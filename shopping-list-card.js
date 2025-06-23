@@ -1,13 +1,13 @@
 // A custom card for Home Assistant's Lovelace UI to manage a shopping list.
-// Version 10: Fixes the infinite render loop by only re-rendering when the todo entity changes.
+// Version 11: Definitive fix for the infinite render loop by checking the entity's 'last_updated' timestamp.
 
-console.log("Shopping List Card: File loaded. Version 10.");
+console.log("Shopping List Card: File loaded. Version 11.");
 
 class ShoppingListCard extends HTMLElement {
   constructor() {
     super();
-    this._isUpdating = false; // Add a lock to prevent rapid clicks.
-    this._state = null; // Stores the last known state to prevent loops.
+    this._isUpdating = false;
+    this._lastUpdated = null; // V11 FIX: Store the timestamp of the last state update.
   }
 
   // set hass is called by Home Assistant whenever the state changes.
@@ -15,12 +15,13 @@ class ShoppingListCard extends HTMLElement {
     this._hass = hass;
     if (!this._config) return;
 
-    // V10 FIX: This is the crucial change to prevent infinite render loops.
-    // We get the new state of our todo entity.
     const newState = hass.states[this._config.todo_list];
-    // We only re-render if the state object is actually different from the last one we saw.
-    if (newState !== this._state) {
-        this._state = newState; // Store the new state.
+    
+    // V11 FIX: This is the definitive fix for the infinite loop.
+    // We only re-render if the entity's last_updated timestamp has changed.
+    if (newState && newState.last_updated !== this._lastUpdated) {
+        this._lastUpdated = newState.last_updated; // Store the new timestamp.
+        
         if (!this.content) {
             this.innerHTML = `<ha-card><div class="card-content"></div></ha-card>`;
             this.content = this.querySelector("div.card-content");
@@ -45,8 +46,10 @@ class ShoppingListCard extends HTMLElement {
     if (!this._config || !this._hass) return;
 
     this._isUpdating = false;
+    
+    const state = this._hass.states[this._config.todo_list];
 
-    if (!this._state) {
+    if (!state) {
       this.content.innerHTML = `<div class="warning">Entity not found: ${this._config.todo_list}</div>`;
       return;
     }
