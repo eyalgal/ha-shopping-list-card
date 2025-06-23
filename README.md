@@ -64,3 +64,9 @@ When `enable_quantity` is set to `true`:
 * An item on the list will display its quantity along with `+` and `-` buttons.
 * If the quantity is 1, the `-` button will be hidden, and tapping the main card will remove the item.
 * If the quantity is greater than 1, the `-` button is visible for decrementing the count.### Quantity Behavior
+
+## Support
+
+If you find this card useful and would like to show your support, you can buy me a coffee!
+
+<a href="https://coff.ee/eyalgal" target="_blank"><img src="https://cdn.buymeacoffee.com/buttons/v2/default-yellow.png" alt="Buy Me A Coffee" style="height: 60px !important;width: 217px !important;" ></a>
