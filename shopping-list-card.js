@@ -211,13 +211,13 @@ class ShoppingListCard extends HTMLElement {
         display: flex;
         align-items: center;
         justify-content: center;
-        width: 40px;
-        height: 40px;
+        width: 36px;
+        height: 36px;
         border-radius: 50%;
         flex-shrink: 0;
       }
       .icon-wrapper ha-icon {
-        --mdc-icon-size: 18px;
+        --mdc-icon-size: 22px;
       }
       .card-container.is-on .icon-wrapper {
         background-color: rgba(76, 175, 80, 0.2);
@@ -263,7 +263,7 @@ class ShoppingListCard extends HTMLElement {
         justify-content: center;
       }
       .quantity-btn ha-icon {
-        --mdc-icon-size: 16px;
+        --mdc-icon-size: 20px;
       }
       .quantity-btn-placeholder { width: 24px; }
 
