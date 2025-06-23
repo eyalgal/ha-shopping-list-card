@@ -36,9 +36,10 @@ class ShoppingListCardEditor extends HTMLElement {
     this.shadowRoot.innerHTML = `
       <style>
         .form-row { margin-bottom: 16px; }
+        .grid-container { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
         .switch-row { display: flex; align-items: center; justify-content: space-between; margin-top: 24px; }
         .switch-row span { font-weight: 500; font-size: 14px; }
-        ha-textfield, ha-entity-picker { display: block; }
+        ha-textfield, ha-entity-picker, ha-icon-picker, ha-color-picker { display: block; }
       </style>
       <div class="form-row">
         <ha-textfield
@@ -60,6 +61,20 @@ class ShoppingListCardEditor extends HTMLElement {
           required
         ></ha-entity-picker>
       </div>
+      <div class="grid-container">
+          <div class="form-row">
+            <ha-icon-picker id="on_icon" label="On-list Icon"></ha-icon-picker>
+          </div>
+          <div class="form-row">
+            <ha-icon-picker id="off_icon" label="Off-list Icon"></ha-icon-picker>
+          </div>
+          <div class="form-row">
+            <ha-textfield id="on_color" label="On-list Color" placeholder="e.g., #4CAF50"></ha-textfield>
+          </div>
+          <div class="form-row">
+            <ha-textfield id="off_color" label="Off-list Color" placeholder="e.g., #808080"></ha-textfield>
+          </div>
+      </div>
       <div class="switch-row">
         <span>Enable Quantity Controls</span>
         <ha-switch id="enable_quantity"></ha-switch>
@@ -72,10 +87,11 @@ class ShoppingListCardEditor extends HTMLElement {
     entityPicker.includeDomains = ['todo'];
     entityPicker.allowCustomEntity = false;
 
-    this.shadowRoot.querySelector('#title').addEventListener('input', () => this._handleConfigChanged());
-    this.shadowRoot.querySelector('#subtitle').addEventListener('input', () => this._handleConfigChanged());
-    entityPicker.addEventListener('value-changed', () => this._handleConfigChanged());
-    this.shadowRoot.querySelector('#enable_quantity').addEventListener('change', () => this._handleConfigChanged());
+    this.shadowRoot.querySelectorAll('ha-textfield, ha-icon-picker, ha-switch').forEach(el => {
+        el.addEventListener('input', () => this._handleConfigChanged());
+        el.addEventListener('change', () => this._handleConfigChanged());
+        el.addEventListener('value-changed', () => this._handleConfigChanged());
+    });
     
     if (this._config) {
       this._updateFormValues();
@@ -86,6 +102,10 @@ class ShoppingListCardEditor extends HTMLElement {
     this.shadowRoot.querySelector('#title').value = this._config.title || '';
     this.shadowRoot.querySelector('#subtitle').value = this._config.subtitle || '';
     this.shadowRoot.querySelector('#todo_list').value = this._config.todo_list || '';
+    this.shadowRoot.querySelector('#on_icon').value = this._config.on_icon || '';
+    this.shadowRoot.querySelector('#off_icon').value = this._config.off_icon || '';
+    this.shadowRoot.querySelector('#on_color').value = this._config.on_color || '';
+    this.shadowRoot.querySelector('#off_color').value = this._config.off_color || '';
     this.shadowRoot.querySelector('#enable_quantity').checked = this._config.enable_quantity || false;
   }
 
@@ -95,6 +115,10 @@ class ShoppingListCardEditor extends HTMLElement {
       title: this.shadowRoot.querySelector('#title').value,
       subtitle: this.shadowRoot.querySelector('#subtitle').value,
       todo_list: this.shadowRoot.querySelector('#todo_list').value,
+      on_icon: this.shadowRoot.querySelector('#on_icon').value,
+      off_icon: this.shadowRoot.querySelector('#off_icon').value,
+      on_color: this.shadowRoot.querySelector('#on_color').value,
+      off_color: this.shadowRoot.querySelector('#off_color').value,
       enable_quantity: this.shadowRoot.querySelector('#enable_quantity').checked,
     };
     
@@ -136,7 +160,6 @@ class ShoppingListCard extends HTMLElement {
     this._config = config;
   }
   
-  // FINAL FIX: Removed the 'async' keyword.
   static getConfigElement() {
     return document.createElement('shopping-list-card-editor');
   }
@@ -193,30 +216,27 @@ class ShoppingListCard extends HTMLElement {
         break;
       }
     }
+    
+    const onIcon = this._config.on_icon || 'mdi:check';
+    const offIcon = this._config.off_icon || 'mdi:plus';
+    const onColor = this._config.on_color || '#4CAF50';
+    const offColor = this._config.off_color || '#808080';
 
-    const icon = isOn ? 'mdi:check' : 'mdi:plus';
+    const icon = isOn ? onIcon : offIcon;
     const stateClass = isOn ? "is-on" : "is-off";
     
     let qtyControls = '';
     if (isOn && this._config.enable_quantity) {
-      // Only show minus button if quantity > 1
-      if (qty > 1) {
-        qtyControls = `
-          <div class="quantity-controls">
-            <div class="quantity-btn" data-action="decrement"><ha-icon icon="mdi:minus"></ha-icon></div>
-            <span class="quantity">${qty}</span>
-            <div class="quantity-btn" data-action="increment"><ha-icon icon="mdi:plus"></ha-icon></div>
-          </div>
-        `;
-      } else {
-        // When quantity is 1, only show the number and plus button
-        qtyControls = `
-          <div class="quantity-controls">
-            <span class="quantity">${qty}</span>
-            <div class="quantity-btn" data-action="increment"><ha-icon icon="mdi:plus"></ha-icon></div>
-          </div>
-        `;
-      }
+      const decBtn = qty > 1
+        ? `<div class="quantity-btn" data-action="decrement"><ha-icon icon="mdi:minus"></ha-icon></div>`
+        : ``;
+      qtyControls = `
+        <div class="quantity-controls">
+          ${decBtn}
+          <span class="quantity">${qty}</span>
+          <div class="quantity-btn" data-action="increment"><ha-icon icon="mdi:plus"></ha-icon></div>
+        </div>
+      `;
     }
 
     this.content.innerHTML = `
@@ -231,6 +251,15 @@ class ShoppingListCard extends HTMLElement {
         ${qtyControls}
       </div>
     `;
+    
+    const iconWrapper = this.content.querySelector('.icon-wrapper');
+    if (isOn) {
+        iconWrapper.style.backgroundColor = `${onColor}33`; // Add 20% opacity
+        iconWrapper.style.color = onColor;
+    } else {
+        iconWrapper.style.backgroundColor = `${offColor}33`; // Add 20% opacity
+        iconWrapper.style.color = offColor;
+    }
 
     this.content.querySelector('.card-container')
       .onclick = ev => this._handleTap(ev, isOn, matched, qty, fullItemName);
@@ -346,29 +375,23 @@ class ShoppingListCard extends HTMLElement {
       .icon-wrapper ha-icon {
         --mdc-icon-size: 22px;
       }
-      .card-container.is-on .icon-wrapper {
-        background-color: rgba(76, 175, 80, 0.2);
-        color: rgb(76, 175, 80);
-      }
-      .card-container.is-off .icon-wrapper {
-        background-color: rgba(128, 128, 128, 0.2);
-        color: rgb(128, 128, 128);
-      }
       
-       .info-container { 
-         flex-grow: 1; 
-         overflow: hidden;
-         min-width: 0;
-       }
+      .info-container { 
+        flex-grow: 1; 
+        overflow: hidden; 
+        min-width: 0;
+      }
+      .primary, .secondary {
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
       .primary {
         font-family:    var(--primary-font-family);
         font-size:      14px;
         font-weight:    500;
         line-height:    20px;
         color:          var(--primary-text-color);
-        white-space:    nowrap;
-        overflow:       hidden;
-        text-overflow:  ellipsis;
       }
       .secondary {
         font-family:    var(--secondary-font-family);
@@ -376,22 +399,18 @@ class ShoppingListCard extends HTMLElement {
         font-weight:    400;
         line-height:    16px;
         color:          var(--secondary-text-color);
-        white-space:    nowrap;
-        overflow:       hidden;
-        text-overflow:  ellipsis;
       }
 
       .quantity-controls {
         display:        flex;
         align-items:    center;
         gap:            4px;
-        flex-shrink:    0;
       }
       .quantity {
         font-size:      14px;
         font-weight:    500;
-        min-width:      20px;
-        text-align:     center;
+        min-width: 1em;
+        text-align: center;
       }
       .quantity-btn {
         width: 24px;
@@ -402,7 +421,6 @@ class ShoppingListCard extends HTMLElement {
         display: flex;
         align-items: center;
         justify-content: center;
-        flex-shrink: 0;
       }
       .quantity-btn ha-icon {
         --mdc-icon-size: 20px;
