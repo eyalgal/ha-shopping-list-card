@@ -30,7 +30,7 @@ const colorMap = {
     'brown': { name: 'Brown', hex: '#795548' },
     'grey': { name: 'Grey', hex: '#9E9E9E' },
     'blue-grey': { name: 'Blue Grey', hex: '#607D8B' },
-    'disabled': { name: 'Disabled', hex: '#808080' } // Default grey for off-state
+    'disabled': { name: 'Disabled', hex: '#808080' }
 };
 
 
@@ -64,17 +64,7 @@ class ShoppingListCardEditor extends HTMLElement {
         .grid-container { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
         .switch-row { display: flex; align-items: center; justify-content: space-between; margin-top: 24px; }
         .switch-row span { font-weight: 500; font-size: 14px; }
-        ha-textfield, ha-entity-picker, ha-icon-picker { display: block; }
-
-        /* Custom Dropdown Styles */
-        .color-picker-wrapper { position: relative; }
-        .color-picker-label { font-size: 12px; color: var(--secondary-text-color); margin-bottom: 4px; }
-        .color-picker-selected { display: flex; align-items: center; padding: 8px; border: 1px solid var(--divider-color); border-radius: 4px; cursor: pointer; }
-        .color-swatch { width: 20px; height: 20px; border-radius: 50%; margin-right: 8px; }
-        .color-dropdown { display: none; position: absolute; background: var(--card-background-color); border: 1px solid var(--divider-color); border-radius: 4px; max-height: 200px; overflow-y: auto; z-index: 10; width: 100%; box-shadow: 0 2px 4px rgba(0,0,0,0.2); }
-        .color-dropdown.open { display: block; }
-        .color-option { display: flex; align-items: center; padding: 8px; cursor: pointer; }
-        .color-option:hover { background-color: var(--secondary-background-color); }
+        ha-textfield, ha-entity-picker, ha-icon-picker, ha-select { display: block; }
       </style>
       <div class="form-row">
         <ha-textfield id="title" label="Title (Required)" required></ha-textfield>
@@ -87,26 +77,20 @@ class ShoppingListCardEditor extends HTMLElement {
       </div>
       <div class="grid-container">
           <div class="form-row">
+            <ha-icon-picker id="off_icon" label="Off-list Icon"></ha-icon-picker>
+          </div>
+          <div class="form-row">
+            <ha-select id="off_color" label="Off-list Color">
+              ${Object.keys(colorMap).map(key => `<mwc-list-item value="${key}">${colorMap[key].name}</mwc-list-item>`).join('')}
+            </ha-select>
+          </div>
+          <div class="form-row">
             <ha-icon-picker id="on_icon" label="On-list Icon"></ha-icon-picker>
           </div>
           <div class="form-row">
-            <ha-icon-picker id="off_icon" label="Off-list Icon"></ha-icon-picker>
-          </div>
-          <div class="form-row color-picker-wrapper">
-              <div class="color-picker-label">On-list Color</div>
-              <div class="color-picker-selected" data-target="on_color_dropdown">
-                  <div class="color-swatch" id="on_color_swatch"></div>
-                  <span id="on_color_name"></span>
-              </div>
-              <div class="color-dropdown" id="on_color_dropdown"></div>
-          </div>
-          <div class="form-row color-picker-wrapper">
-              <div class="color-picker-label">Off-list Color</div>
-              <div class="color-picker-selected" data-target="off_color_dropdown">
-                  <div class="color-swatch" id="off_color_swatch"></div>
-                  <span id="off_color_name"></span>
-              </div>
-              <div class="color-dropdown" id="off_color_dropdown"></div>
+            <ha-select id="on_color" label="On-list Color">
+                ${Object.keys(colorMap).map(key => `<mwc-list-item value="${key}">${colorMap[key].name}</mwc-list-item>`).join('')}
+            </ha-select>
           </div>
       </div>
       <div class="switch-row">
@@ -116,17 +100,16 @@ class ShoppingListCardEditor extends HTMLElement {
     `;
     this._rendered = true;
     
-    this._populateColorDropdowns();
-
     const entityPicker = this.shadowRoot.querySelector('#todo_list');
     entityPicker.hass = this._hass;
     entityPicker.includeDomains = ['todo'];
     entityPicker.allowCustomEntity = false;
 
-    this.shadowRoot.querySelectorAll('ha-textfield, ha-icon-picker, ha-switch, ha-entity-picker').forEach(el => {
+    this.shadowRoot.querySelectorAll('ha-textfield, ha-icon-picker, ha-switch, ha-entity-picker, ha-select').forEach(el => {
         el.addEventListener('value-changed', () => this._handleConfigChanged());
         el.addEventListener('change', () => this._handleConfigChanged());
         el.addEventListener('input', () => this._handleConfigChanged());
+        el.addEventListener('selected', () => this._handleConfigChanged()); // For ha-select
     });
     
     if (this._config) {
@@ -134,71 +117,18 @@ class ShoppingListCardEditor extends HTMLElement {
     }
   }
   
-  _populateColorDropdowns() {
-    const onDropdown = this.shadowRoot.querySelector('#on_color_dropdown');
-    const offDropdown = this.shadowRoot.querySelector('#off_color_dropdown');
-
-    for (const [key, value] of Object.entries(colorMap)) {
-        const createOption = (k, v) => {
-            const option = document.createElement('div');
-            option.className = 'color-option';
-            option.dataset.value = k;
-            option.innerHTML = `<div class="color-swatch" style="background-color: ${v.hex};"></div><span>${v.name}</span>`;
-            option.addEventListener('click', (e) => {
-                e.stopPropagation();
-                const dropdown = e.currentTarget.parentElement;
-                const wrapper = dropdown.parentElement;
-                wrapper.querySelector('.color-picker-selected .color-swatch').style.backgroundColor = v.hex;
-                wrapper.querySelector('.color-picker-selected span').textContent = v.name;
-                dropdown.classList.remove('open');
-                this._handleConfigChanged();
-            });
-            return option;
-        };
-        onDropdown.appendChild(createOption(key, value));
-        offDropdown.appendChild(createOption(key, value));
-    }
-    
-    this.shadowRoot.querySelectorAll('.color-picker-selected').forEach(el => {
-        el.addEventListener('click', (e) => {
-            const targetId = e.currentTarget.dataset.target;
-            this.shadowRoot.getElementById(targetId).classList.toggle('open');
-        });
-    });
-  }
-
   _updateFormValues() {
     this.shadowRoot.querySelector('#title').value = this._config.title || '';
     this.shadowRoot.querySelector('#subtitle').value = this._config.subtitle || '';
     this.shadowRoot.querySelector('#todo_list').value = this._config.todo_list || '';
     this.shadowRoot.querySelector('#on_icon').value = this._config.on_icon || 'mdi:check';
     this.shadowRoot.querySelector('#off_icon').value = this._config.off_icon || 'mdi:plus';
+    this.shadowRoot.querySelector('#on_color').value = this._config.on_color || 'green';
+    this.shadowRoot.querySelector('#off_color').value = this._config.off_color || 'disabled';
     this.shadowRoot.querySelector('#enable_quantity').checked = this._config.enable_quantity || false;
-
-    const onColorKey = this._config.on_color || 'green';
-    const offColorKey = this._config.off_color || 'disabled';
-    
-    this.shadowRoot.querySelector('#on_color_swatch').style.backgroundColor = colorMap[onColorKey].hex;
-    this.shadowRoot.querySelector('#on_color_name').textContent = colorMap[onColorKey].name;
-    this.shadowRoot.querySelector('#off_color_swatch').style.backgroundColor = colorMap[offColorKey].hex;
-    this.shadowRoot.querySelector('#off_color_name').textContent = colorMap[offColorKey].name;
   }
 
   _handleConfigChanged() {
-    // Find the selected color name from the dropdown. This is a bit more involved now.
-    const getSelectedColor = (dropdownId) => {
-      const selectedSwatch = this.shadowRoot.querySelector(`#${dropdownId}_swatch`).style.backgroundColor;
-      for (const [key, value] of Object.entries(colorMap)) {
-          // Note: Browser might convert hex to rgb() so we can't do a direct string compare.
-          // A safer, though more complex, approach would be needed for perfect matching.
-          // For now, we find based on the name displayed.
-          if(this.shadowRoot.querySelector(`#${dropdownId}_name`).textContent === value.name) {
-              return key;
-          }
-      }
-      return dropdownId === 'on_color' ? 'green' : 'disabled';
-    };
-    
     const newConfig = {
       type: 'custom:shopping-list-card',
       title: this.shadowRoot.querySelector('#title').value,
@@ -206,8 +136,8 @@ class ShoppingListCardEditor extends HTMLElement {
       todo_list: this.shadowRoot.querySelector('#todo_list').value,
       on_icon: this.shadowRoot.querySelector('#on_icon').value,
       off_icon: this.shadowRoot.querySelector('#off_icon').value,
-      on_color: getSelectedColor('on_color'),
-      off_color: getSelectedColor('off_color'),
+      on_color: this.shadowRoot.querySelector('#on_color').value,
+      off_color: this.shadowRoot.querySelector('#off_color').value,
       enable_quantity: this.shadowRoot.querySelector('#enable_quantity').checked,
     };
     
@@ -309,11 +239,13 @@ class ShoppingListCard extends HTMLElement {
     const onIcon = this._config.on_icon || 'mdi:check';
     const offIcon = this._config.off_icon || 'mdi:plus';
     
-    // Get hex color from map, with defaults
-    const onColorHex = colorMap[this._config.on_color]?.hex || '#4CAF50';
-    const offColorHex = colorMap[this._config.off_color]?.hex || '#808080';
+    const onColorKey = this._config.on_color || 'green';
+    const offColorKey = this._config.off_color || 'disabled';
+    
+    const onColorHex = colorMap[onColorKey]?.hex || onColorKey; // Fallback to value if not in map
+    const offColorHex = colorMap[offColorKey]?.hex || offColorKey;
 
-    const icon = isOn ? onIcon : offIcon;
+    const icon = isOn ? onIcon : offColor;
     const color = isOn ? onColorHex : offColorHex;
     const stateClass = isOn ? "is-on" : "is-off";
     
