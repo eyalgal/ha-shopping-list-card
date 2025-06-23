@@ -1,12 +1,15 @@
+import '/frontend/src/components/ha-entity-picker.js';
+import '/frontend/src/components/ha-textfield.js';
+import '/frontend/src/components/ha-switch.js';
+
 /*
  * Shopping List Card
  *
- * A Home Assistant Lovelace card to manage items on a to-do list with a
- * clean, modern interface and a visual editor.
+ * A Home Assistant Lovelace card to manage items on a
+ * shopping list with a clean, modern interface and a visual editor.
  *
  * Author: eyalgal
  * License: MIT License
- *
  */
 
 class ShoppingListCardEditor extends HTMLElement {
@@ -38,7 +41,8 @@ class ShoppingListCardEditor extends HTMLElement {
         .form-row { margin-bottom: 16px; }
         .switch-row { display: flex; align-items: center; justify-content: space-between; margin-top: 24px; }
         .switch-row span { font-weight: 500; font-size: 14px; }
-        ha-textfield, ha-entity-picker { display: block; }
+        ha-textfield, ha-entity-picker { display: block; width: 100%; }
+        ha-switch { margin-left: 8px; }
       </style>
       <div class="form-row">
         <ha-textfield
@@ -67,11 +71,11 @@ class ShoppingListCardEditor extends HTMLElement {
     `;
     this._rendered = true;
     
-    // Set properties on ha-entity-picker directly
+    // Configure entity-picker for the Shopping List integration
     const entityPicker = this.shadowRoot.querySelector('#todo_list');
     entityPicker.hass = this._hass;
-    entityPicker.includeDomains = ['todo'];
-    entityPicker.allowCustomEntity = false;
+    entityPicker.includeDomains = ['shopping_list'];
+    entityPicker.allowCustomEntity = true;
 
     // Add event listeners
     this.shadowRoot.querySelector('#title').addEventListener('input', () => this._handleConfigChanged());
@@ -234,7 +238,7 @@ class ShoppingListCard extends HTMLElement {
     ev.stopPropagation();
     const action = ev.target.closest('.quantity-btn')?.dataset.action;
 
-    this._isUpdating = true;
+    this._isUpdating = false;
     this.content.querySelector('.card-container').classList.add('is-updating');
 
     let call;
@@ -276,7 +280,7 @@ class ShoppingListCard extends HTMLElement {
   }
 
   _addItem(name) {
-    return this._hass.callService("todo", "add_item", {
+    return this._hass.callService("shopping_list", "add_item", {
       entity_id: this._config.todo_list,
       item: name,
     });
@@ -284,7 +288,7 @@ class ShoppingListCard extends HTMLElement {
 
   _removeItem(item) {
     if (!item) return Promise.resolve();
-    return this._hass.callService("todo", "remove_item", {
+    return this._hass.callService("shopping_list", "remove_item", {
       entity_id: this._config.todo_list,
       item,
     });
@@ -292,7 +296,7 @@ class ShoppingListCard extends HTMLElement {
 
   _updateQuantity(oldItem, newQty, fullName) {
     const newName = newQty > 1 ? `${fullName} (${newQty})` : fullName;
-    return this._hass.callService("todo", "update_item", {
+    return this._hass.callService("shopping_list", "update_item", {
       entity_id: this._config.todo_list,
       item: oldItem,
       rename: newName,
@@ -301,116 +305,4 @@ class ShoppingListCard extends HTMLElement {
 
   _attachStyles() {
     if (this.querySelector("style")) return;
-    const style = document.createElement('style');
-    style.textContent = `
-      ha-card {
-        border-radius: var(--ha-card-border-radius, 12px);
-        background:     var(--card-background-color);
-        box-shadow:     var(--ha-card-box-shadow);
-        overflow:       hidden;
-      }
-      .card-content { padding: 0 !important; }
-
-      .card-container {
-        display:        flex;
-        align-items:    center;
-        padding:        10px;
-        gap:            10px;
-        cursor:         pointer;
-        transition:     background-color 0.2s;
-      }
-      .card-container:hover {
-        background-color: var(--secondary-background-color);
-      }
-      .card-container.is-updating {
-        opacity:         0.5;
-        pointer-events:  none;
-      }
-      
-      .icon-wrapper {
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        width: 36px;
-        height: 36px;
-        border-radius: 50%;
-        flex-shrink: 0;
-      }
-      .icon-wrapper ha-icon {
-        --mdc-icon-size: 22px;
-      }
-      .card-container.is-on .icon-wrapper {
-        background-color: rgba(76, 175, 80, 0.2);
-        color: rgb(76, 175, 80);
-      }
-      .card-container.is-off .icon-wrapper {
-        background-color: rgba(128, 128, 128, 0.2);
-        color: rgb(128, 128, 128);
-      }
-      
-      .info-container { flex-grow: 1; overflow: hidden; }
-      .primary {
-        font-family:    var(--primary-font-family);
-        font-size:      14px;
-        font-weight:    500;
-        line-height:    20px;
-        color:          var(--primary-text-color);
-      }
-      .secondary {
-        font-family:    var(--secondary-font-family);
-        font-size:      12px;
-        font-weight:    400;
-        line-height:    16px;
-        color:          var(--secondary-text-color);
-      }
-
-      .quantity-controls {
-        display:        flex;
-        align-items:    center;
-        gap:            4px;
-      }
-      .quantity {
-        font-size:      14px;
-        font-weight:    500;
-      }
-      .quantity-btn {
-        width: 24px;
-        height: 24px;
-        background-color: rgba(128, 128, 128, 0.2);
-        border-radius: 5px;
-        color: var(--secondary-text-color);
-        display: flex;
-        align-items: center;
-        justify-content: center;
-      }
-      .quantity-btn ha-icon {
-        --mdc-icon-size: 20px;
-      }
-      .quantity-btn-placeholder { width: 24px; }
-
-      .warning {
-        padding:        12px;
-        background:     var(--error-color);
-        color:          var(--text-primary-color);
-        border-radius:  var(--ha-card-border-radius, 12px);
-      }
-    `;
-    this.appendChild(style);
-  }
-
-  getCardSize() {
-    return 1;
-  }
-}
-
-// Register both custom elements
-customElements.define("shopping-list-card", ShoppingListCard);
-customElements.define('shopping-list-card-editor', ShoppingListCardEditor);
-
-window.customCards = window.customCards || [];
-window.customCards.push({
-  type: "shopping-list-card",
-  name: "Shopping List Card",
-  preview: true,
-  description: "A card to manage items on a shopping list."
-});
+    const style = document.createElement('{"{code cut due to length}
