@@ -9,7 +9,7 @@
  *
  */
 
-console.log("Shopping List Card: File loaded. Version 38 (Final Editor Fix).");
+console.log("Shopping List Card: File loaded. Version 39 (Conditional Config Saving).");
 
 const colorMap = {
     'red': { name: 'Red', hex: '#F44336' },
@@ -107,7 +107,6 @@ class ShoppingListCardEditor extends HTMLElement {
     entityPicker.includeDomains = ['todo'];
     entityPicker.allowCustomEntity = false;
 
-    // FINAL FIX: Add 'value-changed' to the event listeners to correctly capture icon picker changes.
     this.shadowRoot.querySelectorAll('ha-textfield, ha-icon-picker, ha-switch, ha-entity-picker, input[type="color"]').forEach(el => {
         el.addEventListener('change', () => this._handleConfigChanged());
         el.addEventListener('input', () => this._handleConfigChanged());
@@ -134,14 +133,38 @@ class ShoppingListCardEditor extends HTMLElement {
     const newConfig = {
       type: 'custom:shopping-list-card',
       title: this.shadowRoot.querySelector('#title').value,
-      subtitle: this.shadowRoot.querySelector('#subtitle').value,
       todo_list: this.shadowRoot.querySelector('#todo_list').value,
-      on_icon: this.shadowRoot.querySelector('#on_icon').value,
-      off_icon: this.shadowRoot.querySelector('#off_icon').value,
-      on_color: this.shadowRoot.querySelector('#on_color').value,
-      off_color: this.shadowRoot.querySelector('#off_color').value,
-      enable_quantity: this.shadowRoot.querySelector('#enable_quantity').checked,
     };
+    
+    const subtitle = this.shadowRoot.querySelector('#subtitle').value;
+    if (subtitle) {
+        newConfig.subtitle = subtitle;
+    }
+
+    const onIcon = this.shadowRoot.querySelector('#on_icon').value;
+    if (onIcon !== 'mdi:check') {
+        newConfig.on_icon = onIcon;
+    }
+
+    const offIcon = this.shadowRoot.querySelector('#off_icon').value;
+    if (offIcon !== 'mdi:plus') {
+        newConfig.off_icon = offIcon;
+    }
+    
+    const onColor = this.shadowRoot.querySelector('#on_color').value;
+    if (onColor !== colorMap.green.hex) {
+        newConfig.on_color = onColor;
+    }
+
+    const offColor = this.shadowRoot.querySelector('#off_color').value;
+    if (offColor !== colorMap.disabled.hex) {
+        newConfig.off_color = offColor;
+    }
+
+    const enableQuantity = this.shadowRoot.querySelector('#enable_quantity').checked;
+    if (enableQuantity) {
+        newConfig.enable_quantity = true;
+    }
     
     const event = new CustomEvent('config-changed', {
       bubbles: true,
