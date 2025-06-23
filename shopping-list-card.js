@@ -202,13 +202,13 @@ class ShoppingListCard extends HTMLElement {
         
         /* V18 FIX: Use !important to override mushroom defaults. */
         .card-container.is-on mushroom-shape-icon {
-            --icon-color: rgb(var(--rgb-green)) !important;
-            --shape-color: rgba(var(--rgb-green), 0.2) !important;
+            --icon-color: green !important;
+            --shape-color: green, 0.2) !important;
         }
         .card-container.is-off mushroom-shape-icon {
-            --icon-color: rgb(var(--rgb-disabled)) !important;
-            --shape-color: rgba(var(--rgb-disabled), 0.2) !important;
-            --shape-color-disabled: rgba(var(--rgb-disabled), 0.2) !important;
+            --icon-color: grey !important;
+            --shape-color: grey, 0.2) !important;
+            --shape-color-disabled: disabled, 0.2) !important;
         }
     `;
     this.appendChild(style);
