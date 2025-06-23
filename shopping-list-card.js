@@ -1,7 +1,7 @@
 // A custom card for Home Assistant's Lovelace UI to manage a shopping list.
-// Version 23: styling tweaked to match Mushroom Template Card exactly
+// Version 24: Corrects the Mushroom CSS variable names to fix the icon color.
 
-console.log("Shopping List Card: File loaded. Version 23.");
+console.log("Shopping List Card: File loaded. Version 24.");
 
 class ShoppingListCard extends HTMLElement {
   constructor() {
@@ -92,19 +92,19 @@ class ShoppingListCard extends HTMLElement {
       `;
     }
 
+    // FINAL FIX: Use the correct Mushroom variable names (--rgb-green, not --rgb-green-color).
     const shapeColor = isOn
-      ? 'rgba(var(--rgb-green-color), 0.2)'
-      : 'rgba(var(--rgb-disabled-color), 0.2)';
+      ? 'rgba(var(--rgb-green), 0.2)'
+      : 'rgba(var(--rgb-disabled), 0.2)';
     const iconColor = isOn
-      ? 'rgb(var(--rgb-green-color))'
-      : 'rgb(var(--rgb-disabled-color))';
+      ? 'rgb(var(--rgb-green))'
+      : 'rgb(var(--rgb-disabled))';
 
     this.content.innerHTML = `
       <div class="card-container">
         <mushroom-shape-icon
           slot="icon"
-          shape-color="${shapeColor}"
-          icon-color="${iconColor}"
+          style="--shape-color: ${shapeColor}; --icon-color: ${iconColor};"
         >
           <ha-icon icon="${icon}"></ha-icon>
         </mushroom-shape-icon>
@@ -151,11 +151,15 @@ class ShoppingListCard extends HTMLElement {
       } catch (e) {
         console.error("Shopping List Card: Service call failed", e);
         this._isUpdating = false;
-        this.content.querySelector('.card-container').classList.remove('is-updating');
+        if (this.content.querySelector('.card-container')) {
+            this.content.querySelector('.card-container').classList.remove('is-updating');
+        }
       }
     } else {
       this._isUpdating = false;
-      this.content.querySelector('.card-container').classList.remove('is-updating');
+      if (this.content.querySelector('.card-container')) {
+          this.content.querySelector('.card-container').classList.remove('is-updating');
+      }
     }
   }
 
@@ -187,81 +191,75 @@ class ShoppingListCard extends HTMLElement {
     if (this.querySelector("style")) return;
     const style = document.createElement('style');
     style.textContent = `
-      /* match Mushroom Template Card container */
       ha-card {
-        border-radius: var(--ha-card-border-radius, 8px);
+        border-radius: var(--ha-card-border-radius, 12px);
         background:     var(--card-background-color);
         box-shadow:     var(--ha-card-box-shadow);
         overflow:       hidden;
       }
       .card-content { padding: 0 !important; }
 
-      /* row layout & hover */
       .card-container {
         display:        flex;
         align-items:    center;
-        padding:        16px;
-        gap:            16px;
+        padding:        12px;
+        gap:            12px;
         cursor:         pointer;
         transition:     background-color 0.2s;
       }
       .card-container:hover {
-        background-color: var(--hover-background-color);
+        background-color: var(--secondary-background-color);
       }
       .card-container.is-updating {
         opacity:         0.5;
         pointer-events:  none;
       }
 
-      /* icon size, shape, padding */
       mushroom-shape-icon {
         --shape-size:   40px;
-        --mdc-icon-size:24px;
+        --icon-size:    20px;
         flex-shrink:    0;
       }
-      /* ensure perfect circle */
       mushroom-shape-icon .shape {
         border-radius:  50% !important;
       }
 
-      /* text styles */
       .info-container { flex-grow: 1; overflow: hidden; }
       .primary {
-        font-family:    var(--ha-user-font-family, var(--font-family));
-        font-size:      16px;
+        font-family:    var(--primary-font-family);
+        font-size:      14px;
         font-weight:    500;
-        line-height:    1.2;
+        line-height:    20px;
         color:          var(--primary-text-color);
       }
       .secondary {
-        font-family:    var(--ha-user-font-family, var(--font-family));
-        font-size:      14px;
+        font-family:    var(--secondary-font-family);
+        font-size:      12px;
         font-weight:    400;
-        line-height:    1.2;
+        line-height:    16px;
         color:          var(--secondary-text-color);
       }
 
-      /* quantity controls */
       .quantity-controls {
         display:        flex;
         align-items:    center;
-        gap:            8px;
+        gap:            4px;
       }
       .quantity {
-        font-size:      16px;
+        font-size:      14px;
         font-weight:    500;
       }
       .quantity-btn {
         --mdc-icon-button-size: 36px;
+        color: var(--secondary-text-color);
       }
       .quantity-btn-placeholder { width: 36px; }
 
-      /* warnings */
       .warning {
         padding:        12px;
         background:     var(--error-color);
         color:          var(--text-primary-color);
-        border-radius:  var(--ha-card-border-radius, 8px);
+        border-radius:  var(--ha-card-border-radius, 12px);
       }
     `;
     this.appendChild(style);
