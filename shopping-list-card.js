@@ -1,7 +1,7 @@
 // A custom card for Home Assistant's Lovelace UI to manage a shopping list.
-// Version 14: Final fix for icon styling using the correct Mushroom CSS variables.
+// Version 15: Definitive styling fix using a robust, class-based CSS targeting method.
 
-console.log("Shopping List Card: File loaded. Version 14.");
+console.log("Shopping List Card: File loaded. Version 15.");
 
 class ShoppingListCard extends HTMLElement {
   constructor() {
@@ -88,7 +88,7 @@ class ShoppingListCard extends HTMLElement {
     }
     
     const icon = isOnList ? "mdi:check" : "mdi:plus";
-    const iconColorName = isOnList ? "green" : "disabled";
+    const stateClass = isOnList ? "is-on" : "is-off"; // V15 FIX: Use a class on the container for styling.
 
     let quantityControls = '';
     if (isOnList && this._config.enable_quantity) {
@@ -105,8 +105,9 @@ class ShoppingListCard extends HTMLElement {
         `;
     }
 
+    // V15 FIX: Add the stateClass to the container div.
     this.content.innerHTML = `
-        <div class="card-container ${this._isUpdating ? 'is-updating' : ''}">
+        <div class="card-container ${stateClass} ${this._isUpdating ? 'is-updating' : ''}">
             <mushroom-shape-icon slot="icon">
                 <ha-icon icon="${icon}"></ha-icon>
             </mushroom-shape-icon>
@@ -117,13 +118,6 @@ class ShoppingListCard extends HTMLElement {
             ${quantityControls}
         </div>
     `;
-    
-    const iconElement = this.content.querySelector('mushroom-shape-icon');
-    if (iconElement) {
-        // V14 FIX: Use the correct Mushroom variable format (e.g., --rgb-green) by removing the '-color' suffix.
-        iconElement.style.setProperty('--icon-color', `rgb(var(--rgb-${iconColorName}))`);
-        iconElement.style.setProperty('--shape-color', `rgba(var(--rgb-${iconColorName}), 0.2)`);
-    }
 
     this.content.querySelector('.card-container').onclick = (ev) => this._handleTap(ev, isOnList, matchedItem, quantity, fullItemName);
   }
@@ -169,6 +163,7 @@ class ShoppingListCard extends HTMLElement {
   _attachStyles() {
     if (this.querySelector("style")) return; 
     const style = document.createElement('style');
+    // V15 FIX: Use CSS classes on the container to style the icon. This is the most robust method.
     style.textContent = `
         ha-card { border-radius: 12px; border-width: 0; }
         .card-content { padding: 0 !important; }
@@ -183,6 +178,15 @@ class ShoppingListCard extends HTMLElement {
         .quantity-btn { color: var(--secondary-text-color); --mdc-icon-button-size: 36px; }
         .quantity-btn-placeholder { width: 36px; }
         .warning { padding: 12px; background-color: var(--error-color); color: var(--text-primary-color); border-radius: var(--ha-card-border-radius, 4px); }
+
+        .card-container.is-on mushroom-shape-icon {
+            --icon-color: rgb(var(--rgb-green));
+            --shape-color: rgba(var(--rgb-green), 0.2);
+        }
+        .card-container.is-off mushroom-shape-icon {
+            --icon-color: rgb(var(--rgb-disabled));
+            --shape-color: rgba(var(--rgb-disabled), 0.2);
+        }
     `;
     this.appendChild(style);
   }
