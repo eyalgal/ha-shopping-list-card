@@ -18,8 +18,10 @@ class ShoppingListCardEditor extends HTMLElement {
 
   set hass(hass) {
     this._hass = hass;
-    // Render the editor controls once hass is available.
-    this._render();
+    if (!this._rendered) {
+      this._render();
+      this._rendered = true;
+    }
     if(this._config) {
       this.setConfig(this._config);
     }
@@ -28,67 +30,70 @@ class ShoppingListCardEditor extends HTMLElement {
   setConfig(config) {
     this._config = config;
     if (this.shadowRoot.childElementCount > 0) {
-        this.shadowRoot.getElementById('title').value = this._config.title || '';
-        this.shadowRoot.getElementById('subtitle').value = this._config.subtitle || '';
-        this.shadowRoot.getElementById('todo_list').value = this._config.todo_list || '';
-        this.shadowRoot.getElementById('enable_quantity').checked = this._config.enable_quantity || false;
+        this.shadowRoot.querySelector('#title').value = this._config.title || '';
+        this.shadowRoot.querySelector('#subtitle').value = this._config.subtitle || '';
+        this.shadowRoot.querySelector('#todo_list').value = this._config.todo_list || '';
+        this.shadowRoot.querySelector('#enable_quantity').checked = this._config.enable_quantity || false;
     }
   }
 
   _render() {
     this.shadowRoot.innerHTML = `
       <style>
-        .form-row { display: flex; flex-direction: column; margin-bottom: 12px; }
-        .form-row label { margin-bottom: 4px; font-weight: 500;}
-        .form-row input { 
-            padding: 8px; 
-            border: 1px solid var(--divider-color); 
-            border-radius: var(--ha-card-border-radius, 12px); 
-        }
-        .checkbox-row { display: flex; align-items: center; margin-top: 16px; }
-        .checkbox-row label { margin-left: 8px; }
+        .form-row { display: flex; flex-direction: column; margin-bottom: 16px; }
+        .switch-row { display: flex; align-items: center; justify-content: space-between; margin-top: 16px; }
+        .switch-row span { font-weight: 500; }
+        ha-textfield { display: block; }
       </style>
       <div class="form-row">
-        <label for="title">Title (Required)</label>
-        <input type="text" id="title" placeholder="e.g., Milk" required />
+        <ha-textfield
+          id="title"
+          label="Title (Required)"
+          .value="${this._config?.title || ''}"
+          required
+        ></ha-textfield>
       </div>
       <div class="form-row">
-        <label for="subtitle">Subtitle</label>
-        <input type="text" id="subtitle" placeholder="e.g., Lactose-free" />
+        <ha-textfield
+          id="subtitle"
+          label="Subtitle"
+          .value="${this._config?.subtitle || ''}"
+        ></ha-textfield>
       </div>
       <div class="form-row">
-        <label for="todo_list">To-do List Entity (Required)</label>
         <ha-entity-picker
           id="todo_list"
+          label="To-do List Entity (Required)"
+          .hass="${this._hass}"
+          .value="${this._config?.todo_list || ''}"
+          .includeDomains="${['todo']}"
+          .allowCustomEntity=${false}
           required
         ></ha-entity-picker>
       </div>
-      <div class="checkbox-row">
-        <input type="checkbox" id="enable_quantity" />
-        <label for="enable_quantity">Enable Quantity Controls</label>
+      <div class="switch-row">
+        <span>Enable Quantity Controls</span>
+        <ha-switch
+          id="enable_quantity"
+          .checked="${this._config?.enable_quantity || false}"
+        ></ha-switch>
       </div>
     `;
 
-    // Correctly pass the hass object and config to the entity picker
-    const entityPicker = this.shadowRoot.getElementById('todo_list');
-    entityPicker.hass = this._hass;
-    entityPicker.includeDomains = ['todo'];
-    entityPicker.allowCustomEntity = false;
-
-
-    this.shadowRoot.getElementById('title').addEventListener('input', this._handleConfigChanged.bind(this));
-    this.shadowRoot.getElementById('subtitle').addEventListener('input', this._handleConfigChanged.bind(this));
-    entityPicker.addEventListener('value-changed', this._handleConfigChanged.bind(this));
-    this.shadowRoot.getElementById('enable_quantity').addEventListener('change', this._handleConfigChanged.bind(this));
+    this.shadowRoot.querySelectorAll('*').forEach(el => {
+        el.addEventListener('input', () => this._handleConfigChanged());
+        el.addEventListener('change', () => this._handleConfigChanged());
+        el.addEventListener('value-changed', () => this._handleConfigChanged());
+    });
   }
 
   _handleConfigChanged() {
     const newConfig = {
       type: 'custom:shopping-list-card',
-      title: this.shadowRoot.getElementById('title').value,
-      subtitle: this.shadowRoot.getElementById('subtitle').value,
-      todo_list: this.shadowRoot.getElementById('todo_list').value,
-      enable_quantity: this.shadowRoot.getElementById('enable_quantity').checked,
+      title: this.shadowRoot.querySelector('#title').value,
+      subtitle: this.shadowRoot.querySelector('#subtitle').value,
+      todo_list: this.shadowRoot.querySelector('#todo_list').value,
+      enable_quantity: this.shadowRoot.querySelector('#enable_quantity').checked,
     };
     
     const event = new CustomEvent('config-changed', {
@@ -133,7 +138,6 @@ class ShoppingListCard extends HTMLElement {
   
   // Static methods for the visual editor
   static async getConfigElement() {
-    // The editor element is defined below the main card class.
     return document.createElement('shopping-list-card-editor');
   }
 
@@ -401,12 +405,3 @@ class ShoppingListCard extends HTMLElement {
 // Register both custom elements
 customElements.define("shopping-list-card", ShoppingListCard);
 customElements.define('shopping-list-card-editor', ShoppingListCardEditor);
-
-// Add the card to the card picker list
-window.customCards = window.customCards || [];
-window.customCards.push({
-  type: "shopping-list-card",
-  name: "Shopping List Card",
-  preview: true,
-  description: "A card to manage items on a shopping list."
-});
