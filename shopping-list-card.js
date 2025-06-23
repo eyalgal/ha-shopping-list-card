@@ -1,7 +1,7 @@
 // A custom card for Home Assistant's Lovelace UI to manage a shopping list.
-// Version 16: Definitive fix for styling and click-locking.
+// Version 13: Forcefully applies styles via Javascript to fix stubborn icon color bug.
 
-console.log("Shopping List Card: File loaded. Version 16.");
+console.log("Shopping List Card: File loaded. Version 13.");
 
 class ShoppingListCard extends HTMLElement {
   constructor() {
@@ -42,6 +42,8 @@ class ShoppingListCard extends HTMLElement {
 
   async _render() {
     if (!this._config || !this._hass) return;
+
+    this._isUpdating = false;
     
     const state = this._hass.states[this._config.todo_list];
 
@@ -86,7 +88,7 @@ class ShoppingListCard extends HTMLElement {
     }
     
     const icon = isOnList ? "mdi:check" : "mdi:plus";
-    const stateClass = isOnList ? "is-on" : "is-off";
+    const iconColorVar = isOnList ? "green" : "disabled";
 
     let quantityControls = '';
     if (isOnList && this._config.enable_quantity) {
@@ -104,12 +106,10 @@ class ShoppingListCard extends HTMLElement {
     }
 
     this.content.innerHTML = `
-        <div class="card-container ${stateClass} ${this._isUpdating ? 'is-updating' : ''}">
-            <div class="icon-container">
-                <mushroom-shape-icon slot="icon">
-                    <ha-icon icon="${icon}"></ha-icon>
-                </mushroom-shape-icon>
-            </div>
+        <div class="card-container ${this._isUpdating ? 'is-updating' : ''}">
+            <mushroom-shape-icon slot="icon">
+                <ha-icon icon="${icon}"></ha-icon>
+            </mushroom-shape-icon>
             <div class="info-container">
                 <div class="primary">${this._config.title}</div>
                 ${this._config.subtitle ? `<div class="secondary">${this._config.subtitle}</div>` : ''}
@@ -117,6 +117,14 @@ class ShoppingListCard extends HTMLElement {
             ${quantityControls}
         </div>
     `;
+    
+    // V13 FIX: Directly get the element and set its style variables via Javascript.
+    // This is the most forceful and reliable way to apply the styles.
+    const iconElement = this.content.querySelector('mushroom-shape-icon');
+    if (iconElement) {
+        iconElement.style.setProperty('--icon-color', `rgb(var(--rgb-${iconColorVar}-color))`);
+        iconElement.style.setProperty('--shape-color', `rgba(var(--rgb-${iconColorVar}-color), 0.2)`);
+    }
 
     this.content.querySelector('.card-container').onclick = (ev) => this._handleTap(ev, isOnList, matchedItem, quantity, fullItemName);
   }
@@ -127,15 +135,8 @@ class ShoppingListCard extends HTMLElement {
     ev.stopPropagation(); 
     const action = ev.target.closest('.quantity-btn')?.dataset.action;
 
-    // V16 FIX: Use a simple timed lock to prevent double-clicks and guarantee re-enabling the card.
     this._isUpdating = true;
     this.content.querySelector('.card-container').classList.add('is-updating');
-    setTimeout(() => {
-        if(this.content.querySelector('.card-container')) {
-           this.content.querySelector('.card-container').classList.remove('is-updating');
-        }
-        this._isUpdating = false;
-    }, 1000); // Re-enable after 1 second
 
     if (action === 'increment') {
       this._updateQuantity(matchedItem, quantity + 1, fullItemName);
@@ -169,39 +170,14 @@ class ShoppingListCard extends HTMLElement {
   _attachStyles() {
     if (this.querySelector("style")) return; 
     const style = document.createElement('style');
-    // V16 FIX: Style a container DIV instead of the mushroom-icon directly.
+    // V13 Change: Removed the .on and .off classes as they are no longer needed.
     style.textContent = `
         ha-card { border-radius: 12px; border-width: 0; }
         .card-content { padding: 0 !important; }
         .card-container { display: flex; align-items: center; padding: 12px; cursor: pointer; transition: opacity 0.3s ease-in-out; }
         .card-container.is-updating { opacity: 0.5; pointer-events: none; }
-        
-        .icon-container {
-            width: 40px;
-            height: 40px;
-            border-radius: 50%;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            flex-shrink: 0;
-            margin-right: 12px;
-        }
-
-        .icon-container mushroom-shape-icon {
-            --icon-color: currentColor;
-            --shape-color: transparent;
-        }
-
-        .card-container.is-on .icon-container {
-            background-color: rgba(var(--rgb-green), 0.2);
-            color: rgb(var(--rgb-green));
-        }
-        .card-container.is-off .icon-container {
-            background-color: rgba(var(--rgb-disabled), 0.2);
-            color: rgb(var(--rgb-disabled));
-        }
-
-        .info-container { flex-grow: 1; line-height: 1.4; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        mushroom-shape-icon { flex-shrink: 0; }
+        .info-container { flex-grow: 1; line-height: 1.4; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; margin-left: 12px; }
         .primary { font-weight: 500; }
         .secondary { font-size: 0.9em; color: var(--secondary-text-color); }
         .quantity-controls { display: flex; align-items: center; margin-left: 8px; }
