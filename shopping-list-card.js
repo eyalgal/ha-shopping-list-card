@@ -9,7 +9,7 @@
  *
  */
 
-console.log("Shopping List Card: File loaded. Version 35 (Native Color Picker).");
+console.log("Shopping List Card: File loaded. Version 36 (Stable Editor).");
 
 const colorMap = {
     'red': { name: 'Red', hex: '#F44336' },
@@ -124,10 +124,10 @@ class ShoppingListCardEditor extends HTMLElement {
     entityPicker.allowCustomEntity = false;
 
     this.shadowRoot.querySelectorAll('ha-textfield, ha-icon-picker, ha-switch, ha-entity-picker, ha-select').forEach(el => {
-        el.addEventListener('value-changed', () => this._handleConfigChanged());
-        el.addEventListener('change', () => this._handleConfigChanged());
-        el.addEventListener('input', () => this._handleConfigChanged());
-        el.addEventListener('selected', () => this._handleConfigChanged());
+        el.addEventListener('value-changed', () => this._handleConfigChanged(el));
+        el.addEventListener('change', () => this._handleConfigChanged(el));
+        el.addEventListener('input', () => this._handleConfigChanged(el));
+        el.addEventListener('selected', () => this._handleConfigChanged(el));
     });
     
     if (this._config) {
