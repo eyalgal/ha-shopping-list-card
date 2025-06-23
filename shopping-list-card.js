@@ -7,18 +7,20 @@ class ShoppingListCard extends HTMLElement {
   set hass(hass) {
     this._hass = hass;
     if (!this.content) {
+      // Initialize the card's basic structure once.
       this.innerHTML = `
         <ha-card>
           <div class="card-content"></div>
         </ha-card>
       `;
-      this.content = this.querySelector("div");
+      this.content = this.querySelector("div.card-content");
+      this._attachStyles();
     }
+    // Re-render the card's content whenever the state changes.
     this._render();
   }
 
   // setConfig is called by Lovelace when the card is first configured.
-  // It receives the configuration from your ui-lovelace.yaml.
   setConfig(config) {
     if (!config.title) {
       throw new Error("You need to define a title for the item.");
@@ -27,7 +29,11 @@ class ShoppingListCard extends HTMLElement {
       throw new Error("You need to define a todo_list entity_id.");
     }
     this._config = config;
-    this._attachStyles();
+  }
+
+  // Helper function to escape special regex characters from a string.
+  _escapeRegExp(string) {
+    return string.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
   }
 
   // _render is our main function to update the card's display.
@@ -44,29 +50,36 @@ class ShoppingListCard extends HTMLElement {
         return;
     }
 
+    // V2 CHANGE: Construct the full item name from title and subtitle.
+    // This is the core fix for matching items on the list.
+    const fullItemName = this._config.subtitle 
+        ? `${this._config.title} - ${this._config.subtitle}` 
+        : this._config.title;
+    
+    const fullItemNameLower = fullItemName.toLowerCase();
+    
     // Extract the list of to-do items from the entity's attributes.
-    // In HA, to-do list items are stored in the 'items' attribute.
-    const todoItems = state.attributes.items || [];
-    const lowerCaseTodoItems = todoItems.map(item => item.toLowerCase());
-    const itemNameLower = this._config.title.toLowerCase();
+    const todoItems = state.attributes.item || [];
 
-    // Regex to find the item and an optional quantity like "(3)".
-    const itemRegex = new RegExp(`^${itemNameLower}(?: \\((\\d+)\\))?$`);
+    // V2 CHANGE: Create a more robust regex.
+    // It's case-insensitive and handles special characters in the item name.
+    const escapedItemName = this._escapeRegExp(fullItemNameLower);
+    const itemRegex = new RegExp(`^${escapedItemName}(?: \\((\\d+)\\))?$`, 'i');
     
     let isOnList = false;
     let quantity = 1;
     let matchedItem = null;
 
-    // We loop through the items to find a match.
+    // Loop through the items on the to-do list to find a match.
     for (const item of todoItems) {
-        const match = item.toLowerCase().match(itemRegex);
+        const match = item.match(itemRegex);
         if (match) {
             isOnList = true;
-            // The first capturing group in the regex is the quantity.
+            // The first capturing group in the regex is the quantity, if present.
             if (match[1]) {
                 quantity = parseInt(match[1], 10);
             }
-            matchedItem = item; // Keep the original casing.
+            matchedItem = item; // Keep the original casing for removal/updates.
             break;
         }
     }
@@ -93,7 +106,7 @@ class ShoppingListCard extends HTMLElement {
     // This is the HTML structure of our card.
     this.content.innerHTML = `
         <div class="card-container">
-            <div class="icon-container" style="color: ${iconColor};">
+            <div class="icon-container" style="background-color: var(--${iconColor}-color-rgb, 0, 128, 0, 0.2); color: var(--${iconColor}-color);">
                 <ha-icon icon="${icon}"></ha-icon>
             </div>
             <div class="info-container">
@@ -105,36 +118,41 @@ class ShoppingListCard extends HTMLElement {
     `;
 
     // Add event listeners for the various actions.
-    this.querySelector('.card-container').onclick = (ev) => this._handleTap(ev, isOnList, matchedItem, quantity);
+    this.content.querySelector('.card-container').onclick = (ev) => this._handleTap(ev, isOnList, matchedItem, quantity, fullItemName);
   }
 
-  _handleTap(ev, isOnList, matchedItem, quantity) {
+  _handleTap(ev, isOnList, matchedItem, quantity, fullItemName) {
+    // Stop the event from bubbling up and causing unintended side effects.
+    ev.stopPropagation(); 
     const action = ev.target.closest('.quantity-btn')?.dataset.action;
 
     if (action === 'increment') {
-        this._updateQuantity(matchedItem, quantity + 1);
+        this._updateQuantity(matchedItem, quantity + 1, fullItemName);
     } else if (action === 'decrement') {
-        if (quantity > 1) {
-            this._updateQuantity(matchedItem, quantity - 1);
-        } else {
+        // If quantity is 1, decrementing removes it. Otherwise, just lower the count.
+        if (quantity <= 1) {
             this._removeItem(matchedItem);
+        } else {
+            this._updateQuantity(matchedItem, quantity - 1, fullItemName);
         }
     } else {
         // If the click was not on a quantity button, toggle the item.
         if (isOnList) {
             this._removeItem(matchedItem);
         } else {
-            this._addItem();
+            this._addItem(fullItemName);
         }
     }
   }
 
   // Calls the todo.add_item service.
-  _addItem() {
-    this._hass.callService("todo", "add_item", {
-      entity_id: this._config.todo_list,
-      item: this._config.title,
-    });
+  _addItem(itemName) {
+      // V2 CHANGE: If quantity is enabled, add with "(1)" initially.
+      const itemToAdd = this._config.enable_quantity ? `${itemName} (1)` : itemName;
+      this._hass.callService("todo", "add_item", {
+          entity_id: this._config.todo_list,
+          item: itemToAdd,
+      });
   }
 
   // Calls the todo.remove_item service.
@@ -146,8 +164,8 @@ class ShoppingListCard extends HTMLElement {
   }
 
   // Calls the todo.update_item service to change the quantity.
-  _updateQuantity(oldItem, newQuantity) {
-      const newItemName = `${this._config.title} (${newQuantity})`;
+  _updateQuantity(oldItem, newQuantity, fullItemName) {
+      const newItemName = `${fullItemName} (${newQuantity})`;
       this._hass.callService("todo", "update_item", {
           entity_id: this._config.todo_list,
           item: oldItem,
@@ -161,6 +179,9 @@ class ShoppingListCard extends HTMLElement {
 
     const style = document.createElement('style');
     style.textContent = `
+        .card-content {
+            padding: 0;
+        }
         .card-container {
             display: flex;
             align-items: center;
@@ -174,13 +195,15 @@ class ShoppingListCard extends HTMLElement {
             width: 40px;
             height: 40px;
             border-radius: 50%;
-            background-color: rgba(127, 127, 127, 0.1);
             margin-right: 12px;
             flex-shrink: 0;
         }
         .info-container {
             flex-grow: 1;
             line-height: 1.4;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
         }
         .primary {
             font-weight: 500;
@@ -192,6 +215,7 @@ class ShoppingListCard extends HTMLElement {
         .quantity-controls {
             display: flex;
             align-items: center;
+            margin-left: 8px;
         }
         .quantity {
             margin: 0 4px;
@@ -204,8 +228,8 @@ class ShoppingListCard extends HTMLElement {
         }
         .warning {
             padding: 12px;
-            background-color: var(--red-color);
-            color: var(--text-primary-color-dark);
+            background-color: var(--error-color);
+            color: var(--text-primary-color);
             border-radius: var(--ha-card-border-radius, 4px);
         }
     `;
@@ -226,6 +250,6 @@ window.customCards = window.customCards || [];
 window.customCards.push({
   type: "shopping-list-card",
   name: "Shopping List Card",
-  preview: true, // Optional - shows a preview in the card picker
+  preview: true,
   description: "A card to manage items on a shopping list.",
 });
