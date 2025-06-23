@@ -14,28 +14,38 @@ class ShoppingListCardEditor extends HTMLElement {
   constructor() {
     super();
     this.attachShadow({ mode: 'open' });
-    this._render();
   }
 
   set hass(hass) {
     this._hass = hass;
+    // Render the editor controls once hass is available.
+    this._render();
+    if(this._config) {
+      this.setConfig(this._config);
+    }
   }
 
   setConfig(config) {
     this._config = config;
-    this.shadowRoot.getElementById('title').value = this._config.title || '';
-    this.shadowRoot.getElementById('subtitle').value = this._config.subtitle || '';
-    this.shadowRoot.getElementById('todo_list').value = this._config.todo_list || '';
-    this.shadowRoot.getElementById('enable_quantity').checked = this._config.enable_quantity || false;
+    if (this.shadowRoot.childElementCount > 0) {
+        this.shadowRoot.getElementById('title').value = this._config.title || '';
+        this.shadowRoot.getElementById('subtitle').value = this._config.subtitle || '';
+        this.shadowRoot.getElementById('todo_list').value = this._config.todo_list || '';
+        this.shadowRoot.getElementById('enable_quantity').checked = this._config.enable_quantity || false;
+    }
   }
 
   _render() {
     this.shadowRoot.innerHTML = `
       <style>
         .form-row { display: flex; flex-direction: column; margin-bottom: 12px; }
-        .form-row label { margin-bottom: 4px; }
-        .form-row input, .form-row ha-entity-picker { width: 100%; }
-        .checkbox-row { display: flex; align-items: center; }
+        .form-row label { margin-bottom: 4px; font-weight: 500;}
+        .form-row input { 
+            padding: 8px; 
+            border: 1px solid var(--divider-color); 
+            border-radius: var(--ha-card-border-radius, 12px); 
+        }
+        .checkbox-row { display: flex; align-items: center; margin-top: 16px; }
         .checkbox-row label { margin-left: 8px; }
       </style>
       <div class="form-row">
@@ -50,9 +60,6 @@ class ShoppingListCardEditor extends HTMLElement {
         <label for="todo_list">To-do List Entity (Required)</label>
         <ha-entity-picker
           id="todo_list"
-          .hass="${this._hass}"
-          .includeDomains="${['todo']}"
-          .allowCustomEntity=${false}
           required
         ></ha-entity-picker>
       </div>
@@ -62,9 +69,16 @@ class ShoppingListCardEditor extends HTMLElement {
       </div>
     `;
 
+    // Correctly pass the hass object and config to the entity picker
+    const entityPicker = this.shadowRoot.getElementById('todo_list');
+    entityPicker.hass = this._hass;
+    entityPicker.includeDomains = ['todo'];
+    entityPicker.allowCustomEntity = false;
+
+
     this.shadowRoot.getElementById('title').addEventListener('input', this._handleConfigChanged.bind(this));
     this.shadowRoot.getElementById('subtitle').addEventListener('input', this._handleConfigChanged.bind(this));
-    this.shadowRoot.getElementById('todo_list').addEventListener('value-changed', this._handleConfigChanged.bind(this));
+    entityPicker.addEventListener('value-changed', this._handleConfigChanged.bind(this));
     this.shadowRoot.getElementById('enable_quantity').addEventListener('change', this._handleConfigChanged.bind(this));
   }
 
@@ -85,8 +99,6 @@ class ShoppingListCardEditor extends HTMLElement {
     this.dispatchEvent(event);
   }
 }
-
-customElements.define('shopping-list-card-editor', ShoppingListCardEditor);
 
 
 // The main card element
@@ -121,6 +133,7 @@ class ShoppingListCard extends HTMLElement {
   
   // Static methods for the visual editor
   static async getConfigElement() {
+    // The editor element is defined below the main card class.
     return document.createElement('shopping-list-card-editor');
   }
 
@@ -385,4 +398,15 @@ class ShoppingListCard extends HTMLElement {
   }
 }
 
+// Register both custom elements
 customElements.define("shopping-list-card", ShoppingListCard);
+customElements.define('shopping-list-card-editor', ShoppingListCardEditor);
+
+// Add the card to the card picker list
+window.customCards = window.customCards || [];
+window.customCards.push({
+  type: "shopping-list-card",
+  name: "Shopping List Card",
+  preview: true,
+  description: "A card to manage items on a shopping list."
+});
