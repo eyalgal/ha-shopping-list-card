@@ -1,13 +1,13 @@
 // A custom card for Home Assistant's Lovelace UI to manage a shopping list.
-// Version 11: Definitive fix for the infinite render loop by checking the entity's 'last_updated' timestamp.
+// Version 17: Fixes the quantity not updating by forcing a re-render after a service call.
 
-console.log("Shopping List Card: File loaded. Version 11.");
+console.log("Shopping List Card: File loaded. Version 17.");
 
 class ShoppingListCard extends HTMLElement {
   constructor() {
     super();
     this._isUpdating = false;
-    this._lastUpdated = null; // V11 FIX: Store the timestamp of the last state update.
+    this._lastUpdated = null;
   }
 
   // set hass is called by Home Assistant whenever the state changes.
@@ -17,10 +17,9 @@ class ShoppingListCard extends HTMLElement {
 
     const newState = hass.states[this._config.todo_list];
     
-    // V11 FIX: This is the definitive fix for the infinite loop.
-    // We only re-render if the entity's last_updated timestamp has changed.
+    // This check prevents the infinite render loop.
     if (newState && newState.last_updated !== this._lastUpdated) {
-        this._lastUpdated = newState.last_updated; // Store the new timestamp.
+        this._lastUpdated = newState.last_updated;
         
         if (!this.content) {
             this.innerHTML = `<ha-card><div class="card-content"></div></ha-card>`;
@@ -43,12 +42,15 @@ class ShoppingListCard extends HTMLElement {
   }
 
   async _render() {
+    // Release the click lock now that a re-render is happening.
+    this._isUpdating = false;
+    if(this.content && this.content.querySelector('.card-container')) {
+        this.content.querySelector('.card-container').classList.remove('is-updating');
+    }
+
     if (!this._config || !this._hass) return;
 
-    this._isUpdating = false;
-    
     const state = this._hass.states[this._config.todo_list];
-
     if (!state) {
       this.content.innerHTML = `<div class="warning">Entity not found: ${this._config.todo_list}</div>`;
       return;
@@ -90,7 +92,7 @@ class ShoppingListCard extends HTMLElement {
     }
     
     const icon = isOnList ? "mdi:check" : "mdi:plus";
-    const iconColor = isOnList ? "green" : "disabled";
+    const stateClass = isOnList ? "on" : "off";
 
     let quantityControls = '';
     if (isOnList && this._config.enable_quantity) {
@@ -108,8 +110,8 @@ class ShoppingListCard extends HTMLElement {
     }
 
     this.content.innerHTML = `
-        <div class="card-container ${this._isUpdating ? 'is-updating' : ''}">
-            <mushroom-shape-icon slot="icon" style="--icon-color:rgb(var(--rgb-${iconColor}-color)); --shape-color:rgba(var(--rgb-${iconColor}-color), 0.2);">
+        <div class="card-container">
+            <mushroom-shape-icon class="${stateClass}" slot="icon">
                 <ha-icon icon="${icon}"></ha-icon>
             </mushroom-shape-icon>
             <div class="info-container">
@@ -123,7 +125,8 @@ class ShoppingListCard extends HTMLElement {
     this.content.querySelector('.card-container').onclick = (ev) => this._handleTap(ev, isOnList, matchedItem, quantity, fullItemName);
   }
 
-  _handleTap(ev, isOnList, matchedItem, quantity, fullItemName) {
+  // V17 FIX: The tap handler is now async to await service calls.
+  async _handleTap(ev, isOnList, matchedItem, quantity, fullItemName) {
     if (this._isUpdating) return; 
     
     ev.stopPropagation(); 
@@ -131,34 +134,55 @@ class ShoppingListCard extends HTMLElement {
 
     this._isUpdating = true;
     this.content.querySelector('.card-container').classList.add('is-updating');
+    
+    let serviceCall;
 
     if (action === 'increment') {
-      this._updateQuantity(matchedItem, quantity + 1, fullItemName);
+      serviceCall = this._updateQuantity(matchedItem, quantity + 1, fullItemName);
     } else if (action === 'decrement') {
-      if (quantity > 1) this._updateQuantity(matchedItem, quantity - 1, fullItemName);
+      if (quantity > 1) serviceCall = this._updateQuantity(matchedItem, quantity - 1, fullItemName);
     } else {
       if (isOnList) {
-        if (!this._config.enable_quantity || quantity === 1) {
-          this._removeItem(matchedItem);
+        if (!this._config.enable_quantity || quantity === 1) serviceCall = this._removeItem(matchedItem);
+      } else serviceCall = this._addItem(fullItemName);
+    }
+
+    if (serviceCall) {
+      try {
+        await serviceCall;
+        // V17 FIX: After the call succeeds, clear the timestamp and force a re-render.
+        // This makes the UI update instantly with the new quantity.
+        this._lastUpdated = null;
+        this._render();
+      } catch (err) {
+        console.error("Shopping List Card: Service call failed", err);
+        this._isUpdating = false; // Release lock on failure
+        if(this.content.querySelector('.card-container')) {
+           this.content.querySelector('.card-container').classList.remove('is-updating');
         }
-      } else {
-        this._addItem(fullItemName);
+      }
+    } else {
+      // If no action was taken, release the lock immediately.
+      this._isUpdating = false;
+      if(this.content.querySelector('.card-container')) {
+         this.content.querySelector('.card-container').classList.remove('is-updating');
       }
     }
   }
 
+  // V17 FIX: These functions now return the promise from the service call.
   _addItem(itemName) {
-      this._hass.callService("todo", "add_item", { entity_id: this._config.todo_list, item: itemName });
+      return this._hass.callService("todo", "add_item", { entity_id: this._config.todo_list, item: itemName });
   }
 
   _removeItem(item) {
-    if (!item) return;
-    this._hass.callService("todo", "remove_item", { entity_id: this._config.todo_list, item: item });
+    if (!item) return Promise.resolve();
+    return this._hass.callService("todo", "remove_item", { entity_id: this._config.todo_list, item: item });
   }
 
   _updateQuantity(oldItem, newQuantity, fullItemName) {
       const newItemName = newQuantity > 1 ? `${fullItemName} (${newQuantity})` : fullItemName;
-      this._hass.callService("todo", "update_item", { entity_id: this._config.todo_list, item: oldItem, rename: newItemName });
+      return this._hass.callService("todo", "update_item", { entity_id: this._config.todo_list, item: oldItem, rename: newItemName });
   }
 
   _attachStyles() {
@@ -178,6 +202,15 @@ class ShoppingListCard extends HTMLElement {
         .quantity-btn { color: var(--secondary-text-color); --mdc-icon-button-size: 36px; }
         .quantity-btn-placeholder { width: 36px; }
         .warning { padding: 12px; background-color: var(--error-color); color: var(--text-primary-color); border-radius: var(--ha-card-border-radius, 4px); }
+        
+        mushroom-shape-icon.on {
+            --icon-color: rgb(var(--rgb-green-color));
+            --shape-color: rgba(var(--rgb-green-color), 0.2);
+        }
+        mushroom-shape-icon.off {
+            --icon-color: rgb(var(--rgb-disabled-color));
+            --shape-color: rgba(var(--rgb-disabled-color), 0.2);
+        }
     `;
     this.appendChild(style);
   }
