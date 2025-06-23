@@ -1,7 +1,7 @@
 // A custom card for Home Assistant's Lovelace UI to manage a shopping list.
-// Version 12: Fixes icon styling by using CSS classes instead of inline styles.
+// Version 14: Final fix for icon styling using the correct Mushroom CSS variables.
 
-console.log("Shopping List Card: File loaded. Version 12.");
+console.log("Shopping List Card: File loaded. Version 14.");
 
 class ShoppingListCard extends HTMLElement {
   constructor() {
@@ -88,7 +88,7 @@ class ShoppingListCard extends HTMLElement {
     }
     
     const icon = isOnList ? "mdi:check" : "mdi:plus";
-    const stateClass = isOnList ? "on" : "off"; // V12 FIX: Use a class for styling.
+    const iconColorName = isOnList ? "green" : "disabled";
 
     let quantityControls = '';
     if (isOnList && this._config.enable_quantity) {
@@ -105,10 +105,9 @@ class ShoppingListCard extends HTMLElement {
         `;
     }
 
-    // V12 FIX: Apply the state class to the mushroom-shape-icon element.
     this.content.innerHTML = `
         <div class="card-container ${this._isUpdating ? 'is-updating' : ''}">
-            <mushroom-shape-icon class="${stateClass}" slot="icon">
+            <mushroom-shape-icon slot="icon">
                 <ha-icon icon="${icon}"></ha-icon>
             </mushroom-shape-icon>
             <div class="info-container">
@@ -118,6 +117,13 @@ class ShoppingListCard extends HTMLElement {
             ${quantityControls}
         </div>
     `;
+    
+    const iconElement = this.content.querySelector('mushroom-shape-icon');
+    if (iconElement) {
+        // V14 FIX: Use the correct Mushroom variable format (e.g., --rgb-green) by removing the '-color' suffix.
+        iconElement.style.setProperty('--icon-color', `rgb(var(--rgb-${iconColorName}))`);
+        iconElement.style.setProperty('--shape-color', `rgba(var(--rgb-${iconColorName}), 0.2)`);
+    }
 
     this.content.querySelector('.card-container').onclick = (ev) => this._handleTap(ev, isOnList, matchedItem, quantity, fullItemName);
   }
@@ -163,7 +169,6 @@ class ShoppingListCard extends HTMLElement {
   _attachStyles() {
     if (this.querySelector("style")) return; 
     const style = document.createElement('style');
-    // V12 FIX: Added CSS rules for the .on and .off classes.
     style.textContent = `
         ha-card { border-radius: 12px; border-width: 0; }
         .card-content { padding: 0 !important; }
@@ -178,15 +183,6 @@ class ShoppingListCard extends HTMLElement {
         .quantity-btn { color: var(--secondary-text-color); --mdc-icon-button-size: 36px; }
         .quantity-btn-placeholder { width: 36px; }
         .warning { padding: 12px; background-color: var(--error-color); color: var(--text-primary-color); border-radius: var(--ha-card-border-radius, 4px); }
-        
-        mushroom-shape-icon.on {
-            --icon-color: rgb(var(--rgb-green-color));
-            --shape-color: rgba(var(--rgb-green-color), 0.2);
-        }
-        mushroom-shape-icon.off {
-            --icon-color: rgb(var(--rgb-disabled-color));
-            --shape-color: rgba(var(--rgb-disabled-color), 0.2);
-        }
     `;
     this.appendChild(style);
   }
