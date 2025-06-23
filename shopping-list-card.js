@@ -1,7 +1,7 @@
 // A custom card for Home Assistant's Lovelace UI to manage a shopping list.
-// Version 18: Implements user-suggested !important CSS override for robust icon styling.
+// Version 19: Implements direct attribute styling for icons and themed border-radius.
 
-console.log("Shopping List Card: File loaded. Version 18.");
+console.log("Shopping List Card: File loaded. Version 19.");
 
 class ShoppingListCard extends HTMLElement {
   constructor() {
@@ -92,7 +92,9 @@ class ShoppingListCard extends HTMLElement {
     }
     
     const icon = isOnList ? "mdi:check" : "mdi:plus";
-    const stateClass = isOnList ? "is-on" : "is-off";
+    // V19 FIX: Define color variables to be used in inline style.
+    const iconColorName = isOnList ? "green" : "disabled";
+    const styleString = `--icon-color: rgb(var(--rgb-${iconColorName})); --shape-color: rgba(var(--rgb-${iconColorName}), 0.2); --shape-color-disabled: rgba(var(--rgb-${iconColorName}), 0.2);`;
 
     let quantityControls = '';
     if (isOnList && this._config.enable_quantity) {
@@ -110,8 +112,8 @@ class ShoppingListCard extends HTMLElement {
     }
 
     this.content.innerHTML = `
-        <div class="card-container ${stateClass}">
-            <mushroom-shape-icon slot="icon">
+        <div class="card-container">
+            <mushroom-shape-icon slot="icon" style="${styleString}">
                 <ha-icon icon="${icon}"></ha-icon>
             </mushroom-shape-icon>
             <div class="info-container">
@@ -150,12 +152,10 @@ class ShoppingListCard extends HTMLElement {
       try {
         await serviceCall;
         this._lastUpdated = null; // Force a re-render check on next hass update
-        // We don't call _render() directly to avoid race conditions. 
-        // The hass setter will handle the re-render when the state update arrives.
       } catch (err) {
         console.error("Shopping List Card: Service call failed", err);
       } finally {
-        this._isUpdating = false; // Always release the lock
+        this._isUpdating = false; 
         if(this.content.querySelector('.card-container')) {
            this.content.querySelector('.card-container').classList.remove('is-updating');
         }
@@ -186,7 +186,8 @@ class ShoppingListCard extends HTMLElement {
     if (this.querySelector("style")) return; 
     const style = document.createElement('style');
     style.textContent = `
-        ha-card { border-radius: 12px; border-width: 0; }
+        /* V19 FIX: Use theme variable for border-radius */
+        ha-card { border-radius: var(--ha-card-border-radius, 12px); border-width: 0; }
         .card-content { padding: 0 !important; }
         .card-container { display: flex; align-items: center; padding: 12px; cursor: pointer; }
         .card-container.is-updating { pointer-events: none; }
@@ -199,17 +200,6 @@ class ShoppingListCard extends HTMLElement {
         .quantity-btn { color: var(--secondary-text-color); --mdc-icon-button-size: 36px; }
         .quantity-btn-placeholder { width: 36px; }
         .warning { padding: 12px; background-color: var(--error-color); color: var(--text-primary-color); border-radius: var(--ha-card-border-radius, 4px); }
-        
-        /* V18 FIX: Use !important to override mushroom defaults. */
-        .card-container.is-on mushroom-shape-icon {
-            --icon-color: green !important;
-            --shape-color: green, 0.2) !important;
-        }
-        .card-container.is-off mushroom-shape-icon {
-            --icon-color: grey !important;
-            --shape-color: grey, 0.2) !important;
-            --shape-color-disabled: disabled, 0.2) !important;
-        }
     `;
     this.appendChild(style);
   }
