@@ -1,46 +1,34 @@
 // A custom card for Home Assistant's Lovelace UI to manage a shopping list.
 // This card is designed to look and feel like a Mushroom card.
+// Version 3: Major bug fixes and logic overhaul.
 
 class ShoppingListCard extends HTMLElement {
-  // The 'hass' object is the core of the Home Assistant frontend state.
-  // It's passed down to the card whenever the state changes.
+  // set hass is called by Home Assistant whenever the state changes.
   set hass(hass) {
     this._hass = hass;
     if (!this.content) {
-      // Initialize the card's basic structure once.
-      this.innerHTML = `
-        <ha-card>
-          <div class="card-content"></div>
-        </ha-card>
-      `;
+      this.innerHTML = `<ha-card><div class="card-content"></div></ha-card>`;
       this.content = this.querySelector("div.card-content");
       this._attachStyles();
     }
-    // Re-render the card's content whenever the state changes.
     this._render();
   }
 
-  // setConfig is called by Lovelace when the card is first configured.
+  // setConfig is called once when the card is configured.
   setConfig(config) {
-    if (!config.title) {
-      throw new Error("You need to define a title for the item.");
-    }
-    if (!config.todo_list) {
-      throw new Error("You need to define a todo_list entity_id.");
-    }
+    if (!config.title) throw new Error("You must define a title.");
+    if (!config.todo_list) throw new Error("You must define a todo_list entity_id.");
     this._config = config;
   }
 
-  // Helper function to escape special regex characters from a string.
+  // Helper function to escape special characters for use in a Regular Expression.
   _escapeRegExp(string) {
     return string.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
   }
 
-  // _render is our main function to update the card's display.
+  // _render is the main function to update the card's display.
   _render() {
-    if (!this._config || !this._hass) {
-      return;
-    }
+    if (!this._config || !this._hass) return;
 
     const todoEntityId = this._config.todo_list;
     const state = this._hass.states[todoEntityId];
@@ -50,45 +38,37 @@ class ShoppingListCard extends HTMLElement {
         return;
     }
 
-    // V2 CHANGE: Construct the full item name from title and subtitle.
-    // This is the core fix for matching items on the list.
     const fullItemName = this._config.subtitle 
         ? `${this._config.title} - ${this._config.subtitle}` 
         : this._config.title;
-    
-    const fullItemNameLower = fullItemName.toLowerCase();
-    
-    // Extract the list of to-do items from the entity's attributes.
-    const todoItems = state.attributes.item || [];
 
-    // V2 CHANGE: Create a more robust regex.
-    // It's case-insensitive and handles special characters in the item name.
-    const escapedItemName = this._escapeRegExp(fullItemNameLower);
+    // V3 FIX: Use the modern 'items' attribute which is an array of objects, 
+    // and fall back to the old 'item' attribute (array of strings) for older HA versions.
+    // This is the most critical fix.
+    const todoSummaries = (state.attributes.items?.map(i => i.summary)) || state.attributes.item || [];
+
+    const escapedItemName = this._escapeRegExp(fullItemName);
     const itemRegex = new RegExp(`^${escapedItemName}(?: \\((\\d+)\\))?$`, 'i');
     
     let isOnList = false;
-    let quantity = 1;
+    let quantity = 0;
     let matchedItem = null;
 
-    // Loop through the items on the to-do list to find a match.
-    for (const item of todoItems) {
-        const match = item.match(itemRegex);
+    for (const summary of todoSummaries) {
+        const match = summary.match(itemRegex);
         if (match) {
             isOnList = true;
-            // The first capturing group in the regex is the quantity, if present.
-            if (match[1]) {
-                quantity = parseInt(match[1], 10);
-            }
-            matchedItem = item; // Keep the original casing for removal/updates.
+            matchedItem = summary;
+            quantity = match[1] ? parseInt(match[1], 10) : 1; // If no number, quantity is 1.
             break;
         }
     }
 
-    // Determine the icon and color based on whether the item is on the list.
     const icon = isOnList ? "mdi:check" : "mdi:plus";
     const iconColor = isOnList ? "green" : "grey";
 
     let quantityControls = '';
+    // V3 FIX: Show quantity controls when item is on the list.
     if (isOnList && this._config.enable_quantity) {
         quantityControls = `
             <div class="quantity-controls">
@@ -106,7 +86,7 @@ class ShoppingListCard extends HTMLElement {
     // This is the HTML structure of our card.
     this.content.innerHTML = `
         <div class="card-container">
-            <div class="icon-container" style="background-color: var(--${iconColor}-color-rgb, 0, 128, 0, 0.2); color: var(--${iconColor}-color);">
+            <div class="icon-container" style="background-color: rgba(var(--rgb-${iconColor}-color), 0.1); color: var(--${iconColor}-color);">
                 <ha-icon icon="${icon}"></ha-icon>
             </div>
             <div class="info-container">
@@ -122,23 +102,25 @@ class ShoppingListCard extends HTMLElement {
   }
 
   _handleTap(ev, isOnList, matchedItem, quantity, fullItemName) {
-    // Stop the event from bubbling up and causing unintended side effects.
     ev.stopPropagation(); 
     const action = ev.target.closest('.quantity-btn')?.dataset.action;
 
     if (action === 'increment') {
         this._updateQuantity(matchedItem, quantity + 1, fullItemName);
     } else if (action === 'decrement') {
-        // If quantity is 1, decrementing removes it. Otherwise, just lower the count.
-        if (quantity <= 1) {
-            this._removeItem(matchedItem);
-        } else {
+        // V3 FIX: Decrementing from 2 goes to 1 (base name), from 1 removes the item.
+        if (quantity > 1) {
             this._updateQuantity(matchedItem, quantity - 1, fullItemName);
+        } else {
+            this._removeItem(matchedItem);
         }
     } else {
-        // If the click was not on a quantity button, toggle the item.
+        // If not a quantity button, handle the main tap action.
         if (isOnList) {
-            this._removeItem(matchedItem);
+            // V3 UX CHANGE: If quantity is enabled, main tap does nothing to prevent accidental removal.
+            if (!this._config.enable_quantity) {
+                this._removeItem(matchedItem);
+            }
         } else {
             this._addItem(fullItemName);
         }
@@ -147,11 +129,10 @@ class ShoppingListCard extends HTMLElement {
 
   // Calls the todo.add_item service.
   _addItem(itemName) {
-      // V2 CHANGE: If quantity is enabled, add with "(1)" initially.
-      const itemToAdd = this._config.enable_quantity ? `${itemName} (1)` : itemName;
+      // V3 FIX: Always add the base name. Quantity is handled by updates.
       this._hass.callService("todo", "add_item", {
           entity_id: this._config.todo_list,
-          item: itemToAdd,
+          item: itemName,
       });
   }
 
@@ -165,7 +146,11 @@ class ShoppingListCard extends HTMLElement {
 
   // Calls the todo.update_item service to change the quantity.
   _updateQuantity(oldItem, newQuantity, fullItemName) {
-      const newItemName = `${fullItemName} (${newQuantity})`;
+      // V3 FIX: If new quantity is 1, rename to base name. Otherwise, add (x).
+      const newItemName = newQuantity > 1
+          ? `${fullItemName} (${newQuantity})`
+          : fullItemName;
+
       this._hass.callService("todo", "update_item", {
           entity_id: this._config.todo_list,
           item: oldItem,
@@ -175,13 +160,14 @@ class ShoppingListCard extends HTMLElement {
 
   // Attaches the CSS styles to the card.
   _attachStyles() {
-    if (this.querySelector("style")) return; // Styles already attached
+    if (this.querySelector("style")) return; 
 
     const style = document.createElement('style');
     style.textContent = `
-        .card-content {
-            padding: 0;
+        ha-card {
+            border-radius: 12px;
         }
+        .card-content { padding: 0 !important; }
         .card-container {
             display: flex;
             align-items: center;
@@ -205,13 +191,8 @@ class ShoppingListCard extends HTMLElement {
             text-overflow: ellipsis;
             white-space: nowrap;
         }
-        .primary {
-            font-weight: 500;
-        }
-        .secondary {
-            font-size: 0.9em;
-            color: var(--secondary-text-color);
-        }
+        .primary { font-weight: 500; }
+        .secondary { font-size: 0.9em; color: var(--secondary-text-color); }
         .quantity-controls {
             display: flex;
             align-items: center;
@@ -236,16 +217,11 @@ class ShoppingListCard extends HTMLElement {
     this.appendChild(style);
   }
 
-  // Returns the height of the card for Lovelace layout purposes.
-  getCardSize() {
-    return 1;
-  }
+  getCardSize() { return 1; }
 }
 
-// Register the custom element with the browser.
 customElements.define("shopping-list-card", ShoppingListCard);
 
-// Add the card to the list of custom cards for the Lovelace panel.
 window.customCards = window.customCards || [];
 window.customCards.push({
   type: "shopping-list-card",
