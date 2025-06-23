@@ -1,7 +1,7 @@
 // A custom card for Home Assistant's Lovelace UI to manage a shopping list.
-// Version 18: Use direct shape-color/icon-color attributes and inherit border-radius from theme.
+// Version 19: shape-icon is now perfectly round, colours via attributes, card border-radius from theme.
 
-console.log("Shopping List Card: File loaded. Version 18.");
+console.log("Shopping List Card: File loaded. Version 19.");
 
 class ShoppingListCard extends HTMLElement {
   constructor() {
@@ -17,7 +17,6 @@ class ShoppingListCard extends HTMLElement {
     const newState = hass.states[this._config.todo_list];
     if (newState && newState.last_updated !== this._lastUpdated) {
       this._lastUpdated = newState.last_updated;
-
       if (!this.content) {
         this.innerHTML = `<ha-card><div class="card-content"></div></ha-card>`;
         this.content = this.querySelector("div.card-content");
@@ -38,7 +37,6 @@ class ShoppingListCard extends HTMLElement {
   }
 
   async _render() {
-    // Release update lock
     this._isUpdating = false;
     const container = this.content.querySelector('.card-container');
     if (container) container.classList.remove('is-updating');
@@ -50,62 +48,63 @@ class ShoppingListCard extends HTMLElement {
       return;
     }
 
+    // Build the item name
     const fullItemName = this._config.subtitle
       ? `${this._config.title} - ${this._config.subtitle}`
       : this._config.title;
 
-    let todoSummaries = [];
+    // Fetch current list
+    let summaries = [];
     try {
       const result = await this._hass.callWS({
         type: 'todo/item/list',
         entity_id: this._config.todo_list,
       });
-      todoSummaries = result.items.map(item => item.summary);
-    } catch (err) {
-      console.error('Shopping List Card: Error fetching to-do items.', err);
+      summaries = result.items.map(i => i.summary);
+    } catch (e) {
+      console.error('Shopping List Card: Error fetching to-do items.', e);
       this.content.innerHTML = `<div class="warning">Error fetching items.</div>`;
       return;
     }
 
-    const escaped = this._escapeRegExp(fullItemName);
-    const rx = new RegExp(`^${escaped}(?: \\((\\d+)\\))?$`, 'i');
-
-    let isOnList = false, quantity = 0, matchedItem = null;
-    for (const summary of todoSummaries) {
-      if (typeof summary !== 'string') continue;
-      const m = summary.match(rx);
+    // Match on the exact name (with optional "(qty)")
+    const rx = new RegExp(`^${this._escapeRegExp(fullItemName)}(?: \\((\\d+)\\))?$`, 'i');
+    let isOn = false, qty = 0, matched = null;
+    for (const s of summaries) {
+      const m = s.match(rx);
       if (m) {
-        isOnList = true;
-        matchedItem = summary;
-        quantity = m[1] ? parseInt(m[1], 10) : 1;
+        isOn = true;
+        matched = s;
+        qty = m[1] ? parseInt(m[1], 10) : 1;
         break;
       }
     }
 
-    const icon = isOnList ? "mdi:check" : "mdi:plus";
-
-    let quantityControls = '';
-    if (isOnList && this._config.enable_quantity) {
-      const dec = quantity > 1
+    // Decide icon & quantity controls
+    const icon = isOn ? 'mdi:check' : 'mdi:plus';
+    let qtyControls = '';
+    if (isOn && this._config.enable_quantity) {
+      const decBtn = qty > 1
         ? `<ha-icon-button class="quantity-btn" data-action="decrement"><ha-icon icon="mdi:minus"></ha-icon></ha-icon-button>`
         : `<div class="quantity-btn-placeholder"></div>`;
-      quantityControls = `
+      qtyControls = `
         <div class="quantity-controls">
-          ${dec}
-          <span class="quantity">${quantity}</span>
+          ${decBtn}
+          <span class="quantity">${qty}</span>
           <ha-icon-button class="quantity-btn" data-action="increment"><ha-icon icon="mdi:plus"></ha-icon></ha-icon-button>
         </div>
       `;
     }
 
-    // Direct attributes for shape/icon colours
-    const shapeColor = isOnList
+    // Calculate colours
+    const shapeColor = isOn
       ? 'rgba(var(--rgb-green-color), 0.2)'
       : 'rgba(var(--rgb-disabled-color), 0.2)';
-    const iconColor = isOnList
+    const iconColor = isOn
       ? 'rgb(var(--rgb-green-color))'
       : 'rgb(var(--rgb-disabled-color))';
 
+    // Render
     this.content.innerHTML = `
       <div class="card-container">
         <mushroom-shape-icon
@@ -119,44 +118,44 @@ class ShoppingListCard extends HTMLElement {
           <div class="primary">${this._config.title}</div>
           ${this._config.subtitle ? `<div class="secondary">${this._config.subtitle}</div>` : ''}
         </div>
-        ${quantityControls}
+        ${qtyControls}
       </div>
     `;
 
-    this.content.querySelector('.card-container').onclick = (ev) =>
-      this._handleTap(ev, isOnList, matchedItem, quantity, fullItemName);
+    this.content.querySelector('.card-container')
+      .onclick = ev => this._handleTap(ev, isOn, matched, qty, fullItemName);
   }
 
-  async _handleTap(ev, isOnList, matchedItem, quantity, fullItemName) {
+  async _handleTap(ev, isOn, matched, qty, fullItemName) {
     if (this._isUpdating) return;
     ev.stopPropagation();
-
     const action = ev.target.closest('.quantity-btn')?.dataset.action;
+
     this._isUpdating = true;
     this.content.querySelector('.card-container').classList.add('is-updating');
 
-    let serviceCall;
+    let call;
     if (action === 'increment') {
-      serviceCall = this._updateQuantity(matchedItem, quantity + 1, fullItemName);
+      call = this._updateQuantity(matched, qty + 1, fullItemName);
     } else if (action === 'decrement') {
-      if (quantity > 1) serviceCall = this._updateQuantity(matchedItem, quantity - 1, fullItemName);
+      if (qty > 1) call = this._updateQuantity(matched, qty - 1, fullItemName);
     } else {
-      if (isOnList) {
-        if (!this._config.enable_quantity || quantity === 1) {
-          serviceCall = this._removeItem(matchedItem);
+      if (isOn) {
+        if (!this._config.enable_quantity || qty === 1) {
+          call = this._removeItem(matched);
         }
       } else {
-        serviceCall = this._addItem(fullItemName);
+        call = this._addItem(fullItemName);
       }
     }
 
-    if (serviceCall) {
+    if (call) {
       try {
-        await serviceCall;
+        await call;
         this._lastUpdated = null;
         this._render();
-      } catch (err) {
-        console.error("Shopping List Card: Service call failed", err);
+      } catch (e) {
+        console.error("Shopping List Card: Service call failed", e);
         this._isUpdating = false;
         this.content.querySelector('.card-container').classList.remove('is-updating');
       }
@@ -166,10 +165,10 @@ class ShoppingListCard extends HTMLElement {
     }
   }
 
-  _addItem(itemName) {
+  _addItem(name) {
     return this._hass.callService("todo", "add_item", {
       entity_id: this._config.todo_list,
-      item: itemName
+      item: name,
     });
   }
 
@@ -177,16 +176,16 @@ class ShoppingListCard extends HTMLElement {
     if (!item) return Promise.resolve();
     return this._hass.callService("todo", "remove_item", {
       entity_id: this._config.todo_list,
-      item
+      item,
     });
   }
 
-  _updateQuantity(oldItem, newQty, fullItemName) {
-    const newName = newQty > 1 ? `${fullItemName} (${newQty})` : fullItemName;
+  _updateQuantity(oldItem, newQty, fullName) {
+    const newName = newQty > 1 ? `${fullName} (${newQty})` : fullName;
     return this._hass.callService("todo", "update_item", {
       entity_id: this._config.todo_list,
       item: oldItem,
-      rename: newName
+      rename: newName,
     });
   }
 
@@ -211,6 +210,10 @@ class ShoppingListCard extends HTMLElement {
         pointer-events: none;
       }
       mushroom-shape-icon { flex-shrink: 0; }
+      /* FORCE THE ICON SHAPE TO BE CIRCULAR */
+      mushroom-shape-icon .shape {
+        border-radius: 50% !important;
+      }
       .info-container {
         flex-grow: 1;
         line-height: 1.4;
