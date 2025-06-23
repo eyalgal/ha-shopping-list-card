@@ -1,7 +1,3 @@
-import '/frontend/src/components/ha-entity-picker.js';
-import '/frontend/src/components/ha-textfield.js';
-import '/frontend/src/components/ha-switch.js';
-
 /*
  * Shopping List Card
  *
@@ -11,6 +7,10 @@ import '/frontend/src/components/ha-switch.js';
  * Author: eyalgal
  * License: MIT License
  */
+
+import '/frontend/src/components/ha-entity-picker.js';
+import '/frontend/src/components/ha-textfield.js';
+import '/frontend/src/components/ha-switch.js';
 
 class ShoppingListCardEditor extends HTMLElement {
   constructor() {
