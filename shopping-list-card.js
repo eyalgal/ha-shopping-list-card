@@ -9,7 +9,7 @@
  *
  */
 
-console.log("Shopping List Card: File loaded. Version 33.");
+console.log("Shopping List Card: File loaded. Version 35 (Native Color Picker).");
 
 const colorMap = {
     'red': { name: 'Red', hex: '#F44336' },
@@ -62,13 +62,13 @@ class ShoppingListCardEditor extends HTMLElement {
     this.shadowRoot.innerHTML = `
       <style>
         .form-row { margin-bottom: 16px; }
-        .grid-container { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+        .grid-container { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; align-items: end; }
         .switch-row { display: flex; align-items: center; justify-content: space-between; margin-top: 24px; }
         .switch-row span { font-weight: 500; font-size: 14px; }
         ha-textfield, ha-entity-picker, ha-icon-picker, ha-select { display: block; }
         .circle-color {
-          width: 18px;
-          height: 18px;
+          width: 20px;
+          height: 20px;
           border-radius: 50%;
           background-color: var(--color);
           border: 1px solid var(--divider-color);
@@ -90,9 +90,9 @@ class ShoppingListCardEditor extends HTMLElement {
           <div class="form-row">
             <ha-select id="off_color" label="Off-list Color">
               ${Object.entries(colorMap).map(([key, value]) => `
-                <mwc-list-item value="${key}">
-                  <span class="circle-color" style="--color:${value.hex};" slot="graphic"></span>
-                  ${value.name}
+                <mwc-list-item value="${key}" graphic="avatar">
+                  <span>${value.name}</span>
+                  <span class="circle-color" slot="graphic" style="--color:${value.hex};"></span>
                 </mwc-list-item>
               `).join('')}
             </ha-select>
@@ -103,9 +103,9 @@ class ShoppingListCardEditor extends HTMLElement {
           <div class="form-row">
             <ha-select id="on_color" label="On-list Color">
                 ${Object.entries(colorMap).map(([key, value]) => `
-                <mwc-list-item value="${key}">
-                  <span class="circle-color" style="--color:${value.hex};" slot="graphic"></span>
-                  ${value.name}
+                <mwc-list-item value="${key}" graphic="avatar">
+                  <span>${value.name}</span>
+                  <span class="circle-color" slot="graphic" style="--color:${value.hex};"></span>
                 </mwc-list-item>
               `).join('')}
             </ha-select>
@@ -124,8 +124,10 @@ class ShoppingListCardEditor extends HTMLElement {
     entityPicker.allowCustomEntity = false;
 
     this.shadowRoot.querySelectorAll('ha-textfield, ha-icon-picker, ha-switch, ha-entity-picker, ha-select').forEach(el => {
+        el.addEventListener('value-changed', () => this._handleConfigChanged());
         el.addEventListener('change', () => this._handleConfigChanged());
         el.addEventListener('input', () => this._handleConfigChanged());
+        el.addEventListener('selected', () => this._handleConfigChanged());
     });
     
     if (this._config) {
