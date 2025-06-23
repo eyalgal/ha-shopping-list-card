@@ -1,7 +1,7 @@
 // A custom card for Home Assistant's Lovelace UI to manage a shopping list.
-// Version 8: Adds click-locking to prevent race conditions and implements true mushroom icon styling.
+// Version 9: Corrects the CSS variable for the icon color to use a valid theme variable.
 
-console.log("Shopping List Card: File loaded. Version 8.");
+console.log("Shopping List Card: File loaded. Version 9.");
 
 class ShoppingListCard extends HTMLElement {
   constructor() {
@@ -83,14 +83,15 @@ class ShoppingListCard extends HTMLElement {
     }
     
     const icon = isOnList ? "mdi:check" : "mdi:plus";
-    const iconColor = isOnList ? "green" : "grey";
+    // V9 FIX: Use 'disabled' instead of 'grey' for the color variable.
+    // This correctly maps to the HA theme variable `--rgb-disabled-color`.
+    const iconColor = isOnList ? "green" : "disabled";
 
     let quantityControls = '';
     if (isOnList && this._config.enable_quantity) {
-        // V8 FIX: Only show '-' button if quantity > 1.
         const decrementButton = quantity > 1 
             ? `<ha-icon-button class="quantity-btn" data-action="decrement"><ha-icon icon="mdi:minus"></ha-icon></ha-icon-button>`
-            : `<div class="quantity-btn-placeholder"></div>`; // Placeholder to keep alignment
+            : `<div class="quantity-btn-placeholder"></div>`; 
 
         quantityControls = `
             <div class="quantity-controls">
@@ -101,7 +102,6 @@ class ShoppingListCard extends HTMLElement {
         `;
     }
 
-    // V8 FIX: Use mushroom-shape-icon for authentic styling.
     this.content.innerHTML = `
         <div class="card-container ${this._isUpdating ? 'is-updating' : ''}">
             <mushroom-shape-icon slot="icon" style="--icon-color:rgb(var(--rgb-${iconColor}-color)); --shape-color:rgba(var(--rgb-${iconColor}-color), 0.2);">
@@ -119,7 +119,6 @@ class ShoppingListCard extends HTMLElement {
   }
 
   _handleTap(ev, isOnList, matchedItem, quantity, fullItemName) {
-    // V8 FIX: Lock the card to prevent rapid clicks.
     if (this._isUpdating) return; 
     
     ev.stopPropagation(); 
@@ -134,7 +133,6 @@ class ShoppingListCard extends HTMLElement {
       if (quantity > 1) this._updateQuantity(matchedItem, quantity - 1, fullItemName);
     } else {
       if (isOnList) {
-        // V8 FIX: Main click removes if not quantity-enabled OR if quantity is 1.
         if (!this._config.enable_quantity || quantity === 1) {
           this._removeItem(matchedItem);
         }
@@ -166,14 +164,14 @@ class ShoppingListCard extends HTMLElement {
         .card-content { padding: 0 !important; }
         .card-container { display: flex; align-items: center; padding: 12px; cursor: pointer; transition: opacity 0.3s ease-in-out; }
         .card-container.is-updating { opacity: 0.5; pointer-events: none; }
-        mushroom-shape-icon { flex-shrink: 0; } /* V8 Style */
+        mushroom-shape-icon { flex-shrink: 0; }
         .info-container { flex-grow: 1; line-height: 1.4; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; margin-left: 12px; }
         .primary { font-weight: 500; }
         .secondary { font-size: 0.9em; color: var(--secondary-text-color); }
         .quantity-controls { display: flex; align-items: center; margin-left: 8px; }
         .quantity { margin: 0 4px; font-weight: 500; font-size: 1.1em; text-align: center; }
         .quantity-btn { color: var(--secondary-text-color); --mdc-icon-button-size: 36px; }
-        .quantity-btn-placeholder { width: 36px; } /* V8 Style */
+        .quantity-btn-placeholder { width: 36px; }
         .warning { padding: 12px; background-color: var(--error-color); color: var(--text-primary-color); border-radius: var(--ha-card-border-radius, 4px); }
     `;
     this.appendChild(style);
