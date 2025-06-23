@@ -1,7 +1,7 @@
 // A custom card for Home Assistant's Lovelace UI to manage a shopping list.
-// Version 26: Uses hardcoded hex color codes for ultimate style reliability.
+// Version 27: Forces circular icon shape and styles quantity buttons.
 
-console.log("Shopping List Card: File loaded. Version 26.");
+console.log("Shopping List Card: File loaded. Version 27.");
 
 class ShoppingListCard extends HTMLElement {
   constructor() {
@@ -92,8 +92,6 @@ class ShoppingListCard extends HTMLElement {
       `;
     }
 
-    // FINAL STYLE FIX: Use hardcoded 8-digit hex codes. This is the most reliable method.
-    // #RRGGBBAA format. AA=33 is ~20% opacity.
     const shapeColor = isOn
       ? '#4CAF5033'  // Green with ~20% opacity
       : '#80808033'; // Grey with ~20% opacity
@@ -221,6 +219,10 @@ class ShoppingListCard extends HTMLElement {
         --icon-size:    20px;
         flex-shrink:    0;
       }
+      /* V27 FIX: Force the inner shape to be a circle */
+      mushroom-shape-icon .shape {
+        border-radius:  50% !important;
+      }
       
       .info-container { flex-grow: 1; overflow: hidden; }
       .primary {
@@ -247,11 +249,14 @@ class ShoppingListCard extends HTMLElement {
         font-size:      14px;
         font-weight:    500;
       }
+      /* V27 FIX: Style the quantity buttons */
       .quantity-btn {
-        --mdc-icon-button-size: 36px;
+        --mdc-icon-button-size: 28px;
+        background-color: var(--divider-color, #E0E0E0);
+        border-radius: 2px;
         color: var(--secondary-text-color);
       }
-      .quantity-btn-placeholder { width: 36px; }
+      .quantity-btn-placeholder { width: 28px; }
 
       .warning {
         padding:        12px;
