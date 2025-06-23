@@ -70,7 +70,7 @@ class ShoppingListCardEditor extends HTMLElement {
     // Set properties on ha-entity-picker directly
     const entityPicker = this.shadowRoot.querySelector('#todo_list');
     entityPicker.hass = this._hass;
-    entityPicker.includeDomains = ['shopping_list'];
+    entityPicker.includeDomains = ['todo'];
     entityPicker.allowCustomEntity = false;
 
     // Add event listeners
@@ -139,6 +139,8 @@ class ShoppingListCard extends HTMLElement {
   }
   
   static async getConfigElement() {
+    // This is the correct way to load the editor element.
+    await import('/local/shopping-list-card.js');
     return document.createElement('shopping-list-card-editor');
   }
 
