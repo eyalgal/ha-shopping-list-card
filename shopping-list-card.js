@@ -1,7 +1,7 @@
 // A custom card for Home Assistant's Lovelace UI to manage a shopping list.
-// Version 29: Final styling tweaks for icon sizes and alignment.
+// Version 30: Replaces mushroom-shape-icon with a custom styled div for guaranteed circle shape.
 
-console.log("Shopping List Card: File loaded. Version 29.");
+console.log("Shopping List Card: File loaded. Version 30.");
 
 class ShoppingListCard extends HTMLElement {
   constructor() {
@@ -94,12 +94,11 @@ class ShoppingListCard extends HTMLElement {
       `;
     }
 
+    // V30 FIX: Use a simple div with a ha-icon inside for full styling control.
     this.content.innerHTML = `
       <div class="card-container ${stateClass}">
         <div class="icon-wrapper">
-            <mushroom-shape-icon slot="icon">
-                <ha-icon icon="${icon}"></ha-icon>
-            </mushroom-shape-icon>
+            <ha-icon icon="${icon}"></ha-icon>
         </div>
         <div class="info-container">
           <div class="primary">${this._config.title}</div>
@@ -217,19 +216,16 @@ class ShoppingListCard extends HTMLElement {
         border-radius: 50%;
         flex-shrink: 0;
       }
+      .icon-wrapper ha-icon {
+        --mdc-icon-size: 18px;
+      }
       .card-container.is-on .icon-wrapper {
-        background-color: rgba(76, 175, 80, 0.2); /* Green with opacity */
-        color: rgb(76, 175, 80); /* Green */
+        background-color: rgba(76, 175, 80, 0.2);
+        color: rgb(76, 175, 80);
       }
       .card-container.is-off .icon-wrapper {
-        background-color: rgba(128, 128, 128, 0.2); /* Grey with opacity */
-        color: rgb(128, 128, 128); /* Grey */
-      }
-      
-      mushroom-shape-icon {
-        --shape-color: transparent !important;
-        --icon-color: currentColor !important;
-        --icon-size: 18px; /* V29: Smaller main icon */
+        background-color: rgba(128, 128, 128, 0.2);
+        color: rgb(128, 128, 128);
       }
       
       .info-container { flex-grow: 1; overflow: hidden; }
@@ -262,7 +258,6 @@ class ShoppingListCard extends HTMLElement {
         background-color: rgba(128, 128, 128, 0.2);
         border-radius: 5px;
         color: var(--secondary-text-color);
-        /* V29: Center the icon inside the button */
         display: flex;
         align-items: center;
         justify-content: center;
