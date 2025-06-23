@@ -1,7 +1,7 @@
 // A custom card for Home Assistant's Lovelace UI to manage a shopping list.
-// Version 17: Fixes the quantity not updating by forcing a re-render after a service call.
+// Version 18: Implements user-suggested !important CSS override for robust icon styling.
 
-console.log("Shopping List Card: File loaded. Version 17.");
+console.log("Shopping List Card: File loaded. Version 18.");
 
 class ShoppingListCard extends HTMLElement {
   constructor() {
@@ -92,7 +92,7 @@ class ShoppingListCard extends HTMLElement {
     }
     
     const icon = isOnList ? "mdi:check" : "mdi:plus";
-    const stateClass = isOnList ? "on" : "off";
+    const stateClass = isOnList ? "is-on" : "is-off";
 
     let quantityControls = '';
     if (isOnList && this._config.enable_quantity) {
@@ -110,8 +110,8 @@ class ShoppingListCard extends HTMLElement {
     }
 
     this.content.innerHTML = `
-        <div class="card-container">
-            <mushroom-shape-icon class="${stateClass}" slot="icon">
+        <div class="card-container ${stateClass}">
+            <mushroom-shape-icon slot="icon">
                 <ha-icon icon="${icon}"></ha-icon>
             </mushroom-shape-icon>
             <div class="info-container">
@@ -124,8 +124,7 @@ class ShoppingListCard extends HTMLElement {
 
     this.content.querySelector('.card-container').onclick = (ev) => this._handleTap(ev, isOnList, matchedItem, quantity, fullItemName);
   }
-
-  // V17 FIX: The tap handler is now async to await service calls.
+  
   async _handleTap(ev, isOnList, matchedItem, quantity, fullItemName) {
     if (this._isUpdating) return; 
     
@@ -150,19 +149,18 @@ class ShoppingListCard extends HTMLElement {
     if (serviceCall) {
       try {
         await serviceCall;
-        // V17 FIX: After the call succeeds, clear the timestamp and force a re-render.
-        // This makes the UI update instantly with the new quantity.
-        this._lastUpdated = null;
-        this._render();
+        this._lastUpdated = null; // Force a re-render check on next hass update
+        // We don't call _render() directly to avoid race conditions. 
+        // The hass setter will handle the re-render when the state update arrives.
       } catch (err) {
         console.error("Shopping List Card: Service call failed", err);
-        this._isUpdating = false; // Release lock on failure
+      } finally {
+        this._isUpdating = false; // Always release the lock
         if(this.content.querySelector('.card-container')) {
            this.content.querySelector('.card-container').classList.remove('is-updating');
         }
       }
     } else {
-      // If no action was taken, release the lock immediately.
       this._isUpdating = false;
       if(this.content.querySelector('.card-container')) {
          this.content.querySelector('.card-container').classList.remove('is-updating');
@@ -170,7 +168,6 @@ class ShoppingListCard extends HTMLElement {
     }
   }
 
-  // V17 FIX: These functions now return the promise from the service call.
   _addItem(itemName) {
       return this._hass.callService("todo", "add_item", { entity_id: this._config.todo_list, item: itemName });
   }
@@ -191,8 +188,8 @@ class ShoppingListCard extends HTMLElement {
     style.textContent = `
         ha-card { border-radius: 12px; border-width: 0; }
         .card-content { padding: 0 !important; }
-        .card-container { display: flex; align-items: center; padding: 12px; cursor: pointer; transition: opacity 0.3s ease-in-out; }
-        .card-container.is-updating { opacity: 0.5; pointer-events: none; }
+        .card-container { display: flex; align-items: center; padding: 12px; cursor: pointer; }
+        .card-container.is-updating { pointer-events: none; }
         mushroom-shape-icon { flex-shrink: 0; }
         .info-container { flex-grow: 1; line-height: 1.4; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; margin-left: 12px; }
         .primary { font-weight: 500; }
@@ -203,13 +200,15 @@ class ShoppingListCard extends HTMLElement {
         .quantity-btn-placeholder { width: 36px; }
         .warning { padding: 12px; background-color: var(--error-color); color: var(--text-primary-color); border-radius: var(--ha-card-border-radius, 4px); }
         
-        mushroom-shape-icon.on {
-            --icon-color: rgb(var(--rgb-green-color));
-            --shape-color: rgba(var(--rgb-green-color), 0.2);
+        /* V18 FIX: Use !important to override mushroom defaults. */
+        .card-container.is-on mushroom-shape-icon {
+            --icon-color: rgb(var(--rgb-green)) !important;
+            --shape-color: rgba(var(--rgb-green), 0.2) !important;
         }
-        mushroom-shape-icon.off {
-            --icon-color: rgb(var(--rgb-disabled-color));
-            --shape-color: rgba(var(--rgb-disabled-color), 0.2);
+        .card-container.is-off mushroom-shape-icon {
+            --icon-color: rgb(var(--rgb-disabled)) !important;
+            --shape-color: rgba(var(--rgb-disabled), 0.2) !important;
+            --shape-color-disabled: rgba(var(--rgb-disabled), 0.2) !important;
         }
     `;
     this.appendChild(style);
