@@ -2,14 +2,94 @@
  * Shopping List Card
  *
  * A Home Assistant Lovelace card to manage items on a to-do list with a
- * clean, modern interface.
+ * clean, modern interface and a visual editor.
  *
- * Author: Eyal Gal
+ * Author: eyalgal
  * License: MIT License
  *
  */
 
-// A custom card for Home Assistant's Lovelace UI to manage a shopping list.
+// Define the editor custom element
+class ShoppingListCardEditor extends HTMLElement {
+  constructor() {
+    super();
+    this.attachShadow({ mode: 'open' });
+    this._render();
+  }
+
+  set hass(hass) {
+    this._hass = hass;
+  }
+
+  setConfig(config) {
+    this._config = config;
+    this.shadowRoot.getElementById('title').value = this._config.title || '';
+    this.shadowRoot.getElementById('subtitle').value = this._config.subtitle || '';
+    this.shadowRoot.getElementById('todo_list').value = this._config.todo_list || '';
+    this.shadowRoot.getElementById('enable_quantity').checked = this._config.enable_quantity || false;
+  }
+
+  _render() {
+    this.shadowRoot.innerHTML = `
+      <style>
+        .form-row { display: flex; flex-direction: column; margin-bottom: 12px; }
+        .form-row label { margin-bottom: 4px; }
+        .form-row input, .form-row ha-entity-picker { width: 100%; }
+        .checkbox-row { display: flex; align-items: center; }
+        .checkbox-row label { margin-left: 8px; }
+      </style>
+      <div class="form-row">
+        <label for="title">Title (Required)</label>
+        <input type="text" id="title" placeholder="e.g., Milk" required />
+      </div>
+      <div class="form-row">
+        <label for="subtitle">Subtitle</label>
+        <input type="text" id="subtitle" placeholder="e.g., Lactose-free" />
+      </div>
+      <div class="form-row">
+        <label for="todo_list">To-do List Entity (Required)</label>
+        <ha-entity-picker
+          id="todo_list"
+          .hass="${this._hass}"
+          .includeDomains="${['todo']}"
+          .allowCustomEntity=${false}
+          required
+        ></ha-entity-picker>
+      </div>
+      <div class="checkbox-row">
+        <input type="checkbox" id="enable_quantity" />
+        <label for="enable_quantity">Enable Quantity Controls</label>
+      </div>
+    `;
+
+    this.shadowRoot.getElementById('title').addEventListener('input', this._handleConfigChanged.bind(this));
+    this.shadowRoot.getElementById('subtitle').addEventListener('input', this._handleConfigChanged.bind(this));
+    this.shadowRoot.getElementById('todo_list').addEventListener('value-changed', this._handleConfigChanged.bind(this));
+    this.shadowRoot.getElementById('enable_quantity').addEventListener('change', this._handleConfigChanged.bind(this));
+  }
+
+  _handleConfigChanged() {
+    const newConfig = {
+      type: 'custom:shopping-list-card',
+      title: this.shadowRoot.getElementById('title').value,
+      subtitle: this.shadowRoot.getElementById('subtitle').value,
+      todo_list: this.shadowRoot.getElementById('todo_list').value,
+      enable_quantity: this.shadowRoot.getElementById('enable_quantity').checked,
+    };
+    
+    const event = new CustomEvent('config-changed', {
+      bubbles: true,
+      composed: true,
+      detail: { config: newConfig },
+    });
+    this.dispatchEvent(event);
+  }
+}
+
+customElements.define('shopping-list-card-editor', ShoppingListCardEditor);
+
+
+// The main card element
 class ShoppingListCard extends HTMLElement {
   constructor() {
     super();
@@ -37,6 +117,19 @@ class ShoppingListCard extends HTMLElement {
     if (!config.title)      throw new Error("You must define a title.");
     if (!config.todo_list)  throw new Error("You must define a todo_list entity_id.");
     this._config = config;
+  }
+  
+  // Static methods for the visual editor
+  static async getConfigElement() {
+    return document.createElement('shopping-list-card-editor');
+  }
+
+  static getStubConfig() {
+    return {
+      type: 'custom:shopping-list-card',
+      title: 'New Item',
+      todo_list: ''
+    };
   }
 
   _escapeRegExp(string) {
@@ -293,10 +386,3 @@ class ShoppingListCard extends HTMLElement {
 }
 
 customElements.define("shopping-list-card", ShoppingListCard);
-window.customCards = window.customCards || [];
-window.customCards.push({
-  type:        "shopping-list-card",
-  name:        "Shopping List Card",
-  preview:     true,
-  description: "A card to manage items on a shopping list."
-});
