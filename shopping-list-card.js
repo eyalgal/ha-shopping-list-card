@@ -1,6 +1,6 @@
 // A custom card for Home Assistant's Lovelace UI to manage a shopping list.
 // This card is designed to look and feel like a Mushroom card.
-// Version 3: Major bug fixes and logic overhaul.
+// Version 4: Complete logic overhaul for item detection, quantity, and styling.
 
 class ShoppingListCard extends HTMLElement {
   // set hass is called by Home Assistant whenever the state changes.
@@ -42,10 +42,13 @@ class ShoppingListCard extends HTMLElement {
         ? `${this._config.title} - ${this._config.subtitle}` 
         : this._config.title;
 
-    // V3 FIX: Use the modern 'items' attribute which is an array of objects, 
-    // and fall back to the old 'item' attribute (array of strings) for older HA versions.
-    // This is the most critical fix.
-    const todoSummaries = (state.attributes.items?.map(i => i.summary)) || state.attributes.item || [];
+    // V4 FIX: This is the definitive way to get item summaries from a todo entity.
+    // It checks for the modern 'items' attribute (an array of objects) first.
+    // It falls back to the legacy 'item' attribute (an array of strings).
+    const itemsSource = state.attributes.items;
+    const todoSummaries = Array.isArray(itemsSource) 
+        ? itemsSource.map(i => i.summary) 
+        : (state.attributes.item || []);
 
     const escapedItemName = this._escapeRegExp(fullItemName);
     const itemRegex = new RegExp(`^${escapedItemName}(?: \\((\\d+)\\))?$`, 'i');
@@ -54,21 +57,24 @@ class ShoppingListCard extends HTMLElement {
     let quantity = 0;
     let matchedItem = null;
 
+    // Find the item in the list
     for (const summary of todoSummaries) {
+        if (typeof summary !== 'string') continue;
         const match = summary.match(itemRegex);
         if (match) {
             isOnList = true;
             matchedItem = summary;
-            quantity = match[1] ? parseInt(match[1], 10) : 1; // If no number, quantity is 1.
+            quantity = match[1] ? parseInt(match[1], 10) : 1;
             break;
         }
     }
 
     const icon = isOnList ? "mdi:check" : "mdi:plus";
-    const iconColor = isOnList ? "green" : "grey";
+    // V4 FIX: Use reliable theme variables for colors.
+    const iconColor = isOnList ? "green" : "disabled";
 
     let quantityControls = '';
-    // V3 FIX: Show quantity controls when item is on the list.
+    // V4 FIX: This now correctly shows/hides based on the fixed isOnList detection.
     if (isOnList && this._config.enable_quantity) {
         quantityControls = `
             <div class="quantity-controls">
@@ -83,7 +89,6 @@ class ShoppingListCard extends HTMLElement {
         `;
     }
 
-    // This is the HTML structure of our card.
     this.content.innerHTML = `
         <div class="card-container">
             <div class="icon-container" style="background-color: rgba(var(--rgb-${iconColor}-color), 0.1); color: var(--${iconColor}-color);">
@@ -97,7 +102,6 @@ class ShoppingListCard extends HTMLElement {
         </div>
     `;
 
-    // Add event listeners for the various actions.
     this.content.querySelector('.card-container').onclick = (ev) => this._handleTap(ev, isOnList, matchedItem, quantity, fullItemName);
   }
 
@@ -108,16 +112,14 @@ class ShoppingListCard extends HTMLElement {
     if (action === 'increment') {
         this._updateQuantity(matchedItem, quantity + 1, fullItemName);
     } else if (action === 'decrement') {
-        // V3 FIX: Decrementing from 2 goes to 1 (base name), from 1 removes the item.
+        // V4 FIX: Correctly handles decrementing quantity or removing the item.
         if (quantity > 1) {
             this._updateQuantity(matchedItem, quantity - 1, fullItemName);
         } else {
             this._removeItem(matchedItem);
         }
     } else {
-        // If not a quantity button, handle the main tap action.
         if (isOnList) {
-            // V3 UX CHANGE: If quantity is enabled, main tap does nothing to prevent accidental removal.
             if (!this._config.enable_quantity) {
                 this._removeItem(matchedItem);
             }
@@ -129,7 +131,6 @@ class ShoppingListCard extends HTMLElement {
 
   // Calls the todo.add_item service.
   _addItem(itemName) {
-      // V3 FIX: Always add the base name. Quantity is handled by updates.
       this._hass.callService("todo", "add_item", {
           entity_id: this._config.todo_list,
           item: itemName,
@@ -138,6 +139,7 @@ class ShoppingListCard extends HTMLElement {
 
   // Calls the todo.remove_item service.
   _removeItem(item) {
+    if (!item) return; // Safety check
     this._hass.callService("todo", "remove_item", {
       entity_id: this._config.todo_list,
       item: item,
@@ -146,7 +148,7 @@ class ShoppingListCard extends HTMLElement {
 
   // Calls the todo.update_item service to change the quantity.
   _updateQuantity(oldItem, newQuantity, fullItemName) {
-      // V3 FIX: If new quantity is 1, rename to base name. Otherwise, add (x).
+      // V4 FIX: Renames to base name when quantity is 1.
       const newItemName = newQuantity > 1
           ? `${fullItemName} (${newQuantity})`
           : fullItemName;
@@ -158,7 +160,6 @@ class ShoppingListCard extends HTMLElement {
       });
   }
 
-  // Attaches the CSS styles to the card.
   _attachStyles() {
     if (this.querySelector("style")) return; 
 
@@ -166,6 +167,7 @@ class ShoppingListCard extends HTMLElement {
     style.textContent = `
         ha-card {
             border-radius: 12px;
+            border-width: 0;
         }
         .card-content { padding: 0 !important; }
         .card-container {
