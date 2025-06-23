@@ -1,23 +1,33 @@
 // A custom card for Home Assistant's Lovelace UI to manage a shopping list.
-// Version 9: Corrects the CSS variable for the icon color to use a valid theme variable.
+// Version 10: Fixes the infinite render loop by only re-rendering when the todo entity changes.
 
-console.log("Shopping List Card: File loaded. Version 9.");
+console.log("Shopping List Card: File loaded. Version 10.");
 
 class ShoppingListCard extends HTMLElement {
   constructor() {
     super();
     this._isUpdating = false; // Add a lock to prevent rapid clicks.
+    this._state = null; // Stores the last known state to prevent loops.
   }
 
   // set hass is called by Home Assistant whenever the state changes.
   set hass(hass) {
     this._hass = hass;
-    if (!this.content) {
-      this.innerHTML = `<ha-card><div class="card-content"></div></ha-card>`;
-      this.content = this.querySelector("div.card-content");
-      this._attachStyles();
+    if (!this._config) return;
+
+    // V10 FIX: This is the crucial change to prevent infinite render loops.
+    // We get the new state of our todo entity.
+    const newState = hass.states[this._config.todo_list];
+    // We only re-render if the state object is actually different from the last one we saw.
+    if (newState !== this._state) {
+        this._state = newState; // Store the new state.
+        if (!this.content) {
+            this.innerHTML = `<ha-card><div class="card-content"></div></ha-card>`;
+            this.content = this.querySelector("div.card-content");
+            this._attachStyles();
+        }
+        this._render();
     }
-    this._render();
   }
 
   // setConfig is called once when the card is configured.
@@ -27,23 +37,17 @@ class ShoppingListCard extends HTMLElement {
     this._config = config;
   }
 
-  // Helper to escape special characters for use in a Regular Expression.
   _escapeRegExp(string) {
     return string.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
   }
 
-  // _render is the main function to update the card's display.
   async _render() {
     if (!this._config || !this._hass) return;
 
-    // Release the update lock now that a re-render is happening.
     this._isUpdating = false;
 
-    const todoEntityId = this._config.todo_list;
-    const state = this._hass.states[todoEntityId];
-
-    if (!state) {
-      this.content.innerHTML = `<div class="warning">Entity not found: ${todoEntityId}</div>`;
+    if (!this._state) {
+      this.content.innerHTML = `<div class="warning">Entity not found: ${this._config.todo_list}</div>`;
       return;
     }
 
@@ -55,7 +59,7 @@ class ShoppingListCard extends HTMLElement {
     try {
       const result = await this._hass.callWS({
         type: 'todo/item/list',
-        entity_id: todoEntityId,
+        entity_id: this._config.todo_list,
       });
       todoSummaries = result.items.map(item => item.summary);
     } catch (err) {
@@ -83,8 +87,6 @@ class ShoppingListCard extends HTMLElement {
     }
     
     const icon = isOnList ? "mdi:check" : "mdi:plus";
-    // V9 FIX: Use 'disabled' instead of 'grey' for the color variable.
-    // This correctly maps to the HA theme variable `--rgb-disabled-color`.
     const iconColor = isOnList ? "green" : "disabled";
 
     let quantityControls = '';
