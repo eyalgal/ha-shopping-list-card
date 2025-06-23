@@ -31,7 +31,8 @@ class ShoppingListCardEditor extends HTMLElement {
   }
   
   _render() {
-    if (!this.shadowRoot) return;
+    if (!this.shadowRoot || !this._hass) return;
+    
     this.shadowRoot.innerHTML = `
       <style>
         .form-row { margin-bottom: 16px; }
@@ -56,9 +57,6 @@ class ShoppingListCardEditor extends HTMLElement {
         <ha-entity-picker
           id="todo_list"
           label="To-do List Entity (Required)"
-          .hass="${this._hass}"
-          .includeDomains="${['todo']}"
-          .allowCustomEntity=${false}
           required
         ></ha-entity-picker>
       </div>
@@ -69,10 +67,16 @@ class ShoppingListCardEditor extends HTMLElement {
     `;
     this._rendered = true;
     
+    // Set properties on ha-entity-picker directly
+    const entityPicker = this.shadowRoot.querySelector('#todo_list');
+    entityPicker.hass = this._hass;
+    entityPicker.includeDomains = ['todo'];
+    entityPicker.allowCustomEntity = false;
+
     // Add event listeners
     this.shadowRoot.querySelector('#title').addEventListener('input', () => this._handleConfigChanged());
     this.shadowRoot.querySelector('#subtitle').addEventListener('input', () => this._handleConfigChanged());
-    this.shadowRoot.querySelector('#todo_list').addEventListener('value-changed', () => this._handleConfigChanged());
+    entityPicker.addEventListener('value-changed', () => this._handleConfigChanged());
     this.shadowRoot.querySelector('#enable_quantity').addEventListener('change', () => this._handleConfigChanged());
     
     if (this._config) {
