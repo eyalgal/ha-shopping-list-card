@@ -9,7 +9,7 @@
  *
  */
 
-console.log("Shopping List Card: File loaded. Version 36 (Stable Editor).");
+console.log("Shopping List Card: File loaded. Version 37 (Stable Color Picker).");
 
 const colorMap = {
     'red': { name: 'Red', hex: '#F44336' },
@@ -65,14 +65,10 @@ class ShoppingListCardEditor extends HTMLElement {
         .grid-container { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; align-items: end; }
         .switch-row { display: flex; align-items: center; justify-content: space-between; margin-top: 24px; }
         .switch-row span { font-weight: 500; font-size: 14px; }
-        ha-textfield, ha-entity-picker, ha-icon-picker, ha-select { display: block; }
-        .circle-color {
-          width: 20px;
-          height: 20px;
-          border-radius: 50%;
-          background-color: var(--color);
-          border: 1px solid var(--divider-color);
-        }
+        ha-textfield, ha-entity-picker, ha-icon-picker { display: block; }
+        .color-input-container { display: flex; flex-direction: column; }
+        .color-input-container label { font-size: 12px; color: var(--secondary-text-color); margin-bottom: 8px;}
+        input[type="color"] { width: 100%; height: 40px; border: 1px solid var(--divider-color); border-radius: 4px; padding: 4px; box-sizing: border-box; }
       </style>
       <div class="form-row">
         <ha-textfield id="title" label="Title (Required)" required></ha-textfield>
@@ -87,28 +83,16 @@ class ShoppingListCardEditor extends HTMLElement {
           <div class="form-row">
             <ha-icon-picker id="off_icon" label="Off-list Icon"></ha-icon-picker>
           </div>
-          <div class="form-row">
-            <ha-select id="off_color" label="Off-list Color">
-              ${Object.entries(colorMap).map(([key, value]) => `
-                <mwc-list-item value="${key}" graphic="avatar">
-                  <span>${value.name}</span>
-                  <span class="circle-color" slot="graphic" style="--color:${value.hex};"></span>
-                </mwc-list-item>
-              `).join('')}
-            </ha-select>
+          <div class="form-row color-input-container">
+            <label for="off_color">Off-list Color</label>
+            <input type="color" id="off_color">
           </div>
           <div class="form-row">
             <ha-icon-picker id="on_icon" label="On-list Icon"></ha-icon-picker>
           </div>
-          <div class="form-row">
-            <ha-select id="on_color" label="On-list Color">
-                ${Object.entries(colorMap).map(([key, value]) => `
-                <mwc-list-item value="${key}" graphic="avatar">
-                  <span>${value.name}</span>
-                  <span class="circle-color" slot="graphic" style="--color:${value.hex};"></span>
-                </mwc-list-item>
-              `).join('')}
-            </ha-select>
+          <div class="form-row color-input-container">
+            <label for="on_color">On-list Color</label>
+            <input type="color" id="on_color">
           </div>
       </div>
       <div class="switch-row">
@@ -123,11 +107,9 @@ class ShoppingListCardEditor extends HTMLElement {
     entityPicker.includeDomains = ['todo'];
     entityPicker.allowCustomEntity = false;
 
-    this.shadowRoot.querySelectorAll('ha-textfield, ha-icon-picker, ha-switch, ha-entity-picker, ha-select').forEach(el => {
-        el.addEventListener('value-changed', () => this._handleConfigChanged(el));
-        el.addEventListener('change', () => this._handleConfigChanged(el));
-        el.addEventListener('input', () => this._handleConfigChanged(el));
-        el.addEventListener('selected', () => this._handleConfigChanged(el));
+    this.shadowRoot.querySelectorAll('ha-textfield, ha-icon-picker, ha-switch, ha-entity-picker, input[type="color"]').forEach(el => {
+        el.addEventListener('change', () => this._handleConfigChanged());
+        el.addEventListener('input', () => this._handleConfigChanged());
     });
     
     if (this._config) {
@@ -141,8 +123,8 @@ class ShoppingListCardEditor extends HTMLElement {
     this.shadowRoot.querySelector('#todo_list').value = this._config.todo_list || '';
     this.shadowRoot.querySelector('#on_icon').value = this._config.on_icon || 'mdi:check';
     this.shadowRoot.querySelector('#off_icon').value = this._config.off_icon || 'mdi:plus';
-    this.shadowRoot.querySelector('#on_color').value = this._config.on_color || 'green';
-    this.shadowRoot.querySelector('#off_color').value = this._config.off_color || 'disabled';
+    this.shadowRoot.querySelector('#on_color').value = colorMap[this._config.on_color]?.hex || this._config.on_color || colorMap.green.hex;
+    this.shadowRoot.querySelector('#off_color').value = colorMap[this._config.off_color]?.hex || this._config.off_color || colorMap.disabled.hex;
     this.shadowRoot.querySelector('#enable_quantity').checked = this._config.enable_quantity || false;
   }
 
@@ -257,15 +239,12 @@ class ShoppingListCard extends HTMLElement {
     const onIcon = this._config.on_icon || 'mdi:check';
     const offIcon = this._config.off_icon || 'mdi:plus';
     
-    const onColorKey = this._config.on_color || 'green';
-    const offColorKey = this._config.off_color || 'disabled';
-    
-    const onColorHex = colorMap[onColorKey]?.hex || onColorKey; 
-    const offColorHex = colorMap[offColorKey]?.hex || offColorKey;
+    const onColor = this._config.on_color || colorMap.green.hex;
+    const offColor = this._config.off_color || colorMap.disabled.hex;
 
     const icon = isOn ? onIcon : offIcon;
-    const color = isOn ? onColorHex : offColorHex;
-    const bgColor = `${color}33`; 
+    const color = isOn ? onColor : offColor;
+    const bgColor = `${color}33`; // Append 33 for ~20% opacity
     
     let qtyControls = '';
     if (isOn && this._config.enable_quantity) {
