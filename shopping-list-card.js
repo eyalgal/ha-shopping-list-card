@@ -9,6 +9,8 @@
  *
  */
 
+console.log("Shopping List Card: File loaded. Version 41 (Stable Editor).");
+
 class ShoppingListCardEditor extends HTMLElement {
   constructor() {
     super();
@@ -64,6 +66,7 @@ class ShoppingListCardEditor extends HTMLElement {
     entityPicker.includeDomains = ['todo'];
     entityPicker.allowCustomEntity = false;
 
+    // Use a single, reliable event listener for all form elements.
     this.shadowRoot.querySelector('.form').addEventListener('input', () => this._handleConfigChanged());
     
     if (this._config) {
@@ -251,6 +254,7 @@ class ShoppingListCard extends HTMLElement {
     `;
     
     const iconWrapper = this.content.querySelector('.icon-wrapper');
+    // Handle both named colors and hex codes
     const finalColor = color.startsWith('#') ? color : `var(--${color}-color)`;
     const finalBgColor = color.startsWith('#') ? `${color}33` : `rgba(var(--rgb-${color}), 0.2)`;
     iconWrapper.style.color = finalColor;
