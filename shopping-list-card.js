@@ -1,7 +1,7 @@
 // A custom card for Home Assistant's Lovelace UI to manage a shopping list.
-// Version 28: Fixes square icon by styling a wrapper div and adjusts quantity button styles.
+// Version 29: Final styling tweaks for icon sizes and alignment.
 
-console.log("Shopping List Card: File loaded. Version 28.");
+console.log("Shopping List Card: File loaded. Version 29.");
 
 class ShoppingListCard extends HTMLElement {
   constructor() {
@@ -208,7 +208,6 @@ class ShoppingListCard extends HTMLElement {
         pointer-events:  none;
       }
       
-      /* V28 FIX: Style a wrapper div to guarantee shape and color */
       .icon-wrapper {
         display: flex;
         align-items: center;
@@ -228,9 +227,9 @@ class ShoppingListCard extends HTMLElement {
       }
       
       mushroom-shape-icon {
-        --shape-color: transparent !important; /* Make mushroom background transparent */
-        --icon-color: currentColor !important; /* Make icon inherit color from wrapper */
-        --icon-size: 20px;
+        --shape-color: transparent !important;
+        --icon-color: currentColor !important;
+        --icon-size: 18px; /* V29: Smaller main icon */
       }
       
       .info-container { flex-grow: 1; overflow: hidden; }
@@ -258,12 +257,15 @@ class ShoppingListCard extends HTMLElement {
         font-size:      14px;
         font-weight:    500;
       }
-      /* V28 FIX: Style the quantity buttons */
       .quantity-btn {
         --mdc-icon-button-size: 24px;
         background-color: rgba(128, 128, 128, 0.2);
         border-radius: 5px;
         color: var(--secondary-text-color);
+        /* V29: Center the icon inside the button */
+        display: flex;
+        align-items: center;
+        justify-content: center;
       }
       .quantity-btn ha-icon {
         --mdc-icon-size: 16px;
