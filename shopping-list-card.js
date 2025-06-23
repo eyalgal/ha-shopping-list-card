@@ -9,6 +9,31 @@
  *
  */
 
+// Shared color map for the card and editor
+const colorMap = {
+    'red': { name: 'Red', hex: '#F44336' },
+    'pink': { name: 'Pink', hex: '#E91E63' },
+    'purple': { name: 'Purple', hex: '#9C27B0' },
+    'deep-purple': { name: 'Deep Purple', hex: '#673AB7' },
+    'indigo': { name: 'Indigo', hex: '#3F51B5' },
+    'blue': { name: 'Blue', hex: '#2196F3' },
+    'light-blue': { name: 'Light Blue', hex: '#03A9F4' },
+    'cyan': { name: 'Cyan', hex: '#00BCD4' },
+    'teal': { name: 'Teal', hex: '#009688' },
+    'green': { name: 'Green', hex: '#4CAF50' },
+    'light-green': { name: 'Light Green', hex: '#8BC34A' },
+    'lime': { name: 'Lime', hex: '#CDDC39' },
+    'yellow': { name: 'Yellow', hex: '#FFEB3B' },
+    'amber': { name: 'Amber', hex: '#FFC107' },
+    'orange': { name: 'Orange', hex: '#FF9800' },
+    'deep-orange': { name: 'Deep Orange', hex: '#FF5722' },
+    'brown': { name: 'Brown', hex: '#795548' },
+    'grey': { name: 'Grey', hex: '#9E9E9E' },
+    'blue-grey': { name: 'Blue Grey', hex: '#607D8B' },
+    'disabled': { name: 'Disabled', hex: '#808080' } // Default grey for off-state
+};
+
+
 class ShoppingListCardEditor extends HTMLElement {
   constructor() {
     super();
@@ -33,40 +58,32 @@ class ShoppingListCardEditor extends HTMLElement {
   _render() {
     if (!this.shadowRoot || !this._hass) return;
     
-    const colors = [
-      "red", "pink", "purple", "deep-purple", "indigo", "blue",
-      "light-blue", "cyan", "teal", "green", "light-green", "lime",
-      "yellow", "amber", "orange", "deep-orange", "brown", "grey",
-      "blue-grey", "black", "white", "disabled", "primary", "accent"
-    ];
-
     this.shadowRoot.innerHTML = `
       <style>
         .form-row { margin-bottom: 16px; }
         .grid-container { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
         .switch-row { display: flex; align-items: center; justify-content: space-between; margin-top: 24px; }
         .switch-row span { font-weight: 500; font-size: 14px; }
-        ha-textfield, ha-entity-picker, ha-icon-picker, ha-select { display: block; }
+        ha-textfield, ha-entity-picker, ha-icon-picker { display: block; }
+
+        /* Custom Dropdown Styles */
+        .color-picker-wrapper { position: relative; }
+        .color-picker-label { font-size: 12px; color: var(--secondary-text-color); margin-bottom: 4px; }
+        .color-picker-selected { display: flex; align-items: center; padding: 8px; border: 1px solid var(--divider-color); border-radius: 4px; cursor: pointer; }
+        .color-swatch { width: 20px; height: 20px; border-radius: 50%; margin-right: 8px; }
+        .color-dropdown { display: none; position: absolute; background: var(--card-background-color); border: 1px solid var(--divider-color); border-radius: 4px; max-height: 200px; overflow-y: auto; z-index: 10; width: 100%; box-shadow: 0 2px 4px rgba(0,0,0,0.2); }
+        .color-dropdown.open { display: block; }
+        .color-option { display: flex; align-items: center; padding: 8px; cursor: pointer; }
+        .color-option:hover { background-color: var(--secondary-background-color); }
       </style>
       <div class="form-row">
-        <ha-textfield
-          id="title"
-          label="Title (Required)"
-          required
-        ></ha-textfield>
+        <ha-textfield id="title" label="Title (Required)" required></ha-textfield>
       </div>
       <div class="form-row">
-        <ha-textfield
-          id="subtitle"
-          label="Subtitle (Optional)"
-        ></ha-textfield>
+        <ha-textfield id="subtitle" label="Subtitle (Optional)"></ha-textfield>
       </div>
       <div class="form-row">
-        <ha-entity-picker
-          id="todo_list"
-          label="To-do List Entity (Required)"
-          required
-        ></ha-entity-picker>
+        <ha-entity-picker id="todo_list" label="To-do List Entity (Required)" required></ha-entity-picker>
       </div>
       <div class="grid-container">
           <div class="form-row">
@@ -75,15 +92,21 @@ class ShoppingListCardEditor extends HTMLElement {
           <div class="form-row">
             <ha-icon-picker id="off_icon" label="Off-list Icon"></ha-icon-picker>
           </div>
-          <div class="form-row">
-            <ha-select id="on_color" label="On-list Color">
-              ${colors.map(color => `<mwc-list-item value="${color}">${color.replace('-', ' ')}</mwc-list-item>`).join('')}
-            </ha-select>
+          <div class="form-row color-picker-wrapper">
+              <div class="color-picker-label">On-list Color</div>
+              <div class="color-picker-selected" data-target="on_color_dropdown">
+                  <div class="color-swatch" id="on_color_swatch"></div>
+                  <span id="on_color_name"></span>
+              </div>
+              <div class="color-dropdown" id="on_color_dropdown"></div>
           </div>
-          <div class="form-row">
-            <ha-select id="off_color" label="Off-list Color">
-              ${colors.map(color => `<mwc-list-item value="${color}">${color.replace('-', ' ')}</mwc-list-item>`).join('')}
-            </ha-select>
+          <div class="form-row color-picker-wrapper">
+              <div class="color-picker-label">Off-list Color</div>
+              <div class="color-picker-selected" data-target="off_color_dropdown">
+                  <div class="color-swatch" id="off_color_swatch"></div>
+                  <span id="off_color_name"></span>
+              </div>
+              <div class="color-dropdown" id="off_color_dropdown"></div>
           </div>
       </div>
       <div class="switch-row">
@@ -93,16 +116,17 @@ class ShoppingListCardEditor extends HTMLElement {
     `;
     this._rendered = true;
     
+    this._populateColorDropdowns();
+
     const entityPicker = this.shadowRoot.querySelector('#todo_list');
     entityPicker.hass = this._hass;
     entityPicker.includeDomains = ['todo'];
     entityPicker.allowCustomEntity = false;
 
-    this.shadowRoot.querySelectorAll('ha-textfield, ha-icon-picker, ha-switch, ha-entity-picker, ha-select').forEach(el => {
+    this.shadowRoot.querySelectorAll('ha-textfield, ha-icon-picker, ha-switch, ha-entity-picker').forEach(el => {
         el.addEventListener('value-changed', () => this._handleConfigChanged());
         el.addEventListener('change', () => this._handleConfigChanged());
         el.addEventListener('input', () => this._handleConfigChanged());
-        el.addEventListener('selected', () => this._handleConfigChanged());
     });
     
     if (this._config) {
@@ -110,18 +134,71 @@ class ShoppingListCardEditor extends HTMLElement {
     }
   }
   
+  _populateColorDropdowns() {
+    const onDropdown = this.shadowRoot.querySelector('#on_color_dropdown');
+    const offDropdown = this.shadowRoot.querySelector('#off_color_dropdown');
+
+    for (const [key, value] of Object.entries(colorMap)) {
+        const createOption = (k, v) => {
+            const option = document.createElement('div');
+            option.className = 'color-option';
+            option.dataset.value = k;
+            option.innerHTML = `<div class="color-swatch" style="background-color: ${v.hex};"></div><span>${v.name}</span>`;
+            option.addEventListener('click', (e) => {
+                e.stopPropagation();
+                const dropdown = e.currentTarget.parentElement;
+                const wrapper = dropdown.parentElement;
+                wrapper.querySelector('.color-picker-selected .color-swatch').style.backgroundColor = v.hex;
+                wrapper.querySelector('.color-picker-selected span').textContent = v.name;
+                dropdown.classList.remove('open');
+                this._handleConfigChanged();
+            });
+            return option;
+        };
+        onDropdown.appendChild(createOption(key, value));
+        offDropdown.appendChild(createOption(key, value));
+    }
+    
+    this.shadowRoot.querySelectorAll('.color-picker-selected').forEach(el => {
+        el.addEventListener('click', (e) => {
+            const targetId = e.currentTarget.dataset.target;
+            this.shadowRoot.getElementById(targetId).classList.toggle('open');
+        });
+    });
+  }
+
   _updateFormValues() {
     this.shadowRoot.querySelector('#title').value = this._config.title || '';
     this.shadowRoot.querySelector('#subtitle').value = this._config.subtitle || '';
     this.shadowRoot.querySelector('#todo_list').value = this._config.todo_list || '';
     this.shadowRoot.querySelector('#on_icon').value = this._config.on_icon || 'mdi:check';
     this.shadowRoot.querySelector('#off_icon').value = this._config.off_icon || 'mdi:plus';
-    this.shadowRoot.querySelector('#on_color').value = this._config.on_color || 'green';
-    this.shadowRoot.querySelector('#off_color').value = this._config.off_color || 'disabled';
     this.shadowRoot.querySelector('#enable_quantity').checked = this._config.enable_quantity || false;
+
+    const onColorKey = this._config.on_color || 'green';
+    const offColorKey = this._config.off_color || 'disabled';
+    
+    this.shadowRoot.querySelector('#on_color_swatch').style.backgroundColor = colorMap[onColorKey].hex;
+    this.shadowRoot.querySelector('#on_color_name').textContent = colorMap[onColorKey].name;
+    this.shadowRoot.querySelector('#off_color_swatch').style.backgroundColor = colorMap[offColorKey].hex;
+    this.shadowRoot.querySelector('#off_color_name').textContent = colorMap[offColorKey].name;
   }
 
   _handleConfigChanged() {
+    // Find the selected color name from the dropdown. This is a bit more involved now.
+    const getSelectedColor = (dropdownId) => {
+      const selectedSwatch = this.shadowRoot.querySelector(`#${dropdownId}_swatch`).style.backgroundColor;
+      for (const [key, value] of Object.entries(colorMap)) {
+          // Note: Browser might convert hex to rgb() so we can't do a direct string compare.
+          // A safer, though more complex, approach would be needed for perfect matching.
+          // For now, we find based on the name displayed.
+          if(this.shadowRoot.querySelector(`#${dropdownId}_name`).textContent === value.name) {
+              return key;
+          }
+      }
+      return dropdownId === 'on_color' ? 'green' : 'disabled';
+    };
+    
     const newConfig = {
       type: 'custom:shopping-list-card',
       title: this.shadowRoot.querySelector('#title').value,
@@ -129,8 +206,8 @@ class ShoppingListCardEditor extends HTMLElement {
       todo_list: this.shadowRoot.querySelector('#todo_list').value,
       on_icon: this.shadowRoot.querySelector('#on_icon').value,
       off_icon: this.shadowRoot.querySelector('#off_icon').value,
-      on_color: this.shadowRoot.querySelector('#on_color').value,
-      off_color: this.shadowRoot.querySelector('#off_color').value,
+      on_color: getSelectedColor('on_color'),
+      off_color: getSelectedColor('off_color'),
       enable_quantity: this.shadowRoot.querySelector('#enable_quantity').checked,
     };
     
@@ -231,11 +308,13 @@ class ShoppingListCard extends HTMLElement {
 
     const onIcon = this._config.on_icon || 'mdi:check';
     const offIcon = this._config.off_icon || 'mdi:plus';
-    const onColor = this._config.on_color || 'green';
-    const offColor = this._config.off_color || 'disabled';
+    
+    // Get hex color from map, with defaults
+    const onColorHex = colorMap[this._config.on_color]?.hex || '#4CAF50';
+    const offColorHex = colorMap[this._config.off_color]?.hex || '#808080';
 
     const icon = isOn ? onIcon : offIcon;
-    const colorName = isOn ? onColor : offColor;
+    const color = isOn ? onColorHex : offColorHex;
     const stateClass = isOn ? "is-on" : "is-off";
     
     let qtyControls = '';
@@ -254,7 +333,7 @@ class ShoppingListCard extends HTMLElement {
 
     this.content.innerHTML = `
       <div class="card-container ${stateClass}">
-        <div class="icon-wrapper">
+        <div class="icon-wrapper" style="color: ${color};">
             <ha-icon icon="${icon}"></ha-icon>
         </div>
         <div class="info-container">
@@ -264,14 +343,6 @@ class ShoppingListCard extends HTMLElement {
         ${qtyControls}
       </div>
     `;
-
-    const iconWrapper = this.content.querySelector('.icon-wrapper');
-    // Check if the color is a hex code or a named color
-    const finalColor = colorName.startsWith('#') ? colorName : `rgb(var(--rgb-${colorName}))`;
-    const finalBgColor = colorName.startsWith('#') ? `${colorName}33` : `rgba(var(--rgb-${colorName}), 0.2)`;
-    
-    iconWrapper.style.color = finalColor;
-    iconWrapper.style.backgroundColor = finalBgColor;
 
     this.content.querySelector('.card-container')
       .onclick = ev => this._handleTap(ev, isOn, matched, qty, fullItemName);
@@ -379,13 +450,26 @@ class ShoppingListCard extends HTMLElement {
         display: flex;
         align-items: center;
         justify-content: center;
+        position: relative;
         width: 36px;
         height: 36px;
         border-radius: 50%;
         flex-shrink: 0;
       }
+      .icon-wrapper::before {
+        content: '';
+        position: absolute;
+        top: 0;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        background-color: currentColor;
+        opacity: 0.2;
+        border-radius: 50%;
+      }
       .icon-wrapper ha-icon {
         --mdc-icon-size: 22px;
+        position: relative;
       }
       
       .info-container { 
