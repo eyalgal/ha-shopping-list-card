@@ -1,7 +1,7 @@
 // A custom card for Home Assistant's Lovelace UI to manage a shopping list.
-// Version 25: Fixed icon colors with custom implementation and proper fonts
+// Version 23: styling tweaked to match Mushroom Template Card exactly
 
-console.log("Shopping List Card: File loaded. Version 25.");
+console.log("Shopping List Card: File loaded. Version 23.");
 
 class ShoppingListCard extends HTMLElement {
   constructor() {
@@ -92,11 +92,22 @@ class ShoppingListCard extends HTMLElement {
       `;
     }
 
+    const shapeColor = isOn
+      ? 'rgba(var(--rgb-green-color), 0.2)'
+      : 'rgba(var(--rgb-disabled-color), 0.2)';
+    const iconColor = isOn
+      ? 'rgb(var(--rgb-green-color))'
+      : 'rgb(var(--rgb-disabled-color))';
+
     this.content.innerHTML = `
-      <div class="card-container ${isOn ? 'state-on' : 'state-off'}">
-        <div class="custom-shape-icon">
+      <div class="card-container">
+        <mushroom-shape-icon
+          slot="icon"
+          shape-color="${shapeColor}"
+          icon-color="${iconColor}"
+        >
           <ha-icon icon="${icon}"></ha-icon>
-        </div>
+        </mushroom-shape-icon>
         <div class="info-container">
           <div class="primary">${this._config.title}</div>
           ${this._config.subtitle ? `<div class="secondary">${this._config.subtitle}</div>` : ''}
@@ -123,20 +134,11 @@ class ShoppingListCard extends HTMLElement {
     } else if (action === 'decrement') {
       if (qty > 1) call = this._updateQuantity(matched, qty - 1, fullItemName);
     } else {
-      // Main card click
       if (isOn) {
-        // If quantity is enabled and qty > 1, don't remove - let user use decrement
-        if (this._config.enable_quantity && qty > 1) {
-          // Do nothing on main click when qty > 1
-          this._isUpdating = false;
-          this.content.querySelector('.card-container').classList.remove('is-updating');
-          return;
-        } else {
-          // Remove item (qty = 1 or quantity not enabled)
+        if (!this._config.enable_quantity || qty === 1) {
           call = this._removeItem(matched);
         }
       } else {
-        // Add item
         call = this._addItem(fullItemName);
       }
     }
@@ -188,115 +190,78 @@ class ShoppingListCard extends HTMLElement {
       /* match Mushroom Template Card container */
       ha-card {
         border-radius: var(--ha-card-border-radius, 8px);
-        background: var(--card-background-color);
-        box-shadow: var(--ha-card-box-shadow);
-        overflow: hidden;
+        background:     var(--card-background-color);
+        box-shadow:     var(--ha-card-box-shadow);
+        overflow:       hidden;
       }
-      .card-content { 
-        padding: 0 !important; 
-      }
+      .card-content { padding: 0 !important; }
 
       /* row layout & hover */
       .card-container {
-        display: flex;
-        align-items: center;
-        padding: var(--spacing);
-        gap: var(--spacing);
-        cursor: pointer;
-        transition: background-color 0.2s;
+        display:        flex;
+        align-items:    center;
+        padding:        16px;
+        gap:            16px;
+        cursor:         pointer;
+        transition:     background-color 0.2s;
       }
       .card-container:hover {
-        background-color: var(--secondary-background-color);
+        background-color: var(--hover-background-color);
       }
       .card-container.is-updating {
-        opacity: 0.5;
-        pointer-events: none;
+        opacity:         0.5;
+        pointer-events:  none;
       }
 
-      /* Custom shape icon to replace mushroom-shape-icon */
-      .custom-shape-icon {
-        position: relative;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        width: var(--control-height);
-        height: var(--control-height);
-        border-radius: 50%;
-        flex-shrink: 0;
-        transition: all 0.2s ease;
+      /* icon size, shape, padding */
+      mushroom-shape-icon {
+        --shape-size:   40px;
+        --mdc-icon-size:24px;
+        flex-shrink:    0;
       }
-      
-      .custom-shape-icon ha-icon {
-        --mdc-icon-size: var(--control-icon-size);
-        transition: color 0.2s ease;
+      /* ensure perfect circle */
+      mushroom-shape-icon .shape {
+        border-radius:  50% !important;
       }
 
-      /* State-based colors */
-      .state-on .custom-shape-icon {
-        background-color: rgba(var(--rgb-green), 0.2);
-      }
-      .state-on .custom-shape-icon ha-icon {
-        color: rgb(var(--rgb-green));
-      }
-      .state-off .custom-shape-icon {
-        background-color: rgba(var(--rgb-state-inactive), 0.2);
-      }
-      .state-off .custom-shape-icon ha-icon {
-        color: rgb(var(--rgb-state-inactive));
-      }
-
-      /* text styles - use Mushroom variables */
-      .info-container { 
-        flex-grow: 1; 
-        overflow: hidden; 
-        min-width: 0;
-      }
+      /* text styles */
+      .info-container { flex-grow: 1; overflow: hidden; }
       .primary {
-        font-weight: var(--card-primary-font-weight);
-        font-size: var(--card-primary-font-size);
-        line-height: var(--card-primary-line-height);
-        color: var(--card-primary-color);
-        overflow: hidden;
-        text-overflow: ellipsis;
-        white-space: nowrap;
+        font-family:    var(--ha-user-font-family, var(--font-family));
+        font-size:      16px;
+        font-weight:    500;
+        line-height:    1.2;
+        color:          var(--primary-text-color);
       }
       .secondary {
-        font-weight: var(--card-secondary-font-weight);
-        font-size: var(--card-secondary-font-size);
-        line-height: var(--card-secondary-line-height);
-        color: var(--card-secondary-color);
-        overflow: hidden;
-        text-overflow: ellipsis;
-        white-space: nowrap;
+        font-family:    var(--ha-user-font-family, var(--font-family));
+        font-size:      14px;
+        font-weight:    400;
+        line-height:    1.2;
+        color:          var(--secondary-text-color);
       }
 
       /* quantity controls */
       .quantity-controls {
-        display: flex;
-        align-items: center;
-        gap: 8px;
+        display:        flex;
+        align-items:    center;
+        gap:            8px;
       }
       .quantity {
-        font-size: var(--card-primary-font-size);
-        font-weight: var(--card-primary-font-weight);
-        color: var(--card-primary-color);
-        min-width: 24px;
-        text-align: center;
+        font-size:      16px;
+        font-weight:    500;
       }
       .quantity-btn {
-        --mdc-icon-button-size: var(--control-height);
-        --mdc-icon-size: var(--control-icon-size);
+        --mdc-icon-button-size: 36px;
       }
-      .quantity-btn-placeholder { 
-        width: var(--control-height); 
-      }
+      .quantity-btn-placeholder { width: 36px; }
 
       /* warnings */
       .warning {
-        padding: var(--spacing);
-        background: var(--error-color);
-        color: var(--text-primary-color);
-        border-radius: var(--ha-card-border-radius, 8px);
+        padding:        12px;
+        background:     var(--error-color);
+        color:          var(--text-primary-color);
+        border-radius:  var(--ha-card-border-radius, 8px);
       }
     `;
     this.appendChild(style);
@@ -310,8 +275,8 @@ class ShoppingListCard extends HTMLElement {
 customElements.define("shopping-list-card", ShoppingListCard);
 window.customCards = window.customCards || [];
 window.customCards.push({
-  type: "shopping-list-card",
-  name: "Shopping List Card",
-  preview: true,
+  type:        "shopping-list-card",
+  name:        "Shopping List Card",
+  preview:     true,
   description: "A card to manage items on a shopping list."
 });
