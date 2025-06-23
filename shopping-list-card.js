@@ -65,6 +65,13 @@ class ShoppingListCardEditor extends HTMLElement {
         .switch-row { display: flex; align-items: center; justify-content: space-between; margin-top: 24px; }
         .switch-row span { font-weight: 500; font-size: 14px; }
         ha-textfield, ha-entity-picker, ha-icon-picker, ha-select { display: block; }
+        .circle-color {
+          width: 18px;
+          height: 18px;
+          border-radius: 50%;
+          background-color: var(--color);
+          border: 1px solid var(--divider-color);
+        }
       </style>
       <div class="form-row">
         <ha-textfield id="title" label="Title (Required)" required></ha-textfield>
@@ -81,7 +88,12 @@ class ShoppingListCardEditor extends HTMLElement {
           </div>
           <div class="form-row">
             <ha-select id="off_color" label="Off-list Color">
-              ${Object.keys(colorMap).map(key => `<mwc-list-item value="${key}">${colorMap[key].name}</mwc-list-item>`).join('')}
+              ${Object.entries(colorMap).map(([key, value]) => `
+                <ha-list-item value="${key}" graphic="icon">
+                  ${value.name}
+                  <span slot="graphic" class="circle-color" style="--color:${value.hex};"></span>
+                </ha-list-item>
+              `).join('')}
             </ha-select>
           </div>
           <div class="form-row">
@@ -89,7 +101,12 @@ class ShoppingListCardEditor extends HTMLElement {
           </div>
           <div class="form-row">
             <ha-select id="on_color" label="On-list Color">
-                ${Object.keys(colorMap).map(key => `<mwc-list-item value="${key}">${colorMap[key].name}</mwc-list-item>`).join('')}
+                ${Object.entries(colorMap).map(([key, value]) => `
+                <ha-list-item value="${key}" graphic="icon">
+                  ${value.name}
+                  <span slot="graphic" class="circle-color" style="--color:${value.hex};"></span>
+                </ha-list-item>
+              `).join('')}
             </ha-select>
           </div>
       </div>
@@ -109,7 +126,7 @@ class ShoppingListCardEditor extends HTMLElement {
         el.addEventListener('value-changed', () => this._handleConfigChanged());
         el.addEventListener('change', () => this._handleConfigChanged());
         el.addEventListener('input', () => this._handleConfigChanged());
-        el.addEventListener('selected', () => this._handleConfigChanged()); // For ha-select
+        el.addEventListener('selected', () => this._handleConfigChanged());
     });
     
     if (this._config) {
@@ -242,13 +259,13 @@ class ShoppingListCard extends HTMLElement {
     const onColorKey = this._config.on_color || 'green';
     const offColorKey = this._config.off_color || 'disabled';
     
-    const onColorHex = colorMap[onColorKey]?.hex || onColorKey; // Fallback to value if not in map
+    const onColorHex = colorMap[onColorKey]?.hex || onColorKey; 
     const offColorHex = colorMap[offColorKey]?.hex || offColorKey;
 
-    const icon = isOn ? onIcon : offColor;
+    const icon = isOn ? onIcon : offIcon;
     const color = isOn ? onColorHex : offColorHex;
-    const stateClass = isOn ? "is-on" : "is-off";
-    
+    const bgColor = `${color}33`; // Append 33 for ~20% opacity
+
     let qtyControls = '';
     if (isOn && this._config.enable_quantity) {
       const decBtn = qty > 1
@@ -264,8 +281,8 @@ class ShoppingListCard extends HTMLElement {
     }
 
     this.content.innerHTML = `
-      <div class="card-container ${stateClass}">
-        <div class="icon-wrapper" style="color: ${color};">
+      <div class="card-container">
+        <div class="icon-wrapper" style="color: ${color}; background-color: ${bgColor};">
             <ha-icon icon="${icon}"></ha-icon>
         </div>
         <div class="info-container">
@@ -382,26 +399,13 @@ class ShoppingListCard extends HTMLElement {
         display: flex;
         align-items: center;
         justify-content: center;
-        position: relative;
         width: 36px;
         height: 36px;
         border-radius: 50%;
         flex-shrink: 0;
       }
-      .icon-wrapper::before {
-        content: '';
-        position: absolute;
-        top: 0;
-        left: 0;
-        right: 0;
-        bottom: 0;
-        background-color: currentColor;
-        opacity: 0.2;
-        border-radius: 50%;
-      }
       .icon-wrapper ha-icon {
         --mdc-icon-size: 22px;
-        position: relative;
       }
       
       .info-container { 
