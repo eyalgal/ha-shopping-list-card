@@ -1,13 +1,13 @@
 // A custom card for Home Assistant's Lovelace UI to manage a shopping list.
-// Version 13: Forcefully applies styles via Javascript to fix stubborn icon color bug.
+// Version 11: Definitive fix for the infinite render loop by checking the entity's 'last_updated' timestamp.
 
-console.log("Shopping List Card: File loaded. Version 13.");
+console.log("Shopping List Card: File loaded. Version 11.");
 
 class ShoppingListCard extends HTMLElement {
   constructor() {
     super();
     this._isUpdating = false;
-    this._lastUpdated = null;
+    this._lastUpdated = null; // V11 FIX: Store the timestamp of the last state update.
   }
 
   // set hass is called by Home Assistant whenever the state changes.
@@ -17,8 +17,10 @@ class ShoppingListCard extends HTMLElement {
 
     const newState = hass.states[this._config.todo_list];
     
+    // V11 FIX: This is the definitive fix for the infinite loop.
+    // We only re-render if the entity's last_updated timestamp has changed.
     if (newState && newState.last_updated !== this._lastUpdated) {
-        this._lastUpdated = newState.last_updated;
+        this._lastUpdated = newState.last_updated; // Store the new timestamp.
         
         if (!this.content) {
             this.innerHTML = `<ha-card><div class="card-content"></div></ha-card>`;
@@ -88,7 +90,7 @@ class ShoppingListCard extends HTMLElement {
     }
     
     const icon = isOnList ? "mdi:check" : "mdi:plus";
-    const iconColorVar = isOnList ? "green" : "disabled";
+    const iconColor = isOnList ? "green" : "disabled";
 
     let quantityControls = '';
     if (isOnList && this._config.enable_quantity) {
@@ -107,7 +109,7 @@ class ShoppingListCard extends HTMLElement {
 
     this.content.innerHTML = `
         <div class="card-container ${this._isUpdating ? 'is-updating' : ''}">
-            <mushroom-shape-icon slot="icon">
+            <mushroom-shape-icon slot="icon" style="--icon-color:rgb(var(--rgb-${iconColor}-color)); --shape-color:rgba(var(--rgb-${iconColor}-color), 0.2);">
                 <ha-icon icon="${icon}"></ha-icon>
             </mushroom-shape-icon>
             <div class="info-container">
@@ -117,14 +119,6 @@ class ShoppingListCard extends HTMLElement {
             ${quantityControls}
         </div>
     `;
-    
-    // V13 FIX: Directly get the element and set its style variables via Javascript.
-    // This is the most forceful and reliable way to apply the styles.
-    const iconElement = this.content.querySelector('mushroom-shape-icon');
-    if (iconElement) {
-        iconElement.style.setProperty('--icon-color', `rgb(var(--rgb-${iconColorVar}-color))`);
-        iconElement.style.setProperty('--shape-color', `rgba(var(--rgb-${iconColorVar}-color), 0.2)`);
-    }
 
     this.content.querySelector('.card-container').onclick = (ev) => this._handleTap(ev, isOnList, matchedItem, quantity, fullItemName);
   }
@@ -170,7 +164,6 @@ class ShoppingListCard extends HTMLElement {
   _attachStyles() {
     if (this.querySelector("style")) return; 
     const style = document.createElement('style');
-    // V13 Change: Removed the .on and .off classes as they are no longer needed.
     style.textContent = `
         ha-card { border-radius: 12px; border-width: 0; }
         .card-content { padding: 0 !important; }
