@@ -9,55 +9,47 @@
  *
  */
 
-// Define the editor custom element
 class ShoppingListCardEditor extends HTMLElement {
   constructor() {
     super();
     this.attachShadow({ mode: 'open' });
+    this._rendered = false;
   }
 
   set hass(hass) {
     this._hass = hass;
     if (!this._rendered) {
       this._render();
-      this._rendered = true;
-    }
-    if(this._config) {
-      this.setConfig(this._config);
     }
   }
 
   setConfig(config) {
     this._config = config;
-    if (this.shadowRoot.childElementCount > 0) {
-        this.shadowRoot.querySelector('#title').value = this._config.title || '';
-        this.shadowRoot.querySelector('#subtitle').value = this._config.subtitle || '';
-        this.shadowRoot.querySelector('#todo_list').value = this._config.todo_list || '';
-        this.shadowRoot.querySelector('#enable_quantity').checked = this._config.enable_quantity || false;
+    if (this._rendered) {
+      this._updateFormValues();
     }
   }
-
+  
   _render() {
+    if (!this.shadowRoot) return;
     this.shadowRoot.innerHTML = `
       <style>
-        .form-row { display: flex; flex-direction: column; margin-bottom: 16px; }
-        .switch-row { display: flex; align-items: center; justify-content: space-between; margin-top: 16px; }
-        .switch-row span { font-weight: 500; }
-        ha-textfield { display: block; }
+        .form-row { margin-bottom: 16px; }
+        .switch-row { display: flex; align-items: center; justify-content: space-between; margin-top: 24px; }
+        .switch-row span { font-weight: 500; font-size: 14px; }
+        ha-textfield, ha-entity-picker { display: block; }
       </style>
       <div class="form-row">
         <ha-textfield
           id="title"
           label="Title (Required)"
-          .value="${this._config?.title || ''}"
           required
         ></ha-textfield>
       </div>
       <div class="form-row">
         <ha-textfield
           id="subtitle"
-          label="Subtitle"
-          .value="${this._config?.subtitle || ''}"
+          label="Subtitle (Optional)"
         ></ha-textfield>
       </div>
       <div class="form-row">
@@ -65,7 +57,6 @@ class ShoppingListCardEditor extends HTMLElement {
           id="todo_list"
           label="To-do List Entity (Required)"
           .hass="${this._hass}"
-          .value="${this._config?.todo_list || ''}"
           .includeDomains="${['todo']}"
           .allowCustomEntity=${false}
           required
@@ -73,18 +64,27 @@ class ShoppingListCardEditor extends HTMLElement {
       </div>
       <div class="switch-row">
         <span>Enable Quantity Controls</span>
-        <ha-switch
-          id="enable_quantity"
-          .checked="${this._config?.enable_quantity || false}"
-        ></ha-switch>
+        <ha-switch id="enable_quantity"></ha-switch>
       </div>
     `;
-
-    this.shadowRoot.querySelectorAll('*').forEach(el => {
-        el.addEventListener('input', () => this._handleConfigChanged());
-        el.addEventListener('change', () => this._handleConfigChanged());
-        el.addEventListener('value-changed', () => this._handleConfigChanged());
-    });
+    this._rendered = true;
+    
+    // Add event listeners
+    this.shadowRoot.querySelector('#title').addEventListener('input', () => this._handleConfigChanged());
+    this.shadowRoot.querySelector('#subtitle').addEventListener('input', () => this._handleConfigChanged());
+    this.shadowRoot.querySelector('#todo_list').addEventListener('value-changed', () => this._handleConfigChanged());
+    this.shadowRoot.querySelector('#enable_quantity').addEventListener('change', () => this._handleConfigChanged());
+    
+    if (this._config) {
+      this._updateFormValues();
+    }
+  }
+  
+  _updateFormValues() {
+    this.shadowRoot.querySelector('#title').value = this._config.title || '';
+    this.shadowRoot.querySelector('#subtitle').value = this._config.subtitle || '';
+    this.shadowRoot.querySelector('#todo_list').value = this._config.todo_list || '';
+    this.shadowRoot.querySelector('#enable_quantity').checked = this._config.enable_quantity || false;
   }
 
   _handleConfigChanged() {
@@ -105,8 +105,6 @@ class ShoppingListCardEditor extends HTMLElement {
   }
 }
 
-
-// The main card element
 class ShoppingListCard extends HTMLElement {
   constructor() {
     super();
@@ -136,7 +134,6 @@ class ShoppingListCard extends HTMLElement {
     this._config = config;
   }
   
-  // Static methods for the visual editor
   static async getConfigElement() {
     return document.createElement('shopping-list-card-editor');
   }
@@ -405,3 +402,11 @@ class ShoppingListCard extends HTMLElement {
 // Register both custom elements
 customElements.define("shopping-list-card", ShoppingListCard);
 customElements.define('shopping-list-card-editor', ShoppingListCardEditor);
+
+window.customCards = window.customCards || [];
+window.customCards.push({
+  type: "shopping-list-card",
+  name: "Shopping List Card",
+  preview: true,
+  description: "A card to manage items on a shopping list."
+});
