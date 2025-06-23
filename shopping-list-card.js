@@ -1,7 +1,7 @@
 // A custom card for Home Assistant's Lovelace UI to manage a shopping list.
-// Version 27: Forces circular icon shape and styles quantity buttons.
+// Version 28: Fixes square icon by styling a wrapper div and adjusts quantity button styles.
 
-console.log("Shopping List Card: File loaded. Version 27.");
+console.log("Shopping List Card: File loaded. Version 28.");
 
 class ShoppingListCard extends HTMLElement {
   constructor() {
@@ -78,6 +78,8 @@ class ShoppingListCard extends HTMLElement {
     }
 
     const icon = isOn ? 'mdi:check' : 'mdi:plus';
+    const stateClass = isOn ? "is-on" : "is-off";
+    
     let qtyControls = '';
     if (isOn && this._config.enable_quantity) {
       const decBtn = qty > 1
@@ -92,21 +94,13 @@ class ShoppingListCard extends HTMLElement {
       `;
     }
 
-    const shapeColor = isOn
-      ? '#4CAF5033'  // Green with ~20% opacity
-      : '#80808033'; // Grey with ~20% opacity
-    const iconColor = isOn
-      ? '#4CAF50' // Green
-      : '#808080'; // Grey
-
     this.content.innerHTML = `
-      <div class="card-container">
-        <mushroom-shape-icon
-          slot="icon"
-          style="--shape-color: ${shapeColor}; --icon-color: ${iconColor};"
-        >
-          <ha-icon icon="${icon}"></ha-icon>
-        </mushroom-shape-icon>
+      <div class="card-container ${stateClass}">
+        <div class="icon-wrapper">
+            <mushroom-shape-icon slot="icon">
+                <ha-icon icon="${icon}"></ha-icon>
+            </mushroom-shape-icon>
+        </div>
         <div class="info-container">
           <div class="primary">${this._config.title}</div>
           ${this._config.subtitle ? `<div class="secondary">${this._config.subtitle}</div>` : ''}
@@ -213,15 +207,30 @@ class ShoppingListCard extends HTMLElement {
         opacity:         0.5;
         pointer-events:  none;
       }
-
-      mushroom-shape-icon {
-        --shape-size:   40px;
-        --icon-size:    20px;
-        flex-shrink:    0;
+      
+      /* V28 FIX: Style a wrapper div to guarantee shape and color */
+      .icon-wrapper {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        width: 40px;
+        height: 40px;
+        border-radius: 50%;
+        flex-shrink: 0;
       }
-      /* V27 FIX: Force the inner shape to be a circle */
-      mushroom-shape-icon .shape {
-        border-radius:  50% !important;
+      .card-container.is-on .icon-wrapper {
+        background-color: rgba(76, 175, 80, 0.2); /* Green with opacity */
+        color: rgb(76, 175, 80); /* Green */
+      }
+      .card-container.is-off .icon-wrapper {
+        background-color: rgba(128, 128, 128, 0.2); /* Grey with opacity */
+        color: rgb(128, 128, 128); /* Grey */
+      }
+      
+      mushroom-shape-icon {
+        --shape-color: transparent !important; /* Make mushroom background transparent */
+        --icon-color: currentColor !important; /* Make icon inherit color from wrapper */
+        --icon-size: 20px;
       }
       
       .info-container { flex-grow: 1; overflow: hidden; }
@@ -249,14 +258,17 @@ class ShoppingListCard extends HTMLElement {
         font-size:      14px;
         font-weight:    500;
       }
-      /* V27 FIX: Style the quantity buttons */
+      /* V28 FIX: Style the quantity buttons */
       .quantity-btn {
-        --mdc-icon-button-size: 28px;
-        background-color: var(--divider-color, #E0E0E0);
-        border-radius: 2px;
+        --mdc-icon-button-size: 24px;
+        background-color: rgba(128, 128, 128, 0.2);
+        border-radius: 5px;
         color: var(--secondary-text-color);
       }
-      .quantity-btn-placeholder { width: 28px; }
+      .quantity-btn ha-icon {
+        --mdc-icon-size: 16px;
+      }
+      .quantity-btn-placeholder { width: 24px; }
 
       .warning {
         padding:        12px;
