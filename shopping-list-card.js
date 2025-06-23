@@ -1,78 +1,89 @@
 // shopping-list-card.js
-// Version 21: compose <mushroom-template-card> + quantity controls
+// Version 20: full Mushroom-style CSS via our own icon wrapper
 
-console.log("Shopping List Card: File loaded. Version 21");
+console.log("Shopping List Card: File loaded. Version 20.");
 
 class ShoppingListCard extends HTMLElement {
   constructor() {
     super();
-    this._config = null;
-    this._hass = null;
     this._isUpdating = false;
     this._lastUpdated = null;
-    this._styleAdded = false;
-  }
-
-  setConfig(config) {
-    if (!config.title)     throw Error("You must define a title");
-    if (!config.todo_list) throw Error("You must define a todo_list");
-    this._config = config;
   }
 
   set hass(hass) {
     this._hass = hass;
     if (!this._config) return;
-    this._render();
+
+    const s = hass.states[this._config.todo_list];
+    if (s && s.last_updated !== this._lastUpdated) {
+      this._lastUpdated = s.last_updated;
+      if (!this.content) {
+        this.innerHTML = `<ha-card><div class="card-content"></div></ha-card>`;
+        this.content = this.querySelector("div.card-content");
+        this._attachStyles();
+      }
+      this._render();
+    }
+  }
+
+  setConfig(config) {
+    if (!config.title)       throw Error("You must define a title.");
+    if (!config.todo_list)   throw Error("You must define a todo_list entity_id.");
+    this._config = config;
+  }
+
+  _escapeRegExp(str) {
+    return str.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   }
 
   async _render() {
-    const listId = this._config.todo_list;
-    const state = this._hass.states[listId];
+    this._isUpdating = false;
+    const container = this.content.querySelector('.card-container');
+    if (container) container.classList.remove('is-updating');
+
+    if (!this._config || !this._hass) return;
+    const state = this._hass.states[this._config.todo_list];
     if (!state) {
-      this.innerHTML = `<div class="warning">Entity not found: ${listId}</div>`;
+      this.content.innerHTML = `<div class="warning">Entity not found: ${this._config.todo_list}</div>`;
       return;
     }
-    // only re-render on actual updates
-    if (state.last_updated === this._lastUpdated && !this._isUpdating) return;
-    this._lastUpdated = state.last_updated;
 
-    // 1) fetch the existing items
-    let summaries = [];
-    try {
-      const resp = await this._hass.callWS({
-        type: "todo/item/list",
-        entity_id: listId
-      });
-      summaries = resp.items.map(i => i.summary);
-    } catch (e) {
-      console.error("Shopping List Card:", e);
-    }
-
-    // 2) figure out if our item is on the list + its qty
+    // 1) Build full item name
     const fullName = this._config.subtitle
       ? `${this._config.title} - ${this._config.subtitle}`
       : this._config.title;
-    const rx = new RegExp(`^${this._escape(fullName)}(?: \\((\\d+)\\))?$`, "i");
+
+    // 2) Fetch to-do items
+    let summaries = [];
+    try {
+      const resp = await this._hass.callWS({
+        type: 'todo/item/list',
+        entity_id: this._config.todo_list,
+      });
+      summaries = resp.items.map(i => i.summary);
+    } catch (e) {
+      console.error('Shopping List Card: Error fetching items.', e);
+      this.content.innerHTML = `<div class="warning">Error fetching items.</div>`;
+      return;
+    }
+
+    // 3) Detect if on list + quantity
+    const rx = new RegExp(`^${this._escapeRegExp(fullName)}(?: \\((\\d+)\\))?$`, 'i');
     let isOn = false, qty = 0, matched = null;
     for (const s of summaries) {
       const m = s.match(rx);
-      if (m) {
-        isOn = true;
-        matched = s;
-        qty = m[1] ? +m[1] : 1;
-        break;
-      }
+      if (m) { isOn = true; matched = s; qty = m[1]?+m[1]:1; break; }
     }
 
-    // 3) build the qty HTML (if enabled)
-    let qtyHTML = "";
+    // 4) Build quantity controls
+    let qtyControls = '';
     if (isOn && this._config.enable_quantity) {
       const dec = qty > 1
         ? `<ha-icon-button class="quantity-btn" data-action="decrement">
              <ha-icon icon="mdi:minus"></ha-icon>
            </ha-icon-button>`
         : `<div class="quantity-btn-placeholder"></div>`;
-      qtyHTML = `
+      qtyControls = `
         <div class="quantity-controls">
           ${dec}
           <span class="quantity">${qty}</span>
@@ -83,133 +94,172 @@ class ShoppingListCard extends HTMLElement {
       `;
     }
 
-    // 4) decide icon + colours
-    const icon = isOn ? "mdi:check" : "mdi:plus";
-    const iconColor = isOn
-      ? "rgb(var(--rgb-green-color))"
-      : "rgb(var(--rgb-disabled-color))";
+    // 5) Decide icon & colours
+    const icon = isOn ? 'mdi:check' : 'mdi:plus';
+    const bg   = isOn
+      ? 'rgba(var(--rgb-green-color), 0.2)'
+      : 'rgba(var(--rgb-disabled-color), 0.2)';
+    const fg   = isOn
+      ? 'rgb(var(--rgb-green-color))'
+      : 'rgb(var(--rgb-disabled-color))';
 
-    // 5) prepare the mushroom-template-card config
-    const tplConfig = {
-      type:            "custom:mushroom-template-card",
-      primary:         this._config.title,
-      secondary:       this._config.subtitle || undefined,
-      icon,
-      icon_color:      iconColor,
-      icon_color_off:  iconColor,
-      tap_action:      { action: "none" }   // we’ll handle taps ourselves
-    };
+    // 6) Render the card
+    this.content.innerHTML = `
+      <div class="card-container">
+        <div class="icon-wrapper" style="background-color: ${bg};">
+          <ha-icon icon="${icon}" style="color: ${fg};"></ha-icon>
+        </div>
+        <div class="info-container">
+          <div class="primary">${this._config.title}</div>
+          ${this._config.subtitle ? `<div class="secondary">${this._config.subtitle}</div>` : ''}
+        </div>
+        ${qtyControls}
+      </div>
+    `;
 
-    // 6) render
-    this.innerHTML = "";
-    if (!this._styleAdded) this._addStyles();
-
-    const wrapper = document.createElement("div");
-    wrapper.className = "shopping-list-wrapper";
-
-    // — insert the mushroom-template-card
-    const tpl = document.createElement("mushroom-template-card");
-    tpl.setConfig(tplConfig);
-    tpl.hass = this._hass;
-    wrapper.appendChild(tpl);
-
-    // — append qty controls if any
-    if (qtyHTML) {
-      const container = document.createElement("div");
-      container.innerHTML = qtyHTML;
-      // wire the +/- buttons
-      container.querySelectorAll(".quantity-btn").forEach(btn => {
-        btn.addEventListener("click", ev => {
-          ev.stopPropagation(); 
-          this._onQtyClick(ev.currentTarget.dataset.action, matched, qty, fullName);
-        });
-      });
-      wrapper.appendChild(container.firstElementChild);
-    }
-
-    // — wire the main tap (add/remove)
-    tpl.addEventListener("click", () => {
-      this._onMainClick(isOn, matched, fullName);
-    });
-
-    this.appendChild(wrapper);
+    // 7) Wire up taps & clicks
+    const row = this.content.querySelector('.card-container');
+    row.onclick = ev => this._handleTap(ev, isOn, matched, qty, fullName);
+    this.content.querySelectorAll('.quantity-btn').forEach(btn =>
+      btn.addEventListener('click', ev => {
+        ev.stopPropagation();
+        this._handleTap(ev, isOn, matched, qty, fullName);
+      })
+    );
   }
 
-  // handle add/remove
-  async _onMainClick(isOn, matched, fullName) {
+  async _handleTap(ev, isOn, matched, qty, fullName) {
     if (this._isUpdating) return;
+    ev.stopPropagation();
+    const action = ev.target.closest('.quantity-btn')?.dataset.action;
     this._isUpdating = true;
-    const svc  = isOn ? "todo.remove_item" : "todo.add_item";
-    const data = {
+    this.content.querySelector('.card-container').classList.add('is-updating');
+
+    let call;
+    if (action === 'increment') {
+      call = this._updateQuantity(matched, qty + 1, fullName);
+    } else if (action === 'decrement') {
+      if (qty > 1) call = this._updateQuantity(matched, qty - 1, fullName);
+    } else {
+      if (isOn) {
+        if (!this._config.enable_quantity || qty === 1) {
+          call = this._removeItem(matched);
+        }
+      } else {
+        call = this._addItem(fullName);
+      }
+    }
+
+    if (call) {
+      try {
+        await call;
+        this._lastUpdated = null;
+        this._render();
+      } catch (e) {
+        console.error("Shopping List Card: Service call failed", e);
+        this._isUpdating = false;
+        this.content.querySelector('.card-container').classList.remove('is-updating');
+      }
+    } else {
+      this._isUpdating = false;
+      this.content.querySelector('.card-container').classList.remove('is-updating');
+    }
+  }
+
+  _addItem(name) {
+    return this._hass.callService("todo", "add_item", {
       entity_id: this._config.todo_list,
-      item:      isOn ? matched : fullName
-    };
-    try {
-      await this._hass.callService("todo", svc, data);
-      this._lastUpdated = null;
-      this._render();
-    } catch (e) {
-      console.error(e);
-      this._isUpdating = false;
-    }
+      item: name,
+    });
+  }
+  _removeItem(item) {
+    if (!item) return Promise.resolve();
+    return this._hass.callService("todo", "remove_item", {
+      entity_id: this._config.todo_list,
+      item,
+    });
+  }
+  _updateQuantity(oldItem, newQty, fullName) {
+    const newName = newQty > 1 ? `${fullName} (${newQty})` : fullName;
+    return this._hass.callService("todo", "update_item", {
+      entity_id: this._config.todo_list,
+      item: oldItem,
+      rename: newName,
+    });
   }
 
-  // handle +/-
-  async _onQtyClick(action, matched, qty, fullName) {
-    if (this._isUpdating) return;
-    this._isUpdating = true;
-    const newQty = action === "increment" ? qty + 1 : qty - 1;
-    const rename = newQty > 1 ? `${fullName} (${newQty})` : fullName;
-    try {
-      await this._hass.callService("todo", "update_item", {
-        entity_id: this._config.todo_list,
-        item:      matched,
-        rename
-      });
-      this._lastUpdated = null;
-      this._render();
-    } catch (e) {
-      console.error(e);
-      this._isUpdating = false;
-    }
-  }
-
-  _escape(str) {
-    return str.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  }
-
-  _addStyles() {
-    this._styleAdded = true;
-    const style = document.createElement("style");
+  _attachStyles() {
+    if (this.querySelector("style")) return;
+    const style = document.createElement('style');
     style.textContent = `
-      .shopping-list-wrapper {
-        display: flex;
-        align-items: center;
-        background: var(--card-background-color);
+      /* Card shell */
+      ha-card {
         border-radius: var(--ha-card-border-radius, 4px);
+        box-shadow: var(--ha-card-box-shadow, none);
+        background: var(--card-background-color);
         overflow: hidden;
       }
-      .shopping-list-wrapper mushroom-template-card {
-        flex: 1;
+      .card-content { padding: 0 !important; }
+
+      /* Row layout */
+      .card-container {
+        display: flex;
+        align-items: center;
+        padding: 12px 16px;
+        gap: 12px;
+        cursor: pointer;
+        transition: opacity 0.3s ease-in-out;
       }
+      .card-container.is-updating {
+        opacity: 0.5;
+        pointer-events: none;
+      }
+
+      /* Icon circle */
+      .icon-wrapper {
+        flex-shrink: 0;
+        width: 40px;
+        height: 40px;
+        border-radius: 50%;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+      }
+      .icon-wrapper ha-icon {
+        width: 24px;
+        height: 24px;
+      }
+
+      /* Text */
+      .info-container { flex-grow: 1; overflow: hidden; }
+      .primary {
+        font-size: 16px;
+        font-weight: 500;
+        line-height: 1.2;
+      }
+      .secondary {
+        font-size: 14px;
+        color: var(--secondary-text-color);
+      }
+
+      /* Quantity buttons */
       .quantity-controls {
         display: flex;
         align-items: center;
-        padding-right: 12px;
+        gap: 8px;
       }
+      .quantity { font-size: 16px; font-weight: 500; }
       .quantity-btn {
         --mdc-icon-button-size: 36px;
       }
       .quantity-btn-placeholder {
         width: 36px;
       }
-      .quantity {
-        margin: 0 4px;
-        font-weight: 500;
-      }
+
+      /* Warning */
       .warning {
         padding: 12px;
-        background-color: var(--error-color);
+        background: var(--error-color);
         color: var(--text-primary-color);
         border-radius: var(--ha-card-border-radius, 4px);
       }
@@ -226,5 +276,5 @@ window.customCards.push({
   type:        "shopping-list-card",
   name:        "Shopping List Card",
   preview:     true,
-  description: "Manage your todo list with Mushroom styling + quantity controls"
+  description: "A card to manage items on a shopping list."
 });
