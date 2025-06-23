@@ -1,8 +1,7 @@
 // A custom card for Home Assistant's Lovelace UI to manage a shopping list.
-// This card is designed to look and feel like a Mushroom card.
-// Version 6: Added a global console log to test if the file is being loaded at all.
+// Version 7: Final version. Uses the correct `todo.get_items` service call for robust item detection.
 
-console.log("Shopping List Card: File loaded. Version 6.");
+console.log("Shopping List Card: File loaded. Version 7.");
 
 class ShoppingListCard extends HTMLElement {
   // set hass is called by Home Assistant whenever the state changes.
@@ -13,6 +12,7 @@ class ShoppingListCard extends HTMLElement {
       this.content = this.querySelector("div.card-content");
       this._attachStyles();
     }
+    // The main render function is now async to handle fetching items.
     this._render();
   }
 
@@ -21,9 +21,6 @@ class ShoppingListCard extends HTMLElement {
     if (!config.title) throw new Error("You must define a title.");
     if (!config.todo_list) throw new Error("You must define a todo_list entity_id.");
     this._config = config;
-    if (this._config.debug) {
-      console.log("Shopping List Card: Config Loaded", this._config);
-    }
   }
 
   // Helper to escape special characters for use in a Regular Expression.
@@ -31,42 +28,35 @@ class ShoppingListCard extends HTMLElement {
     return string.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
   }
 
-  // _render is the main function to update the card's display.
-  _render() {
+  // _render is the main function to update the card's display. It's now asynchronous.
+  async _render() {
     if (!this._config || !this._hass) return;
 
     const todoEntityId = this._config.todo_list;
     const state = this._hass.states[todoEntityId];
-    const isDebug = this._config.debug;
-
-    if (isDebug) console.log(`Shopping List Card: --- START RENDER (${this._config.title}) ---`);
 
     if (!state) {
-        this.content.innerHTML = `<div class="warning">Entity not found: ${todoEntityId}</div>`;
-        if (isDebug) console.error(`Shopping List Card: Entity ${todoEntityId} not found in hass.states.`);
-        return;
+      this.content.innerHTML = `<div class="warning">Entity not found: ${todoEntityId}</div>`;
+      return;
     }
-    
-    if (isDebug) console.log("Shopping List Card: State object for", todoEntityId, JSON.parse(JSON.stringify(state)));
 
     const fullItemName = this._config.subtitle 
         ? `${this._config.title} - ${this._config.subtitle}` 
         : this._config.title;
-    
-    if (isDebug) console.log("Shopping List Card: Constructed full item name to search for:", `"${fullItemName}"`);
 
-    // V5 FIX: Definitive item detection logic.
+    // V7 FIX: Call the official WebSocket command to get to-do items.
+    // This is the correct, robust way to do this.
     let todoSummaries = [];
-    if (state.attributes && Array.isArray(state.attributes.items)) {
-        // Modern HA: `items` is an array of objects with a `summary` key.
-        todoSummaries = state.attributes.items.map(item => item.summary).filter(Boolean);
-        if (isDebug) console.log("Shopping List Card: Found modern 'items' attribute. Summaries:", todoSummaries);
-    } else if (state.attributes && Array.isArray(state.attributes.item)) {
-        // Legacy HA: `item` is an array of strings.
-        todoSummaries = state.attributes.item;
-        if (isDebug) console.log("Shopping List Card: Found legacy 'item' attribute. Summaries:", todoSummaries);
-    } else {
-        if (isDebug) console.warn("Shopping List Card: Could not find 'items' or 'item' array in entity attributes.");
+    try {
+      const result = await this._hass.callWS({
+        type: 'todo/item/list', // This corresponds to the todo.get_items service
+        entity_id: todoEntityId,
+      });
+      todoSummaries = result.items.map(item => item.summary);
+    } catch (err) {
+      console.error('Shopping List Card: Error fetching to-do items.', err);
+      this.content.innerHTML = `<div class="warning">Error fetching items from ${todoEntityId}</div>`;
+      return;
     }
 
     const escapedItemName = this._escapeRegExp(fullItemName);
@@ -76,29 +66,23 @@ class ShoppingListCard extends HTMLElement {
     let quantity = 0;
     let matchedItem = null;
 
-    if (isDebug) console.log("Shopping List Card: Starting search with regex:", itemRegex);
+    // Search the now-correct list of items.
     for (const summary of todoSummaries) {
-        if (typeof summary !== 'string') {
-            if (isDebug) console.log(`Shopping List Card: Skipping non-string item in list:`, summary);
-            continue;
-        }
-        const match = summary.match(itemRegex);
-        if (match) {
-            if (isDebug) console.log(`Shopping List Card: SUCCESS! Found match for "${fullItemName}" in list item "${summary}"`);
-            isOnList = true;
-            matchedItem = summary;
-            quantity = match[1] ? parseInt(match[1], 10) : 1;
-            break;
-        }
+      if (typeof summary !== 'string') continue;
+      const match = summary.match(itemRegex);
+      if (match) {
+        isOnList = true;
+        matchedItem = summary;
+        quantity = match[1] ? parseInt(match[1], 10) : 1;
+        break;
+      }
     }
     
-    if (!isOnList && isDebug) console.log(`Shopping List Card: FAILED to find match for "${fullItemName}" in list.`);
-
     const icon = isOnList ? "mdi:check" : "mdi:plus";
-    // V5 FIX: Reverted to 'grey' as it's more reliable than 'disabled' for color.
     const iconColor = isOnList ? "green" : "grey";
 
     let quantityControls = '';
+    // This logic should now work correctly.
     if (isOnList && this._config.enable_quantity) {
         quantityControls = `
             <div class="quantity-controls">
@@ -123,7 +107,6 @@ class ShoppingListCard extends HTMLElement {
     `;
 
     this.content.querySelector('.card-container').onclick = (ev) => this._handleTap(ev, isOnList, matchedItem, quantity, fullItemName);
-    if (isDebug) console.log("Shopping List Card: --- END RENDER ---");
   }
 
   _handleTap(ev, isOnList, matchedItem, quantity, fullItemName) {
@@ -132,12 +115,12 @@ class ShoppingListCard extends HTMLElement {
 
     if (action === 'increment') this._updateQuantity(matchedItem, quantity + 1, fullItemName);
     else if (action === 'decrement') {
-        if (quantity > 1) this._updateQuantity(matchedItem, quantity - 1, fullItemName);
-        else this._removeItem(matchedItem);
+      if (quantity > 1) this._updateQuantity(matchedItem, quantity - 1, fullItemName);
+      else this._removeItem(matchedItem);
     } else {
-        if (isOnList) {
-            if (!this._config.enable_quantity) this._removeItem(matchedItem);
-        } else this._addItem(fullItemName);
+      if (isOnList) {
+        if (!this._config.enable_quantity) this._removeItem(matchedItem);
+      } else this._addItem(fullItemName);
     }
   }
 
