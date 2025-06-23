@@ -199,16 +199,24 @@ class ShoppingListCard extends HTMLElement {
     
     let qtyControls = '';
     if (isOn && this._config.enable_quantity) {
-      const decBtn = qty > 1
-        ? `<div class="quantity-btn" data-action="decrement"><ha-icon icon="mdi:minus"></ha-icon></div>`
-        : `<div class="quantity-btn-placeholder"></div>`;
-      qtyControls = `
-        <div class="quantity-controls">
-          ${decBtn}
-          <span class="quantity">${qty}</span>
-          <div class="quantity-btn" data-action="increment"><ha-icon icon="mdi:plus"></ha-icon></div>
-        </div>
-      `;
+      // Only show minus button if quantity > 1
+      if (qty > 1) {
+        qtyControls = `
+          <div class="quantity-controls">
+            <div class="quantity-btn" data-action="decrement"><ha-icon icon="mdi:minus"></ha-icon></div>
+            <span class="quantity">${qty}</span>
+            <div class="quantity-btn" data-action="increment"><ha-icon icon="mdi:plus"></ha-icon></div>
+          </div>
+        `;
+      } else {
+        // When quantity is 1, only show the number and plus button
+        qtyControls = `
+          <div class="quantity-controls">
+            <span class="quantity">${qty}</span>
+            <div class="quantity-btn" data-action="increment"><ha-icon icon="mdi:plus"></ha-icon></div>
+          </div>
+        `;
+      }
     }
 
     this.content.innerHTML = `
@@ -347,13 +355,20 @@ class ShoppingListCard extends HTMLElement {
         color: rgb(128, 128, 128);
       }
       
-      .info-container { flex-grow: 1; overflow: hidden; }
+       .info-container { 
+         flex-grow: 1; 
+         overflow: hidden;
+         min-width: 0;
+       }
       .primary {
         font-family:    var(--primary-font-family);
         font-size:      14px;
         font-weight:    500;
         line-height:    20px;
         color:          var(--primary-text-color);
+        white-space:    nowrap;
+        overflow:       hidden;
+        text-overflow:  ellipsis;
       }
       .secondary {
         font-family:    var(--secondary-font-family);
@@ -361,16 +376,22 @@ class ShoppingListCard extends HTMLElement {
         font-weight:    400;
         line-height:    16px;
         color:          var(--secondary-text-color);
+        white-space:    nowrap;
+        overflow:       hidden;
+        text-overflow:  ellipsis;
       }
 
       .quantity-controls {
         display:        flex;
         align-items:    center;
         gap:            4px;
+        flex-shrink:    0;
       }
       .quantity {
         font-size:      14px;
         font-weight:    500;
+        min-width:      20px;
+        text-align:     center;
       }
       .quantity-btn {
         width: 24px;
@@ -381,11 +402,11 @@ class ShoppingListCard extends HTMLElement {
         display: flex;
         align-items: center;
         justify-content: center;
+        flex-shrink: 0;
       }
       .quantity-btn ha-icon {
         --mdc-icon-size: 20px;
       }
-      .quantity-btn-placeholder { width: 24px; }
 
       .warning {
         padding:        12px;
