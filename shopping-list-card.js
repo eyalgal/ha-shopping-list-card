@@ -1,9 +1,14 @@
 // A custom card for Home Assistant's Lovelace UI to manage a shopping list.
-// Version 7: Final version. Uses the correct `todo.get_items` service call for robust item detection.
+// Version 8: Adds click-locking to prevent race conditions and implements true mushroom icon styling.
 
-console.log("Shopping List Card: File loaded. Version 7.");
+console.log("Shopping List Card: File loaded. Version 8.");
 
 class ShoppingListCard extends HTMLElement {
+  constructor() {
+    super();
+    this._isUpdating = false; // Add a lock to prevent rapid clicks.
+  }
+
   // set hass is called by Home Assistant whenever the state changes.
   set hass(hass) {
     this._hass = hass;
@@ -12,7 +17,6 @@ class ShoppingListCard extends HTMLElement {
       this.content = this.querySelector("div.card-content");
       this._attachStyles();
     }
-    // The main render function is now async to handle fetching items.
     this._render();
   }
 
@@ -28,9 +32,12 @@ class ShoppingListCard extends HTMLElement {
     return string.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
   }
 
-  // _render is the main function to update the card's display. It's now asynchronous.
+  // _render is the main function to update the card's display.
   async _render() {
     if (!this._config || !this._hass) return;
+
+    // Release the update lock now that a re-render is happening.
+    this._isUpdating = false;
 
     const todoEntityId = this._config.todo_list;
     const state = this._hass.states[todoEntityId];
@@ -44,18 +51,16 @@ class ShoppingListCard extends HTMLElement {
         ? `${this._config.title} - ${this._config.subtitle}` 
         : this._config.title;
 
-    // V7 FIX: Call the official WebSocket command to get to-do items.
-    // This is the correct, robust way to do this.
     let todoSummaries = [];
     try {
       const result = await this._hass.callWS({
-        type: 'todo/item/list', // This corresponds to the todo.get_items service
+        type: 'todo/item/list',
         entity_id: todoEntityId,
       });
       todoSummaries = result.items.map(item => item.summary);
     } catch (err) {
       console.error('Shopping List Card: Error fetching to-do items.', err);
-      this.content.innerHTML = `<div class="warning">Error fetching items from ${todoEntityId}</div>`;
+      this.content.innerHTML = `<div class="warning">Error fetching items.</div>`;
       return;
     }
 
@@ -66,7 +71,6 @@ class ShoppingListCard extends HTMLElement {
     let quantity = 0;
     let matchedItem = null;
 
-    // Search the now-correct list of items.
     for (const summary of todoSummaries) {
       if (typeof summary !== 'string') continue;
       const match = summary.match(itemRegex);
@@ -82,22 +86,27 @@ class ShoppingListCard extends HTMLElement {
     const iconColor = isOnList ? "green" : "grey";
 
     let quantityControls = '';
-    // This logic should now work correctly.
     if (isOnList && this._config.enable_quantity) {
+        // V8 FIX: Only show '-' button if quantity > 1.
+        const decrementButton = quantity > 1 
+            ? `<ha-icon-button class="quantity-btn" data-action="decrement"><ha-icon icon="mdi:minus"></ha-icon></ha-icon-button>`
+            : `<div class="quantity-btn-placeholder"></div>`; // Placeholder to keep alignment
+
         quantityControls = `
             <div class="quantity-controls">
-                <ha-icon-button class="quantity-btn" data-action="decrement"><ha-icon icon="mdi:minus"></ha-icon></ha-icon-button>
+                ${decrementButton}
                 <span class="quantity">${quantity}</span>
                 <ha-icon-button class="quantity-btn" data-action="increment"><ha-icon icon="mdi:plus"></ha-icon></ha-icon-button>
             </div>
         `;
     }
 
+    // V8 FIX: Use mushroom-shape-icon for authentic styling.
     this.content.innerHTML = `
-        <div class="card-container">
-            <div class="icon-container" style="background-color: rgba(var(--rgb-${iconColor}-color), 0.1); color: var(--${iconColor}-color);">
+        <div class="card-container ${this._isUpdating ? 'is-updating' : ''}">
+            <mushroom-shape-icon slot="icon" style="--icon-color:rgb(var(--rgb-${iconColor}-color)); --shape-color:rgba(var(--rgb-${iconColor}-color), 0.2);">
                 <ha-icon icon="${icon}"></ha-icon>
-            </div>
+            </mushroom-shape-icon>
             <div class="info-container">
                 <div class="primary">${this._config.title}</div>
                 ${this._config.subtitle ? `<div class="secondary">${this._config.subtitle}</div>` : ''}
@@ -110,17 +119,28 @@ class ShoppingListCard extends HTMLElement {
   }
 
   _handleTap(ev, isOnList, matchedItem, quantity, fullItemName) {
+    // V8 FIX: Lock the card to prevent rapid clicks.
+    if (this._isUpdating) return; 
+    
     ev.stopPropagation(); 
     const action = ev.target.closest('.quantity-btn')?.dataset.action;
 
-    if (action === 'increment') this._updateQuantity(matchedItem, quantity + 1, fullItemName);
-    else if (action === 'decrement') {
+    this._isUpdating = true;
+    this.content.querySelector('.card-container').classList.add('is-updating');
+
+    if (action === 'increment') {
+      this._updateQuantity(matchedItem, quantity + 1, fullItemName);
+    } else if (action === 'decrement') {
       if (quantity > 1) this._updateQuantity(matchedItem, quantity - 1, fullItemName);
-      else this._removeItem(matchedItem);
     } else {
       if (isOnList) {
-        if (!this._config.enable_quantity) this._removeItem(matchedItem);
-      } else this._addItem(fullItemName);
+        // V8 FIX: Main click removes if not quantity-enabled OR if quantity is 1.
+        if (!this._config.enable_quantity || quantity === 1) {
+          this._removeItem(matchedItem);
+        }
+      } else {
+        this._addItem(fullItemName);
+      }
     }
   }
 
@@ -144,14 +164,16 @@ class ShoppingListCard extends HTMLElement {
     style.textContent = `
         ha-card { border-radius: 12px; border-width: 0; }
         .card-content { padding: 0 !important; }
-        .card-container { display: flex; align-items: center; padding: 12px; cursor: pointer; }
-        .icon-container { display: flex; align-items: center; justify-content: center; width: 40px; height: 40px; border-radius: 50%; margin-right: 12px; flex-shrink: 0; }
-        .info-container { flex-grow: 1; line-height: 1.4; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .card-container { display: flex; align-items: center; padding: 12px; cursor: pointer; transition: opacity 0.3s ease-in-out; }
+        .card-container.is-updating { opacity: 0.5; pointer-events: none; }
+        mushroom-shape-icon { flex-shrink: 0; } /* V8 Style */
+        .info-container { flex-grow: 1; line-height: 1.4; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; margin-left: 12px; }
         .primary { font-weight: 500; }
         .secondary { font-size: 0.9em; color: var(--secondary-text-color); }
         .quantity-controls { display: flex; align-items: center; margin-left: 8px; }
-        .quantity { margin: 0 4px; font-weight: 500; font-size: 1.1em; }
+        .quantity { margin: 0 4px; font-weight: 500; font-size: 1.1em; text-align: center; }
         .quantity-btn { color: var(--secondary-text-color); --mdc-icon-button-size: 36px; }
+        .quantity-btn-placeholder { width: 36px; } /* V8 Style */
         .warning { padding: 12px; background-color: var(--error-color); color: var(--text-primary-color); border-radius: var(--ha-card-border-radius, 4px); }
     `;
     this.appendChild(style);
