@@ -9,7 +9,7 @@
  *
  */
 
-console.log("Shopping List Card: File loaded. Version 37 (Stable Color Picker).");
+console.log("Shopping List Card: File loaded. Version 38 (Final Editor Fix).");
 
 const colorMap = {
     'red': { name: 'Red', hex: '#F44336' },
@@ -68,7 +68,7 @@ class ShoppingListCardEditor extends HTMLElement {
         ha-textfield, ha-entity-picker, ha-icon-picker { display: block; }
         .color-input-container { display: flex; flex-direction: column; }
         .color-input-container label { font-size: 12px; color: var(--secondary-text-color); margin-bottom: 8px;}
-        input[type="color"] { width: 100%; height: 40px; border: 1px solid var(--divider-color); border-radius: 4px; padding: 4px; box-sizing: border-box; }
+        input[type="color"] { width: 100%; height: 40px; border: 1px solid var(--divider-color); border-radius: 4px; padding: 4px; box-sizing: border-box; background: var(--card-background-color, white); }
       </style>
       <div class="form-row">
         <ha-textfield id="title" label="Title (Required)" required></ha-textfield>
@@ -107,9 +107,11 @@ class ShoppingListCardEditor extends HTMLElement {
     entityPicker.includeDomains = ['todo'];
     entityPicker.allowCustomEntity = false;
 
+    // FINAL FIX: Add 'value-changed' to the event listeners to correctly capture icon picker changes.
     this.shadowRoot.querySelectorAll('ha-textfield, ha-icon-picker, ha-switch, ha-entity-picker, input[type="color"]').forEach(el => {
         el.addEventListener('change', () => this._handleConfigChanged());
         el.addEventListener('input', () => this._handleConfigChanged());
+        el.addEventListener('value-changed', () => this._handleConfigChanged());
     });
     
     if (this._config) {
@@ -123,8 +125,8 @@ class ShoppingListCardEditor extends HTMLElement {
     this.shadowRoot.querySelector('#todo_list').value = this._config.todo_list || '';
     this.shadowRoot.querySelector('#on_icon').value = this._config.on_icon || 'mdi:check';
     this.shadowRoot.querySelector('#off_icon').value = this._config.off_icon || 'mdi:plus';
-    this.shadowRoot.querySelector('#on_color').value = colorMap[this._config.on_color]?.hex || this._config.on_color || colorMap.green.hex;
-    this.shadowRoot.querySelector('#off_color').value = colorMap[this._config.off_color]?.hex || this._config.off_color || colorMap.disabled.hex;
+    this.shadowRoot.querySelector('#on_color').value = this._config.on_color || colorMap.green.hex;
+    this.shadowRoot.querySelector('#off_color').value = this._config.off_color || colorMap.disabled.hex;
     this.shadowRoot.querySelector('#enable_quantity').checked = this._config.enable_quantity || false;
   }
 
@@ -244,7 +246,7 @@ class ShoppingListCard extends HTMLElement {
 
     const icon = isOn ? onIcon : offIcon;
     const color = isOn ? onColor : offColor;
-    const bgColor = `${color}33`; // Append 33 for ~20% opacity
+    const bgColor = `${color}33`;
     
     let qtyControls = '';
     if (isOn && this._config.enable_quantity) {
