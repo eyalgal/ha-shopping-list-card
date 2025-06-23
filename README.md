@@ -2,6 +2,10 @@
 
 A simple and intuitive Lovelace card for Home Assistant to quickly add and manage items on your shopping list. This card is designed to work with the native `todo` integration and provides a clean, modern interface for your dashboard.
 
+<img src="https://github.com/user-attachments/assets/a0b4b32b-c765-456a-959c-ec2b6138e525" alt="Shopping List Card Preview" width="400"/>
+
+> *The list at the bottom of the screenshot is the standard `type: todo-list` [card](https://www.home-assistant.io/lovelace/todo-list/), used here to display the full list.*
+
 ## Features
 
 * **Visual Editor:** Easy-to-use graphical interface for card configuration.
@@ -29,16 +33,18 @@ A simple and intuitive Lovelace card for Home Assistant to quickly add and manag
 
 This card can be configured using the Visual Editor. Simply add the card to your dashboard and fill out the form.
 
+<img src="https://github.com/user-attachments/assets/cb1e4d2e-fa99-453c-b363-ead634002c6a" alt="Visual Editor" width="600"/>
+
 #### YAML Mode
 
 For advanced use cases, you can configure the card using YAML:
 
 ```yaml
 type: 'custom:shopping-list-card'
-title: 'Milk'
-subtitle: 'Lactose-free'
+title: 'Apples'
+subtitle: 'Pink Lady'
 todo_list: 'todo.shopping_list'
-enable_quantity: false
+enable_quantity: true
 ```
 
 ### Options
