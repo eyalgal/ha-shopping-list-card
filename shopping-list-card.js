@@ -1,7 +1,7 @@
 // A custom card for Home Assistant's Lovelace UI to manage a shopping list.
-// Version 30: Replaces mushroom-shape-icon with a custom styled div for guaranteed circle shape.
+// Version 31: Replaces ha-icon-button for quantity controls to fix centering.
 
-console.log("Shopping List Card: File loaded. Version 30.");
+console.log("Shopping List Card: File loaded. Version 31.");
 
 class ShoppingListCard extends HTMLElement {
   constructor() {
@@ -82,19 +82,19 @@ class ShoppingListCard extends HTMLElement {
     
     let qtyControls = '';
     if (isOn && this._config.enable_quantity) {
+      // V31 FIX: Use a simple div for the button to ensure perfect centering.
       const decBtn = qty > 1
-        ? `<ha-icon-button class="quantity-btn" data-action="decrement"><ha-icon icon="mdi:minus"></ha-icon></ha-icon-button>`
+        ? `<div class="quantity-btn" data-action="decrement"><ha-icon icon="mdi:minus"></ha-icon></div>`
         : `<div class="quantity-btn-placeholder"></div>`;
       qtyControls = `
         <div class="quantity-controls">
           ${decBtn}
           <span class="quantity">${qty}</span>
-          <ha-icon-button class="quantity-btn" data-action="increment"><ha-icon icon="mdi:plus"></ha-icon></ha-icon-button>
+          <div class="quantity-btn" data-action="increment"><ha-icon icon="mdi:plus"></ha-icon></div>
         </div>
       `;
     }
 
-    // V30 FIX: Use a simple div with a ha-icon inside for full styling control.
     this.content.innerHTML = `
       <div class="card-container ${stateClass}">
         <div class="icon-wrapper">
@@ -254,7 +254,8 @@ class ShoppingListCard extends HTMLElement {
         font-weight:    500;
       }
       .quantity-btn {
-        --mdc-icon-button-size: 24px;
+        width: 24px;
+        height: 24px;
         background-color: rgba(128, 128, 128, 0.2);
         border-radius: 5px;
         color: var(--secondary-text-color);
