@@ -1,8 +1,15 @@
+/*
+ * Shopping List Card
+ *
+ * A Home Assistant Lovelace card to manage items on a to-do list with a
+ * clean, modern interface.
+ *
+ * Author: Eyal Gal
+ * License: MIT License
+ *
+ */
+
 // A custom card for Home Assistant's Lovelace UI to manage a shopping list.
-// Version 31: Replaces ha-icon-button for quantity controls to fix centering.
-
-console.log("Shopping List Card: File loaded. Version 31.");
-
 class ShoppingListCard extends HTMLElement {
   constructor() {
     super();
@@ -82,7 +89,6 @@ class ShoppingListCard extends HTMLElement {
     
     let qtyControls = '';
     if (isOn && this._config.enable_quantity) {
-      // V31 FIX: Use a simple div for the button to ensure perfect centering.
       const decBtn = qty > 1
         ? `<div class="quantity-btn" data-action="decrement"><ha-icon icon="mdi:minus"></ha-icon></div>`
         : `<div class="quantity-btn-placeholder"></div>`;
@@ -142,15 +148,18 @@ class ShoppingListCard extends HTMLElement {
         this._render();
       } catch (e) {
         console.error("Shopping List Card: Service call failed", e);
+      } finally {
         this._isUpdating = false;
-        if (this.content.querySelector('.card-container')) {
-            this.content.querySelector('.card-container').classList.remove('is-updating');
+        const container = this.content.querySelector('.card-container');
+        if (container) {
+          container.classList.remove('is-updating');
         }
       }
     } else {
       this._isUpdating = false;
-      if (this.content.querySelector('.card-container')) {
-          this.content.querySelector('.card-container').classList.remove('is-updating');
+      const container = this.content.querySelector('.card-container');
+      if (container) {
+          container.classList.remove('is-updating');
       }
     }
   }
