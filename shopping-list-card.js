@@ -1,6 +1,8 @@
 // A custom card for Home Assistant's Lovelace UI to manage a shopping list.
 // This card is designed to look and feel like a Mushroom card.
-// Version 5: Added a debug mode and completely overhauled the item detection logic.
+// Version 6: Added a global console log to test if the file is being loaded at all.
+
+console.log("Shopping List Card: File loaded. Version 6.");
 
 class ShoppingListCard extends HTMLElement {
   // set hass is called by Home Assistant whenever the state changes.
