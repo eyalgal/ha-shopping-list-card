@@ -1,7 +1,7 @@
 // A custom card for Home Assistant's Lovelace UI to manage a shopping list.
-// Version 24: Corrects the Mushroom CSS variable names to fix the icon color.
+// Version 25: Uses hardcoded RGB values for icon styling to ensure compatibility.
 
-console.log("Shopping List Card: File loaded. Version 24.");
+console.log("Shopping List Card: File loaded. Version 25.");
 
 class ShoppingListCard extends HTMLElement {
   constructor() {
@@ -92,13 +92,13 @@ class ShoppingListCard extends HTMLElement {
       `;
     }
 
-    // FINAL FIX: Use the correct Mushroom variable names (--rgb-green, not --rgb-green-color).
+    // V25 FIX: Use hardcoded RGB values to avoid theme variable issues.
     const shapeColor = isOn
-      ? 'rgba(var(--rgb-green), 0.2)'
-      : 'rgba(var(--rgb-disabled), 0.2)';
+      ? 'rgba(76, 175, 80, 0.2)'  // Green
+      : 'rgba(128, 128, 128, 0.2)'; // Grey
     const iconColor = isOn
-      ? 'rgb(var(--rgb-green))'
-      : 'rgb(var(--rgb-disabled))';
+      ? 'rgb(76, 175, 80)' // Green
+      : 'rgb(128, 128, 128)'; // Grey
 
     this.content.innerHTML = `
       <div class="card-container">
@@ -202,8 +202,8 @@ class ShoppingListCard extends HTMLElement {
       .card-container {
         display:        flex;
         align-items:    center;
-        padding:        12px;
-        gap:            12px;
+        padding:        10px;
+        gap:            10px;
         cursor:         pointer;
         transition:     background-color 0.2s;
       }
