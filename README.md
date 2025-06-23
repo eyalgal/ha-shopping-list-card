@@ -14,7 +14,7 @@ A simple and intuitive Lovelace card for Home Assistant to quickly add and manag
 
 ## Prerequisites
 
-* **To-do List Integration:** You must have a to-do list set up via the `todo` integration. You can add one by going to **Settings > Devices & Services > Helpers** and creating a new **To-do list**.
+* **To-do List Integration:** You must have a to-do list set up via the `todo` integration. You can add one by going to **Settings > Devices & Services > Add Integration > Local To-do**.
 
 ## Installation (HACS)
 
