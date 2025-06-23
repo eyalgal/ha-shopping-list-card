@@ -9,7 +9,8 @@
  *
  */
 
-// Shared color map for the card and editor
+console.log("Shopping List Card: File loaded. Version 33.");
+
 const colorMap = {
     'red': { name: 'Red', hex: '#F44336' },
     'pink': { name: 'Pink', hex: '#E91E63' },
@@ -89,10 +90,10 @@ class ShoppingListCardEditor extends HTMLElement {
           <div class="form-row">
             <ha-select id="off_color" label="Off-list Color">
               ${Object.entries(colorMap).map(([key, value]) => `
-                <ha-list-item value="${key}" graphic="icon">
+                <mwc-list-item value="${key}">
+                  <span class="circle-color" style="--color:${value.hex};" slot="graphic"></span>
                   ${value.name}
-                  <span slot="graphic" class="circle-color" style="--color:${value.hex};"></span>
-                </ha-list-item>
+                </mwc-list-item>
               `).join('')}
             </ha-select>
           </div>
@@ -102,10 +103,10 @@ class ShoppingListCardEditor extends HTMLElement {
           <div class="form-row">
             <ha-select id="on_color" label="On-list Color">
                 ${Object.entries(colorMap).map(([key, value]) => `
-                <ha-list-item value="${key}" graphic="icon">
+                <mwc-list-item value="${key}">
+                  <span class="circle-color" style="--color:${value.hex};" slot="graphic"></span>
                   ${value.name}
-                  <span slot="graphic" class="circle-color" style="--color:${value.hex};"></span>
-                </ha-list-item>
+                </mwc-list-item>
               `).join('')}
             </ha-select>
           </div>
@@ -123,10 +124,8 @@ class ShoppingListCardEditor extends HTMLElement {
     entityPicker.allowCustomEntity = false;
 
     this.shadowRoot.querySelectorAll('ha-textfield, ha-icon-picker, ha-switch, ha-entity-picker, ha-select').forEach(el => {
-        el.addEventListener('value-changed', () => this._handleConfigChanged());
         el.addEventListener('change', () => this._handleConfigChanged());
         el.addEventListener('input', () => this._handleConfigChanged());
-        el.addEventListener('selected', () => this._handleConfigChanged());
     });
     
     if (this._config) {
@@ -264,8 +263,8 @@ class ShoppingListCard extends HTMLElement {
 
     const icon = isOn ? onIcon : offIcon;
     const color = isOn ? onColorHex : offColorHex;
-    const bgColor = `${color}33`; // Append 33 for ~20% opacity
-
+    const bgColor = `${color}33`; 
+    
     let qtyControls = '';
     if (isOn && this._config.enable_quantity) {
       const decBtn = qty > 1
