@@ -33,6 +33,7 @@ class ShoppingListCardEditor extends HTMLElement {
     this.shadowRoot.innerHTML = `
       <style>
         .row { display: flex; align-items: center; gap: 8px; margin-bottom: 16px; }
+        .switch-row { display: flex; align-items: center; gap: 8px; margin-bottom: 16px; }
         ha-textfield, ha-entity-picker, ha-icon-picker { flex-grow: 1; }
         .picker-row { display: flex; align-items: center; gap: 8px; margin-bottom: 16px; }
         input[type="color"] {
@@ -47,15 +48,15 @@ class ShoppingListCardEditor extends HTMLElement {
       </style>
 
       <div class="row">
-        <ha-textfield id="title" label="Title (Required)" required></ha-textfield>
-        <ha-textfield id="subtitle" label="Subtitle (Optional)"></ha-textfield>
-      </div>
-      <div class="row">
         <ha-entity-picker id="todo_list" label="To-Do List Entity (Required)" required></ha-entity-picker>
       </div>
       <div class="row">
+        <ha-textfield id="title" label="Title (Required)" required></ha-textfield>
+        <ha-textfield id="subtitle" label="Subtitle (Optional)"></ha-textfield>
+      </div>
+      <div class="switch-row">
         <ha-switch id="enable_quantity"></ha-switch>
-        <span style="font-weight:500;">Enable Quantity</span>
+        <span style="font-weight:500; flex-grow: 1;">Enable Quantity</span>
       </div>
       <div class="picker-row">
         <ha-icon-picker id="off_icon" label="Off Icon"></ha-icon-picker>
@@ -66,6 +67,10 @@ class ShoppingListCardEditor extends HTMLElement {
         <ha-icon-picker id="on_icon" label="On Icon"></ha-icon-picker>
         <ha-textfield id="on_color" label="On Color (name or hex)"></ha-textfield>
         <input type="color" id="on_color_picker" title="Pick on-state color" />
+      </div>
+      <div class="switch-row">
+        <ha-switch id="colorize_background"></ha-switch>
+        <span style="font-weight:500; flex-grow: 1;">Colorize card background when "On"</span>
       </div>
     `;
 
@@ -117,6 +122,7 @@ class ShoppingListCardEditor extends HTMLElement {
     s.querySelector('#subtitle').value = this._config.subtitle || '';
     s.querySelector('#todo_list').value = this._config.todo_list || '';
     s.querySelector('#enable_quantity').checked = !!this._config.enable_quantity;
+    s.querySelector('#colorize_background').checked = !!this._config.colorize_background;
 
     ['off','on'].forEach(type => {
       s.querySelector(`#${type}_icon`).value = this._config[`${type}_icon`] || ShoppingListCard[`DEFAULT_${type.toUpperCase()}_ICON`];
@@ -131,6 +137,8 @@ class ShoppingListCardEditor extends HTMLElement {
     const cfg = { type: 'custom:shopping-list-card', title: s.querySelector('#title').value, todo_list: s.querySelector('#todo_list').value };
     if (s.querySelector('#subtitle').value) cfg.subtitle = s.querySelector('#subtitle').value;
     if (s.querySelector('#enable_quantity').checked) cfg.enable_quantity = true;
+    if (s.querySelector('#colorize_background').checked) cfg.colorize_background = true;
+
     ['off','on'].forEach(type => {
       const icon = s.querySelector(`#${type}_icon`).value;
       if (icon && icon !== ShoppingListCard[`DEFAULT_${type.toUpperCase()}_ICON`]) cfg[`${type}_icon`] = icon;
@@ -254,6 +262,11 @@ class ShoppingListCard extends HTMLElement {
     const bg      = isOn ? this._toRgba(onHex, 0.2) : this._toRgba(offHex, 0.2);
     const fg      = isOn ? onHex : offHex;
 
+    let cardBgStyle = '';
+    if (isOn && this._config.colorize_background) {
+      cardBgStyle = `style="background-color: ${this._toRgba(onHex, 0.1)};"`;
+    }
+
     let qtyControls = '';
     if (isOn && this._config.enable_quantity) {
         qtyControls = `
@@ -266,7 +279,7 @@ class ShoppingListCard extends HTMLElement {
     }
 
     this.content.innerHTML = `
-      <div class="card-container ${isOn?'is-on':'is-off'}">
+      <div class="card-container ${isOn?'is-on':'is-off'}" ${cardBgStyle}>
         <div class="icon-wrapper" style="background:${bg}; color:${fg};">
           <ha-icon icon="${icon}"></ha-icon>
         </div>
@@ -306,16 +319,14 @@ class ShoppingListCard extends HTMLElement {
     if (call) {
       try {
         await call;
-        this._lastUpdated = null; // Invalidate last updated time to force a re-render on next state change
+        this._lastUpdated = null;
       } catch (e) {
         console.error('Service call failed', e);
       } finally {
-        // Always release the lock
         this._isUpdating = false;
         this.content.querySelector('.card-container')?.classList.remove('is-updating');
       }
     } else {
-        // If no call was made, release the lock immediately
         this._isUpdating = false;
         this.content.querySelector('.card-container')?.classList.remove('is-updating');
     }
