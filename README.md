@@ -1,8 +1,31 @@
 # 🛍️ Shopping List Card
+[![GitHub Release][release_badge]][release]
+[![Buy Me A Coffee][bmac_badge]][bmac]
+<!--
+[![Downloads][downloads_badge]][release]
+[![HACS Status][hacs_badge]][hacs]
+[![License][license_badge]][license]
+[![Community Forum][forum_badge]][forum] 
+-->
+
+<!-- Link references -->
+[release_badge]: https://img.shields.io/github/v/release/eyalgal/ha-shopping-list-card
+[release]: https://github.com/eyalgal/ha-shopping-list-card/releases
+[bmac_badge]: https://img.shields.io/badge/buy_me_a-coffee-yellow
+[bmac]: https://www.buymeacoffee.com/eyalgal
+<!--
+[downloads_badge]: https://img.shields.io/github/downloads/eyalgal/ha-shopping-list-card/total
+[hacs_badge]: https://img.shields.io/badge/HACS-Custom-41BDF5.svg
+[hacs]: https://hacs.xyz
+[license_badge]: https://img.shields.io/github/license/eyalgal/ha-shopping-list-card
+[license]: https://github.com/eyalgal/ha-shopping-list-card/blob/main/LICENSE
+[forum_badge]: https://img.shields.io/badge/Community-Forum-5294E2.svg
+[forum]: <!-- TODO: Add link to your HA community forum post -->
+
 
 A simple and intuitive Lovelace card for Home Assistant to quickly add and manage items on your shopping list. This card is designed to work with the native `todo` integration and provides a clean, modern interface for your dashboard.
 
-<img src="https://github.com/user-attachments/assets/5744066a-28c0-4718-af28-ed5e050fee0a" alt="Shopping List Card Preview" width="400"/>
+<img src="https://github.com/user-attachments/assets/04f2f0f0-0304-47c2-9408-30a28729752a" alt="Shopping List Card Preview" width="700"/>
 
 > *The list at the bottom of the screenshot is the standard `type: todo-list` [card](https://www.home-assistant.io/lovelace/todo-list/), used here to display the full list.*
 
@@ -12,8 +35,9 @@ A simple and intuitive Lovelace card for Home Assistant to quickly add and manag
 * **Quick Add/Remove:** Tap a card to add or remove an item from a specified to-do list.
 * **Visual Feedback:** The card's icon and color change to indicate if an item is already on the list.
 * **Case-Insensitive Matching:** Checks for items on the list without worrying about capitalization.
-* **(Optional) Quantity Control:** For items you need more than one of, you can enable `+` and `-` buttons to adjust the quantity directly from the card.
 * **Fully Customizable:** Set a primary title, a secondary subtitle, and customize the icons and colors for both "on" and "off" states.
+* **(Optional) Quantity Control:** For items you need more than one of, you can enable `+` and `-` buttons to adjust the quantity directly from the card.
+* **(Optional) Background Color:** Optionally colorize the entire card background based on the "on" state color.
 * **Standalone & Theme-Aware:** Works without any other dependencies and respects your theme's styling for fonts, colors, and border radius.
 
 ## ✅ Prerequisites
@@ -33,22 +57,21 @@ A simple and intuitive Lovelace card for Home Assistant to quickly add and manag
 
 This card can be configured using the Visual Editor. Simply add the card to your dashboard and fill out the form.
 
-<img src="https://github.com/user-attachments/assets/092b1a36-e66c-4d32-b3b9-c9babbafe6fe" alt="Visual Editor" width="600"/>
+<img src="https://github.com/user-attachments/assets/c7e6d42c-5025-4389-8bdf-1064a33a49a0" alt="Visual Editor" width="600"/>
 
 #### YAML Mode
 
 For advanced use cases, you can configure the card using YAML:
 
 ```yaml
-type: 'custom:shopping-list-card'
-title: 'Apples'
-subtitle: 'Pink Lady'
-todo_list: 'todo.shopping_list'
-enable_quantity: true
-on_icon: 'mdi:cart-check'
-on_color: 'teal'
-off_icon: 'mdi:cart-plus'
-off_color: '#333333'
+type: custom:shopping-list-card
+title: Feed Guinness
+todo_list: todo.daily_chores
+enable_quantity: false
+off_icon: mdi:paw-off
+on_icon: mdi:paw
+on_color: brown
+colorize_background: true
 ```
 
 ### Options
@@ -64,6 +87,7 @@ off_color: '#333333'
 | `on_color`        | string  | No       | The color for the "on" state (e.g., `green`, `teal`, or `#4CAF50`).             | `green`        |
 | `off_icon`        | string  | No       | The icon to display when the item is not on the list.                            | `mdi:plus`     |
 | `off_color`       | string  | No       | The color for the "off" state (e.g., `grey`, `disabled`, or `#808080`).            | `grey`         |
+| `colorize_background`       | boolean  | No       | If `true`, the card background will be tinted with the "on" state color.            | `false`          |
 
 ### Quantity Behavior
 
