@@ -142,48 +142,243 @@ customElements.define('shopping-list-card-editor',ShoppingListCardEditor);
 // ── Card ─────────────────────────────────────────────────────────────────────
 
 class ShoppingListCard extends HTMLElement {
-  static DEFAULT_ON_ICON='mdi:check';
-  static DEFAULT_OFF_ICON='mdi:plus';
-  static DEFAULT_ON_COLOR='green';
-  static DEFAULT_OFF_COLOR='grey';
-  static COLOR_MAP={red:'#F44336',pink:'#E91E63',purple:'#9C27B0','deep-purple':'#673AB7',indigo:'#3F51B5',blue:'#2196F3','light-blue':'#03A9F4',cyan:'#00BCD4',teal:'#009688',green:'#4CAF50',lime:'#CDDC39',yellow:'#FFEB3B',amber:'#FFC107',orange:'#FF9800',brown:'#795548',grey:'#9E9E9E','blue-grey':'#607D8B'};
+  // default icons
+  static DEFAULT_ON_ICON   = 'mdi:check';
+  static DEFAULT_OFF_ICON  = 'mdi:plus';
 
-  constructor(){super();this._isUpdating=false;this._lastUpdated=null;}
+  // default color *names*
+  static DEFAULT_ON_COLOR  = 'green';
+  static DEFAULT_OFF_COLOR = 'grey';
 
-  set hass(hass){
-    this._hass=hass; if(!this._config)return;
-    const st=hass.states[this._config.todo_list];
-    if(!st||st.last_updated===this._lastUpdated)return;
-    this._lastUpdated=st.last_updated;
-    if(!this.content){this.innerHTML="<ha-card><div class='card-content'></div></ha-card>";this.content=this.querySelector('.card-content');this._attachStyles();}
+  // map name → hex
+  static COLOR_MAP = {
+    red: '#F44336', pink: '#E91E63', purple: '#9C27B0',
+    'deep-purple': '#673AB7', indigo: '#3F51B5',
+    blue: '#2196F3', 'light-blue': '#03A9F4',
+    cyan: '#00BCD4', teal: '#009688', green: '#4CAF50',
+    lime: '#CDDC39', yellow: '#FFEB3B', amber: '#FFC107',
+    orange: '#FF9800', brown: '#795548', grey: '#9E9E9E',
+    'blue-grey': '#607D8B',
+  };
+
+  constructor() {
+    super();
+    this._isUpdating = false;
+    this._lastUpdated = null;
+  }
+
+  set hass(hass) {
+    this._hass = hass;
+    if (!this._config) return;
+    const st = hass.states[this._config.todo_list];
+    if (!st || st.last_updated === this._lastUpdated) return;
+    this._lastUpdated = st.last_updated;
+
+    if (!this.content) {
+      this.innerHTML = `<ha-card><div class="card-content"></div></ha-card>`;
+      this.content = this.querySelector('div.card-content');
+      this._attachStyles();
+    }
     this._render();
   }
 
-  setConfig(cfg){if(!cfg.title)throw Error('Missing title');if(!cfg.todo_list)throw Error('Missing todo_list');this._config=cfg;}
-  static getConfigElement(){return document.createElement('shopping-list-card-editor');}
-  static getStubConfig(){return{type:'custom:shopping-list-card',title:'New Item',todo_list:''};}
+  setConfig(config) {
+    if (!config.title)     throw new Error('You must define a title.');
+    if (!config.todo_list) throw new Error('You must define a todo_list entity_id.');
+    this._config = config;
+  }
 
-  _escapeRegExp(s){return s.replace(/[.*+?^${}()|[\]\\]/g,'\\$&');}
-  _getColorValue(v){if(!v)return null;return v.startsWith('#')?v:(ShoppingListCard.COLOR_MAP[v]||v);}
-  _hexToRgb(h){const m=h.replace('#','').match(/(..)(..)(..)/);return m&&{r:parseInt(m[1],16),g:parseInt(m[2],16),b:parseInt(m[3],16)};}
-  _toRgba(h,a){const c=this._hexToRgb(h);return c?`rgba(${c.r},${c.g},${c.b},${a})`:h;}
+  static getConfigElement() { return document.createElement('shopping-list-card-editor'); }
+  static getStubConfig()   { return { type: 'custom:shopping-list-card', title: 'New Item', todo_list: '' }; }
 
-  async _render(){
-    this._isUpdating=false;
-    const cnt=this.content.querySelector('.card-container');if(cnt)cnt.classList.remove('is-updating');
-    if(!this._config||!this._hass) return;
-    const state=this._hass.states[this._config.todo_list];
-    if(!state){this.content.innerHTML=`<div class='warning'>Entity not found: ${this._config.todo_list}</div>`;return;}
-    const full=this._config.subtitle?`${this._config.title} - ${this._config.subtitle}`:this._config.title;
-    let items=[];try{const res=await this._hass.callWS({type:'todo/item/list',entity_id:this._config.todo_list});items=res.items.map(i=>i.summary);}catch{this.content.innerHTML="<div class='warning'>Error fetching items.</div>";return;}
-    const rx=new RegExp(`^${this._escapeRegExp(full)}(?: \\(\d+\))?$`,'i');let isOn=false,qty=0,match=null;
-    for(const s of items){const m=s.match(rx);if(m){isOn=true;match=s;qty=m[1]?+m[1]:1;break;}}
-    const onI=this._config.on_icon||ShoppingListCard.DEFAULT_ON_ICON;
-    const offI=this._config.off_icon||ShoppingListCard.DEFAULT_OFF_ICON;
-    const onC=this._getColorValue(this._config.on_color||ShoppingListCard.DEFAULT_ON_COLOR)||'#4CAF50';
-    const offC=this._getColorValue(this._config.off_color||ShoppingListCard.DEFAULT_OFF_COLOR)||'#808080';
-    const icon=isOn?onI:offI;
-    const bg=isOn?this._toRgba(onC,0.2):this._toRgba(offC,0.2);
-    const fg=isOn?onC:offC;
-    let qc='';if(isOn&&this._config.enable_quantity){if(qty>1){qc=`<div class='quantity-controls'><div class='quantity-btn' data-action='decrement'><ha-icon icon='mdi:minus'></ha-icon></div><span class='quantity'>${qty}</span><div class='quantity-btn' data-action='increment'><ha-icon icon='mdi:plus'></ha-icon></div></div>`;}else{qc=`<div class='quantity-controls'><span class='quantity'>${qty}</span><div class='quantity-btn' data-action='increment'><ha-icon icon='mdi:plus'></ha-icon></div></div>`;}}
-    this.content.innerHTML=`<div class='card-container ${isOn?'is-on':'is-off'}'><div class='icon-wrapper' style='background:${bg};color:${fg};'><ha-icon icon='${icon
+  _escapeRegExp(s) { return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); }
+
+  _getColorValue(val) {
+    if (!val) return null;
+    if (val.startsWith('#')) return val;
+    return ShoppingListCard.COLOR_MAP[val] || val;
+  }
+
+  _hexToRgb(hex) {
+    const m = hex.replace('#','').match(/^(.{2})(.{2})(.{2})$/);
+    return m && { r: parseInt(m[1],16), g: parseInt(m[2],16), b: parseInt(m[3],16) };
+  }
+
+  _toRgba(hex, a) {
+    const c = this._hexToRgb(hex);
+    return c ? `rgba(${c.r}, ${c.g}, ${c.b}, ${a})` : hex;
+  }
+
+  async _render() {
+    this._isUpdating = false;
+    const container = this.content.querySelector('.card-container');
+    if (container) container.classList.remove('is-updating');
+    if (!this._config || !this._hass) return;
+
+    const state = this._hass.states[this._config.todo_list];
+    if (!state) {
+      this.content.innerHTML = `<div class="warning">Entity not found: ${this._config.todo_list}</div>`;
+      return;
+    }
+
+    const fullName = this._config.subtitle
+      ? `${this._config.title} - ${this._config.subtitle}`
+      : this._config.title;
+
+    let summaries = [];
+    try {
+      const res = await this._hass.callWS({
+        type: 'todo/item/list',
+        entity_id: this._config.todo_list,
+      });
+      summaries = res.items.map(i => i.summary);
+    } catch (e) {
+      console.error('Error fetching items', e);
+      this.content.innerHTML = `<div class="warning">Error fetching items.</div>`;
+      return;
+    }
+
+    const rx = new RegExp(`^${this._escapeRegExp(fullName)}(?: \\((\\d+)\\))?$`, 'i');
+    let isOn = false, qty = 0, matched = null;
+    for (const s of summaries) {
+      const m = s.match(rx);
+      if (m) { isOn = true; matched = s; qty = m[1] ? +m[1] : 1; break; }
+    }
+
+    // pick icons/colors
+    const onIcon   = this._config.on_icon  || ShoppingListCard.DEFAULT_ON_ICON;
+    const offIcon  = this._config.off_icon || ShoppingListCard.DEFAULT_OFF_ICON;
+    const onColorN = this._config.on_color  || ShoppingListCard.DEFAULT_ON_COLOR;
+    const offColorN= this._config.off_color || ShoppingListCard.DEFAULT_OFF_COLOR;
+    const onHex    = this._getColorValue(onColorN)  || '#4CAF50';
+    const offHex   = this._getColorValue(offColorN) || '#808080';
+
+    const icon    = isOn ? onIcon : offIcon;
+    const bg      = isOn ? this._toRgba(onHex, 0.2) : this._toRgba(offHex, 0.2);
+    const fg      = isOn ? onHex : offHex;
+
+    let qtyControls = '';
+    if (isOn && this._config.enable_quantity) {
+      if (qty > 1) {
+        qtyControls = `
+          <div class="quantity-controls">
+            <div class="quantity-btn" data-action="decrement"><ha-icon icon="mdi:minus"></ha-icon></div>
+            <span class="quantity">${qty}</span>
+            <div class="quantity-btn" data-action="increment"><ha-icon icon="mdi:plus"></ha-icon></div>
+          </div>
+        `;
+      } else {
+        qtyControls = `
+          <div class="quantity-controls">
+            <span class="quantity">${qty}</span>
+            <div class="quantity-btn" data-action="increment"><ha-icon icon="mdi:plus"></ha-icon></div>
+          </div>
+        `;
+      }
+    }
+
+    this.content.innerHTML = `
+      <div class="card-container ${isOn?'is-on':'is-off'}">
+        <div class="icon-wrapper" style="background:${bg}; color:${fg};">
+          <ha-icon icon="${icon}"></ha-icon>
+        </div>
+        <div class="info-container">
+          <div class="primary">${this._config.title}</div>
+          ${this._config.subtitle?`<div class="secondary">${this._config.subtitle}</div>`:''}
+        </div>
+        ${qtyControls}
+      </div>
+    `;
+
+    this.content.querySelector('.card-container')
+      .onclick = ev => this._handleTap(ev, isOn, matched, qty, fullName);
+  }
+
+  async _handleTap(ev, isOn, matched, qty, fullName) {
+    if (this._isUpdating) return;
+    ev.stopPropagation();
+    const action = ev.target.closest('.quantity-btn')?.dataset.action;
+
+    this._isUpdating = true;
+    this.content.querySelector('.card-container').classList.add('is-updating');
+
+    let call;
+    if (action === 'increment') {
+      call = this._updateQuantity(matched, qty+1, fullName);
+    } else if (action === 'decrement') {
+      if (qty>1) call = this._updateQuantity(matched, qty-1, fullName);
+    } else {
+      if (isOn) {
+        if (!this._config.enable_quantity || qty===1) call = this._removeItem(matched);
+      } else {
+        call = this._addItem(fullName);
+      }
+    }
+
+    if (call) {
+      try {
+        await call;
+        this._lastUpdated = null;
+        await this._render();
+      } catch (e) {
+        console.error('Service call failed', e);
+      }
+    }
+
+    this._isUpdating = false;
+    this.content.querySelector('.card-container')?.classList.remove('is-updating');
+  }
+
+  _addItem(name) {
+    return this._hass.callService('todo','add_item',{ entity_id: this._config.todo_list, item: name });
+  }
+
+  _removeItem(item) {
+    return item
+      ? this._hass.callService('todo','remove_item',{ entity_id: this._config.todo_list, item })
+      : Promise.resolve();
+  }
+
+  _updateQuantity(oldItem,newQty,fullName) {
+    const newName = newQty>1 ? `${fullName} (${newQty})` : fullName;
+    return this._hass.callService('todo','update_item',{
+      entity_id: this._config.todo_list,
+      item: oldItem,
+      rename: newName,
+    });
+  }
+
+  _attachStyles() {
+    if (this.querySelector('style')) return;
+    const s = document.createElement('style');
+    s.textContent = `
+      ha-card { border-radius: var(--ha-card-border-radius,12px); background: var(--card-background-color); box-shadow: var(--ha-card-box-shadow); overflow:hidden }
+      .card-content { padding:0 !important }
+      .card-container { display:flex; align-items:center; padding:10px; gap:10px; cursor:pointer; transition:background-color .2s }
+      .card-container:hover { background: var(--secondary-background-color) }
+      .icon-wrapper { display:flex; align-items:center; justify-content:center; width:36px; height:36px; border-radius:50%; flex-shrink:0 }
+      .info-container { flex-grow:1; overflow:hidden; min-width:0 }
+      .primary { font-size:14px; font-weight:500; line-height:20px; color:var(--primary-text-color); white-space:nowrap; overflow:hidden; text-overflow:ellipsis }
+      .secondary { font-size:12px; font-weight:400; line-height:16px; color:var(--secondary-text-color); white-space:nowrap; overflow:hidden; text-overflow:ellipsis }
+      .quantity-controls { display:flex; align-items:center; gap:4px; flex-shrink:0 }
+      .quantity { font-size:14px; font-weight:500; min-width:20px; text-align:center }
+      .quantity-btn { width:24px; height:24px; background:rgba(128,128,128,0.2); border-radius:5px; display:flex; align-items:center; justify-content:center }
+      .warning { padding:12px; background:var(--error-color); color:var(--text-primary-color); border-radius:var(--ha-card-border-radius,12px) }
+    `;
+    this.appendChild(s);
+  }
+
+  getCardSize() {
+    return 1;
+  }
+}
+
+customElements.define('shopping-list-card', ShoppingListCard);
+
+window.customCards = window.customCards || [];
+window.customCards.push({
+  type: 'shopping-list-card',
+  name: 'Shopping List Card',
+  preview: true,
+  description: 'A card to manage items on a shopping list.',
+});
