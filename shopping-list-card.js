@@ -33,42 +33,34 @@ class ShoppingListCardEditor extends HTMLElement {
     this.shadowRoot.innerHTML = `
       <style>
         .row { display: flex; align-items: center; gap: 8px; margin-bottom: 16px; }
-        ha-textfield, ha-entity-picker, ha-icon-picker { display: block; width: 100%; }
+        ha-textfield, ha-entity-picker, ha-icon-picker { flex-grow: 1; }
         .picker-row { display: flex; align-items: center; gap: 8px; margin-bottom: 16px; }
-        .picker-row input[type="color"] {
-          width: 24px;
-          height: 24px;
+        input[type="color"] {
+          width: 32px;
+          height: 32px;
           padding: 0;
           border: 1px solid var(--divider-color, #888);
           border-radius: 50%;
+          cursor: pointer;
         }
       </style>
 
-      <!-- Title + Subtitle -->
       <div class="row">
         <ha-textfield id="title" label="Title (Required)" required></ha-textfield>
         <ha-textfield id="subtitle" label="Subtitle (Optional)"></ha-textfield>
       </div>
-
-      <!-- Entity Picker -->
       <div class="row">
         <ha-entity-picker id="todo_list" label="To-Do List Entity (Required)" required></ha-entity-picker>
       </div>
-
-      <!-- Quantity -->
       <div class="row">
         <ha-switch id="enable_quantity"></ha-switch>
         <span style="font-weight:500;">Enable Quantity</span>
       </div>
-
-      <!-- Off state icon + color picker -->
       <div class="picker-row">
         <ha-icon-picker id="off_icon" label="Off Icon"></ha-icon-picker>
         <ha-textfield id="off_color" label="Off Color (name or hex)"></ha-textfield>
         <input type="color" id="off_color_picker" title="Pick off-state color" />
       </div>
-
-      <!-- On state icon + color picker -->
       <div class="picker-row">
         <ha-icon-picker id="on_icon" label="On Icon"></ha-icon-picker>
         <ha-textfield id="on_color" label="On Color (name or hex)"></ha-textfield>
@@ -76,26 +68,26 @@ class ShoppingListCardEditor extends HTMLElement {
       </div>
     `;
 
-    // Setup entity picker
+    // Setup pickers
     const ep = this.shadowRoot.querySelector('#todo_list');
     ep.hass = this._hass;
     ep.includeDomains = ['todo'];
     ep.allowCustomEntity = false;
 
-    // Initialize both icon-pickers and force icon list fetch
     ['off_icon', 'on_icon'].forEach(id => {
-      const ip = this.shadowRoot.querySelector(`#${id}`);
-      ip.hass = this._hass;
-      if (ip._fetchIcons) {
-        ip._fetchIcons();
-      }
+      this.shadowRoot.querySelector(`#${id}`).hass = this._hass;
     });
 
-    // Link color pickers + textfields
+    // Add all event listeners
+    this.shadowRoot.querySelectorAll('ha-textfield, ha-switch, ha-entity-picker, ha-icon-picker').forEach(el => {
+        el.addEventListener('input', () => this._handleConfigChanged());
+        el.addEventListener('change', () => this._handleConfigChanged());
+        el.addEventListener('value-changed', () => this._handleConfigChanged());
+    });
+
     ['off','on'].forEach(type => {
       const tf = this.shadowRoot.querySelector(`#${type}_color`);
       const cp = this.shadowRoot.querySelector(`#${type}_color_picker`);
-      cp.value = this._getEditorHex(this._config?.[`${type}_color`]);
       cp.addEventListener('input', () => {
         tf.value = cp.value;
         this._handleConfigChanged();
@@ -105,17 +97,6 @@ class ShoppingListCardEditor extends HTMLElement {
         if (hex) cp.value = hex;
         this._handleConfigChanged();
       });
-    });
-
-    // Other listeners
-    ['title','subtitle'].forEach(id => {
-      this.shadowRoot.querySelector(`#${id}`).addEventListener('input', () => this._handleConfigChanged());
-    });
-    this.shadowRoot.querySelector('#enable_quantity')
-      .addEventListener('change', () => this._handleConfigChanged());
-    ep.addEventListener('value-changed', () => this._handleConfigChanged());
-    ['off_icon','on_icon'].forEach(id => {
-      this.shadowRoot.querySelector(`#${id}`).addEventListener('value-changed', () => this._handleConfigChanged());
     });
 
     this._rendered = true;
@@ -137,13 +118,10 @@ class ShoppingListCardEditor extends HTMLElement {
     s.querySelector('#enable_quantity').checked = !!this._config.enable_quantity;
 
     ['off','on'].forEach(type => {
-      const ic = this._config[`${type}_icon`] || ShoppingListCard[`DEFAULT_${type.toUpperCase()}_ICON`];
-      s.querySelector(`#${type}_icon`).value = ic;
+      s.querySelector(`#${type}_icon`).value = this._config[`${type}_icon`] || ShoppingListCard[`DEFAULT_${type.toUpperCase()}_ICON`];
       const col = this._config[`${type}_color`] || ShoppingListCard[`DEFAULT_${type.toUpperCase()}_COLOR`];
-      const tf = s.querySelector(`#${type}_color`);
-      const cp = s.querySelector(`#${type}_color_picker`);
-      tf.value = col;
-      cp.value = this._getEditorHex(col);
+      s.querySelector(`#${type}_color`).value = col;
+      s.querySelector(`#${type}_color_picker`).value = this._getEditorHex(col);
     });
   }
 
@@ -162,20 +140,16 @@ class ShoppingListCardEditor extends HTMLElement {
   }
 }
 
-customElements.define('shopping-list-card-editor', ShoppingListCardEditor);, ShoppingListCardEditor);
+// FIX: Removed the extra comma and object from the end of this line.
+customElements.define('shopping-list-card-editor', ShoppingListCardEditor);
 
 // ── Card ─────────────────────────────────────────────────────────────────────
 
 class ShoppingListCard extends HTMLElement {
-  // default icons
   static DEFAULT_ON_ICON   = 'mdi:check';
   static DEFAULT_OFF_ICON  = 'mdi:plus';
-
-  // default color *names*
   static DEFAULT_ON_COLOR  = 'green';
   static DEFAULT_OFF_COLOR = 'grey';
-
-  // map name → hex
   static COLOR_MAP = {
     red: '#F44336', pink: '#E91E63', purple: '#9C27B0',
     'deep-purple': '#673AB7', indigo: '#3F51B5',
@@ -214,19 +188,19 @@ class ShoppingListCard extends HTMLElement {
   }
 
   static getConfigElement() { return document.createElement('shopping-list-card-editor'); }
-  static getStubConfig()   { return { type: 'custom:shopping-list-card', title: 'New Item', todo_list: '' }; }
+  static getStubConfig()    { return { type: 'custom:shopping-list-card', title: 'New Item', todo_list: '' }; }
 
   _escapeRegExp(s) { return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); }
 
   _getColorValue(val) {
     if (!val) return null;
     if (val.startsWith('#')) return val;
-    return ShoppingListCard.COLOR_MAP[val] || val;
+    return ShoppingListCard.COLOR_MAP[val.toLowerCase()] || val;
   }
 
   _hexToRgb(hex) {
     const m = hex.replace('#','').match(/^(.{2})(.{2})(.{2})$/);
-    return m && { r: parseInt(m[1],16), g: parseInt(m[2],16), b: parseInt(m[3],16) };
+    return m ? { r: parseInt(m[1],16), g: parseInt(m[2],16), b: parseInt(m[3],16) } : null;
   }
 
   _toRgba(hex, a) {
@@ -270,13 +244,12 @@ class ShoppingListCard extends HTMLElement {
       if (m) { isOn = true; matched = s; qty = m[1] ? +m[1] : 1; break; }
     }
 
-    // pick icons/colors
-    const onIcon   = this._config.on_icon  || ShoppingListCard.DEFAULT_ON_ICON;
-    const offIcon  = this._config.off_icon || ShoppingListCard.DEFAULT_OFF_ICON;
-    const onColorN = this._config.on_color  || ShoppingListCard.DEFAULT_ON_COLOR;
-    const offColorN= this._config.off_color || ShoppingListCard.DEFAULT_OFF_COLOR;
-    const onHex    = this._getColorValue(onColorN)  || '#4CAF50';
-    const offHex   = this._getColorValue(offColorN) || '#808080';
+    const onIcon    = this._config.on_icon   || ShoppingListCard.DEFAULT_ON_ICON;
+    const offIcon   = this._config.off_icon  || ShoppingListCard.DEFAULT_OFF_ICON;
+    const onColorN  = this._config.on_color  || ShoppingListCard.DEFAULT_ON_COLOR;
+    const offColorN = this._config.off_color || ShoppingListCard.DEFAULT_OFF_COLOR;
+    const onHex     = this._getColorValue(onColorN)  || '#4CAF50';
+    const offHex    = this._getColorValue(offColorN) || '#808080';
 
     const icon    = isOn ? onIcon : offIcon;
     const bg      = isOn ? this._toRgba(onHex, 0.2) : this._toRgba(offHex, 0.2);
@@ -284,22 +257,17 @@ class ShoppingListCard extends HTMLElement {
 
     let qtyControls = '';
     if (isOn && this._config.enable_quantity) {
-      if (qty > 1) {
+        let decBtn = `<div class="quantity-btn-placeholder"></div>`;
+        if (qty > 1) {
+            decBtn = `<div class="quantity-btn" data-action="decrement"><ha-icon icon="mdi:minus"></ha-icon></div>`;
+        }
         qtyControls = `
-          <div class="quantity-controls">
-            <div class="quantity-btn" data-action="decrement"><ha-icon icon="mdi:minus"></ha-icon></div>
-            <span class="quantity">${qty}</span>
-            <div class="quantity-btn" data-action="increment"><ha-icon icon="mdi:plus"></ha-icon></div>
-          </div>
+            <div class="quantity-controls">
+                ${decBtn}
+                <span class="quantity">${qty}</span>
+                <div class="quantity-btn" data-action="increment"><ha-icon icon="mdi:plus"></ha-icon></div>
+            </div>
         `;
-      } else {
-        qtyControls = `
-          <div class="quantity-controls">
-            <span class="quantity">${qty}</span>
-            <div class="quantity-btn" data-action="increment"><ha-icon icon="mdi:plus"></ha-icon></div>
-          </div>
-        `;
-      }
     }
 
     this.content.innerHTML = `
@@ -388,6 +356,8 @@ class ShoppingListCard extends HTMLElement {
       .quantity-controls { display:flex; align-items:center; gap:4px; flex-shrink:0 }
       .quantity { font-size:14px; font-weight:500; min-width:20px; text-align:center }
       .quantity-btn { width:24px; height:24px; background:rgba(128,128,128,0.2); border-radius:5px; display:flex; align-items:center; justify-content:center }
+      .quantity-btn-placeholder { width: 24px; height: 24px; }
+      .quantity-btn ha-icon { --mdc-icon-size: 20px; }
       .warning { padding:12px; background:var(--error-color); color:var(--text-primary-color); border-radius:var(--ha-card-border-radius,12px) }
     `;
     this.appendChild(s);
