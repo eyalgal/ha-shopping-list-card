@@ -248,11 +248,13 @@ class ShoppingListCard extends HTMLElement {
 
     let summaries = [];
     try {
-      const res = await this._hass.callWS({
-        type: 'todo/item/list',
-        entity_id: this._config.todo_list,
-      });
-      summaries = res.items.map(i => i.summary);
+	  const res = await this._hass.callWS({
+	    type: 'todo/item/list',
+	    entity_id: this._config.todo_list,
+	  });
+	  summaries = res.items
+	    .filter(item => item.status === 'needs_action')
+	    .map(item => item.summary);
     } catch (e) {
       console.error('Error fetching items', e);
       this.content.innerHTML = `<div class="warning">Error fetching items.</div>`;
