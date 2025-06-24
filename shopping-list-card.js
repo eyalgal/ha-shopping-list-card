@@ -1,10 +1,10 @@
-/**
+/*
  * Shopping List Card
  *
  * A Home Assistant Lovelace card to manage items on a to-do list with a
  * clean, modern interface and a visual editor.
  *
- * Created by: eyalgal
+ * Author: eyalgal
  * License: MIT
  */
 
@@ -40,7 +40,7 @@ class ShoppingListCardEditor extends HTMLElement {
           height: 40px;
           padding: 0;
           border: 1px solid var(--divider-color, #888);
-          border-radius: 4px; /* Changed from 50% */
+          border-radius: 4px;
           cursor: pointer;
           background: none;
         }
@@ -145,10 +145,10 @@ customElements.define('shopping-list-card-editor', ShoppingListCardEditor);
 // ── Card ─────────────────────────────────────────────────────────────────────
 
 class ShoppingListCard extends HTMLElement {
-  static DEFAULT_ON_ICON   = 'mdi:check';
-  static DEFAULT_OFF_ICON  = 'mdi:plus';
-  static DEFAULT_ON_COLOR  = 'green';
-  static DEFAULT_OFF_COLOR = 'grey';
+  static DEFAULT_ON_ICON    = 'mdi:check';
+  static DEFAULT_OFF_ICON   = 'mdi:plus';
+  static DEFAULT_ON_COLOR   = 'green';
+  static DEFAULT_OFF_COLOR  = 'grey';
   static COLOR_MAP = {
     red: '#F44336', pink: '#E91E63', purple: '#9C27B0',
     'deep-purple': '#673AB7', indigo: '#3F51B5',
@@ -256,13 +256,9 @@ class ShoppingListCard extends HTMLElement {
 
     let qtyControls = '';
     if (isOn && this._config.enable_quantity) {
-        let decBtn = `<div class="quantity-btn-placeholder"></div>`;
-        if (qty > 1) {
-            decBtn = `<div class="quantity-btn" data-action="decrement"><ha-icon icon="mdi:minus"></ha-icon></div>`;
-        }
         qtyControls = `
             <div class="quantity-controls">
-                ${decBtn}
+                ${qty > 1 ? `<div class="quantity-btn" data-action="decrement"><ha-icon icon="mdi:minus"></ha-icon></div>` : ''}
                 <span class="quantity">${qty}</span>
                 <div class="quantity-btn" data-action="increment"><ha-icon icon="mdi:plus"></ha-icon></div>
             </div>
@@ -310,15 +306,19 @@ class ShoppingListCard extends HTMLElement {
     if (call) {
       try {
         await call;
-        this._lastUpdated = null;
-        await this._render();
+        this._lastUpdated = null; // Invalidate last updated time to force a re-render on next state change
       } catch (e) {
         console.error('Service call failed', e);
+      } finally {
+        // Always release the lock
+        this._isUpdating = false;
+        this.content.querySelector('.card-container')?.classList.remove('is-updating');
       }
+    } else {
+        // If no call was made, release the lock immediately
+        this._isUpdating = false;
+        this.content.querySelector('.card-container')?.classList.remove('is-updating');
     }
-
-    this._isUpdating = false;
-    this.content.querySelector('.card-container')?.classList.remove('is-updating');
   }
 
   _addItem(name) {
@@ -355,7 +355,6 @@ class ShoppingListCard extends HTMLElement {
       .quantity-controls { display:flex; align-items:center; gap:4px; flex-shrink:0 }
       .quantity { font-size:14px; font-weight:500; min-width:20px; text-align:center }
       .quantity-btn { width:24px; height:24px; background:rgba(128,128,128,0.2); border-radius:5px; display:flex; align-items:center; justify-content:center }
-      .quantity-btn-placeholder { width: 24px; height: 24px; }
       .quantity-btn ha-icon { --mdc-icon-size: 20px; }
       .warning { padding:12px; background:var(--error-color); color:var(--text-primary-color); border-radius:var(--ha-card-border-radius,12px) }
     `;
@@ -366,9 +365,7 @@ class ShoppingListCard extends HTMLElement {
     return 1;
   }
 }
-
 customElements.define('shopping-list-card', ShoppingListCard);
-
 window.customCards = window.customCards || [];
 window.customCards.push({
   type: 'shopping-list-card',
