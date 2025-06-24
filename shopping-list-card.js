@@ -35,76 +35,74 @@ class ShoppingListCardEditor extends HTMLElement {
         .row { display: flex; gap: 8px; margin-bottom: 16px; }
         .row-full { display: flex; margin-bottom: 16px; }
         .row-full ha-entity-picker { flex: 1; }
-        ha-textfield, ha-entity-picker, ha-icon-picker, ha-select { display: block; }
+        ha-textfield, ha-entity-picker, ha-icon-picker, mwc-select { display: block; }
       </style>
 
       <!-- Title + Subtitle -->
-      <div class='row'>
-        <ha-textfield id='title' label='Title (Required)' required></ha-textfield>
-        <ha-textfield id='subtitle' label='Subtitle (Optional)'></ha-textfield>
+      <div class="row">
+        <ha-textfield id="title" label="Title (Required)" required></ha-textfield>
+        <ha-textfield id="subtitle" label="Subtitle (Optional)"></ha-textfield>
       </div>
 
       <!-- Entity Picker -->
-      <div class='row-full'>
-        <ha-entity-picker id='todo_list' label='To-Do List Entity (Required)' required></ha-entity-picker>
+      <div class="row-full">
+        <ha-entity-picker id="todo_list" label="To-Do List Entity (Required)" required></ha-entity-picker>
       </div>
 
       <!-- Quantity -->
-      <div class='row-full'>
-        <span style='align-self:center; margin-right:8px; font-weight:500;'>Enable Quantity Controls</span>
-        <ha-switch id='enable_quantity'></ha-switch>
+      <div class="row-full">
+        <span style="align-self:center; margin-right:8px; font-weight:500;">Enable Quantity Controls</span>
+        <ha-switch id="enable_quantity"></ha-switch>
       </div>
 
       <!-- Off state icon + color -->
-      <div class='row'>
-        <ha-icon-picker id='off_icon' label='Off Icon'></ha-icon-picker>
-        <ha-select id='off_color' label='Off Color'></ha-select>
+      <div class="row">
+        <ha-icon-picker id="off_icon" label="Off Icon"></ha-icon-picker>
+        <mwc-select id="off_color" label="Off Color"></mwc-select>
       </div>
 
       <!-- On state icon + color -->
-      <div class='row'>
-        <ha-icon-picker id='on_icon' label='On Icon'></ha-icon-picker>
-        <ha-select id='on_color' label='On Color'></ha-select>
+      <div class="row">
+        <ha-icon-picker id="on_icon" label="On Icon"></ha-icon-picker>
+        <mwc-select id="on_color" label="On Color"></mwc-select>
       </div>
     `;
 
-    // entity picker
+    // entity picker setup
     const ep = this.shadowRoot.querySelector('#todo_list');
     ep.hass = this._hass;
     ep.includeDomains = ['todo'];
     ep.allowCustomEntity = false;
 
-    // both icon-pickers load
+    // ensure both icon-pickers load
     ['off_icon','on_icon'].forEach(id => {
-      const ip = this.shadowRoot.querySelector('#'+id);
+      const ip = this.shadowRoot.querySelector(`#${id}`);
       ip.hass = this._hass;
     });
 
-    // populate colors
+    // populate color selects
     ['off','on'].forEach(type => {
-      const sel = this.shadowRoot.querySelector('#'+type+'_color');
+      const sel = this.shadowRoot.querySelector(`#${type}_color`);
       sel.innerHTML = '';
-      Object.entries(ShoppingListCard.COLOR_MAP).forEach(([name,hex]) => {
+      Object.entries(ShoppingListCard.COLOR_MAP).forEach(([name, hex]) => {
         const item = document.createElement('mwc-list-item');
         item.setAttribute('value', name);
         item.setAttribute('graphic', 'icon');
-        item.innerHTML = `<span slot='graphic'><ha-icon icon='mdi:circle' style='color:${hex};'></ha-icon></span>${name}`;
+        item.innerHTML = `<span slot="graphic"><ha-icon icon="mdi:circle" style="color:${hex};"></ha-icon></span>${name}`;
         sel.appendChild(item);
       });
     });
 
     // listeners
     ['title','subtitle','enable_quantity'].forEach(id => {
-      const el = this.shadowRoot.querySelector('#'+id);
-      const evt = el.tagName==='HA-SWITCH'?'change':'input';
+      const el = this.shadowRoot.querySelector(`#${id}`);
+      const evt = el.tagName === 'HA-SWITCH' ? 'change' : 'input';
       el.addEventListener(evt, () => this._handleConfigChanged());
     });
     ep.addEventListener('value-changed', () => this._handleConfigChanged());
-    ['off_icon','on_icon'].forEach(id => {
-      this.shadowRoot.querySelector('#'+id).addEventListener('value-changed', () => this._handleConfigChanged());
-    });
-    ['off_color','on_color'].forEach(id => {
-      this.shadowRoot.querySelector('#'+id).addEventListener('selected', () => this._handleConfigChanged());
+    ['off_icon','on_icon','off_color','on_color'].forEach(id => {
+      this.shadowRoot.querySelector(`#${id}`)
+        .addEventListener('value-changed', () => this._handleConfigChanged());
     });
 
     this._rendered = true;
@@ -113,31 +111,41 @@ class ShoppingListCardEditor extends HTMLElement {
 
   _updateFormValues() {
     const s = this.shadowRoot;
-    s.querySelector('#title').value = this._config.title||'';
-    s.querySelector('#subtitle').value = this._config.subtitle||'';
-    s.querySelector('#todo_list').value = this._config.todo_list||'';
+    s.querySelector('#title').value = this._config.title || '';
+    s.querySelector('#subtitle').value = this._config.subtitle || '';
+    s.querySelector('#todo_list').value = this._config.todo_list || '';
     s.querySelector('#enable_quantity').checked = !!this._config.enable_quantity;
 
-    s.querySelector('#off_icon').value = this._config.off_icon||ShoppingListCard.DEFAULT_OFF_ICON;
-    s.querySelector('#on_icon').value = this._config.on_icon||ShoppingListCard.DEFAULT_ON_ICON;
-    s.querySelector('#off_color').value = this._config.off_color||ShoppingListCard.DEFAULT_OFF_COLOR;
-    s.querySelector('#on_color').value = this._config.on_color||ShoppingListCard.DEFAULT_ON_COLOR;
+    s.querySelector('#off_icon').value = this._config.off_icon || ShoppingListCard.DEFAULT_OFF_ICON;
+    s.querySelector('#on_icon').value = this._config.on_icon || ShoppingListCard.DEFAULT_ON_ICON;
+    s.querySelector('#off_color').value = this._config.off_color || ShoppingListCard.DEFAULT_OFF_COLOR;
+    s.querySelector('#on_color').value = this._config.on_color || ShoppingListCard.DEFAULT_ON_COLOR;
   }
 
   _handleConfigChanged() {
     const s = this.shadowRoot;
-    const cfg = { type:'custom:shopping-list-card', title:s.querySelector('#title').value, todo_list:s.querySelector('#todo_list').value };
-    if (s.querySelector('#subtitle').value) cfg.subtitle=s.querySelector('#subtitle').value;
-    if (s.querySelector('#enable_quantity').checked) cfg.enable_quantity=true;
-    const offI=s.querySelector('#off_icon').value; if(offI!==ShoppingListCard.DEFAULT_OFF_ICON)cfg.off_icon=offI;
-    const onI=s.querySelector('#on_icon').value; if(onI!==ShoppingListCard.DEFAULT_ON_ICON)cfg.on_icon=onI;
-    const offC=s.querySelector('#off_color').value; if(offC!==ShoppingListCard.DEFAULT_OFF_COLOR)cfg.off_color=offC;
-    const onC=s.querySelector('#on_color').value; if(onC!==ShoppingListCard.DEFAULT_ON_COLOR)cfg.on_color=onC;
-    this.dispatchEvent(new CustomEvent('config-changed',{detail:{config:cfg},bubbles:true,composed:true}));
+    const cfg = {
+      type: 'custom:shopping-list-card',
+      title: s.querySelector('#title').value,
+      todo_list: s.querySelector('#todo_list').value,
+    };
+    if (s.querySelector('#subtitle').value) cfg.subtitle = s.querySelector('#subtitle').value;
+    if (s.querySelector('#enable_quantity').checked) cfg.enable_quantity = true;
+    const offIcon = s.querySelector('#off_icon').value;
+    if (offIcon !== ShoppingListCard.DEFAULT_OFF_ICON) cfg.off_icon = offIcon;
+    const onIcon = s.querySelector('#on_icon').value;
+    if (onIcon !== ShoppingListCard.DEFAULT_ON_ICON) cfg.on_icon = onIcon;
+    const offColor = s.querySelector('#off_color').value;
+    if (offColor !== ShoppingListCard.DEFAULT_OFF_COLOR) cfg.off_color = offColor;
+    const onColor = s.querySelector('#on_color').value;
+    if (onColor !== ShoppingListCard.DEFAULT_ON_COLOR) cfg.on_color = onColor;
+
+    this.dispatchEvent(new CustomEvent('config-changed', {
+      detail: { config: cfg }, bubbles: true, composed: true
+    }));
   }
 }
-customElements.define('shopping-list-card-editor',ShoppingListCardEditor);
-
+customElements.define('shopping-list-card-editor', ShoppingListCardEditor);
 
 // ── Card ─────────────────────────────────────────────────────────────────────
 
