@@ -134,18 +134,33 @@ class ShoppingListCardEditor extends HTMLElement {
 
   _handleConfigChanged() {
     const s = this.shadowRoot;
-    const cfg = { type: 'custom:shopping-list-card', title: s.querySelector('#title').value, todo_list: s.querySelector('#todo_list').value };
-    if (s.querySelector('#subtitle').value) cfg.subtitle = s.querySelector('#subtitle').value;
-    if (s.querySelector('#enable_quantity').checked) cfg.enable_quantity = true;
-    if (s.querySelector('#colorize_background').checked) cfg.colorize_background = true;
-
+    // Start with a copy of the existing config to preserve unknown keys
+    const newConfig = { ...this._config };
+    
+    // Update values from the form
+    newConfig.title = s.querySelector('#title').value;
+    newConfig.subtitle = s.querySelector('#subtitle').value || undefined;
+    newConfig.todo_list = s.querySelector('#todo_list').value;
+    newConfig.enable_quantity = s.querySelector('#enable_quantity').checked;
+    newConfig.colorize_background = s.querySelector('#colorize_background').checked;
+    
     ['off','on'].forEach(type => {
       const icon = s.querySelector(`#${type}_icon`).value;
-      if (icon && icon !== ShoppingListCard[`DEFAULT_${type.toUpperCase()}_ICON`]) cfg[`${type}_icon`] = icon;
+      if (icon === ShoppingListCard[`DEFAULT_${type.toUpperCase()}_ICON`]) {
+        delete newConfig[`${type}_icon`];
+      } else {
+        newConfig[`${type}_icon`] = icon;
+      }
+
       const col = s.querySelector(`#${type}_color`).value;
-      if (col && col !== ShoppingListCard[`DEFAULT_${type.toUpperCase()}_COLOR`]) cfg[`${type}_color`] = col;
+      if (col === ShoppingListCard[`DEFAULT_${type.toUpperCase()}_COLOR`]) {
+        delete newConfig[`${type}_color`];
+      } else {
+        newConfig[`${type}_color`] = col;
+      }
     });
-    this.dispatchEvent(new CustomEvent('config-changed', { detail: { config: cfg }, bubbles: true, composed: true }));
+
+    this.dispatchEvent(new CustomEvent('config-changed', { detail: { config: newConfig }, bubbles: true, composed: true }));
   }
 }
 customElements.define('shopping-list-card-editor', ShoppingListCardEditor);
@@ -269,9 +284,13 @@ class ShoppingListCard extends HTMLElement {
 
     let qtyControls = '';
     if (isOn && this._config.enable_quantity) {
+        let decBtn = `<div class="quantity-btn-placeholder"></div>`;
+        if (qty > 1) {
+            decBtn = `<div class="quantity-btn" data-action="decrement"><ha-icon icon="mdi:minus"></ha-icon></div>`;
+        }
         qtyControls = `
             <div class="quantity-controls">
-                ${qty > 1 ? `<div class="quantity-btn" data-action="decrement"><ha-icon icon="mdi:minus"></ha-icon></div>` : ''}
+                ${decBtn}
                 <span class="quantity">${qty}</span>
                 <div class="quantity-btn" data-action="increment"><ha-icon icon="mdi:plus"></ha-icon></div>
             </div>
@@ -320,16 +339,19 @@ class ShoppingListCard extends HTMLElement {
       try {
         await call;
         this._lastUpdated = null;
+        await this._render();	 
       } catch (e) {
         console.error('Service call failed', e);
-      } finally {
-        this._isUpdating = false;
-        this.content.querySelector('.card-container')?.classList.remove('is-updating');
+				 
+								 
+																					   
       }
-    } else {
-        this._isUpdating = false;
-        this.content.querySelector('.card-container')?.classList.remove('is-updating');
+			
+								 
+																					   
     }
+    this._isUpdating = false;
+    this.content.querySelector('.card-container')?.classList.remove('is-updating');						 
   }
 
   _addItem(name) {
@@ -366,6 +388,7 @@ class ShoppingListCard extends HTMLElement {
       .quantity-controls { display:flex; align-items:center; gap:4px; flex-shrink:0 }
       .quantity { font-size:14px; font-weight:500; min-width:20px; text-align:center }
       .quantity-btn { width:24px; height:24px; background:rgba(128,128,128,0.2); border-radius:5px; display:flex; align-items:center; justify-content:center }
+      .quantity-btn-placeholder { width: 24px; height: 24px; }
       .quantity-btn ha-icon { --mdc-icon-size: 20px; }
       .warning { padding:12px; background:var(--error-color); color:var(--text-primary-color); border-radius:var(--ha-card-border-radius,12px) }
     `;
