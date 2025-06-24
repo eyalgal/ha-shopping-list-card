@@ -164,33 +164,26 @@ class ShoppingListCard extends HTMLElement {
   static getStubConfig(){return{type:'custom:shopping-list-card',title:'New Item',todo_list:''};}
 
   _escapeRegExp(s){return s.replace(/[.*+?^${}()|[\]\\]/g,'\\$&');}
-  _getColorValue(v){if(!v)return null;return v.startsWith('#')?v:(ShoppingListCard.COLOR_MAP[v]||v);}  
+  _getColorValue(v){if(!v)return null;return v.startsWith('#')?v:(ShoppingListCard.COLOR_MAP[v]||v);}
   _hexToRgb(h){const m=h.replace('#','').match(/(..)(..)(..)/);return m&&{r:parseInt(m[1],16),g:parseInt(m[2],16),b:parseInt(m[3],16)};}
   _toRgba(h,a){const c=this._hexToRgb(h);return c?`rgba(${c.r},${c.g},${c.b},${a})`:h;}
 
   async _render(){
     this._isUpdating=false;
     const cnt=this.content.querySelector('.card-container');if(cnt)cnt.classList.remove('is-updating');
-    if(!this._config||!this._hass)return;
+    if(!this._config||!this._hass) return;
     const state=this._hass.states[this._config.todo_list];
     if(!state){this.content.innerHTML=`<div class='warning'>Entity not found: ${this._config.todo_list}</div>`;return;}
     const full=this._config.subtitle?`${this._config.title} - ${this._config.subtitle}`:this._config.title;
     let items=[];try{const res=await this._hass.callWS({type:'todo/item/list',entity_id:this._config.todo_list});items=res.items.map(i=>i.summary);}catch{this.content.innerHTML="<div class='warning'>Error fetching items.</div>";return;}
-    const rx=new RegExp(`^${this._escapeRegExp(full)}(?: \((\d+)\))?$`,'i');let isOn=false,qty=0,match=null;
+    const rx=new RegExp(`^${this._escapeRegExp(full)}(?: \\(\d+\))?$`,'i');let isOn=false,qty=0,match=null;
     for(const s of items){const m=s.match(rx);if(m){isOn=true;match=s;qty=m[1]?+m[1]:1;break;}}
-    const onI=this._config.on_icon||ShoppingListCard.DEFAULT_ON_ICON,offI=this._config.off_icon||ShoppingListCard.DEFAULT_OFF_ICON;
+    const onI=this._config.on_icon||ShoppingListCard.DEFAULT_ON_ICON;
+    const offI=this._config.off_icon||ShoppingListCard.DEFAULT_OFF_ICON;
     const onC=this._getColorValue(this._config.on_color||ShoppingListCard.DEFAULT_ON_COLOR)||'#4CAF50';
     const offC=this._getColorValue(this._config.off_color||ShoppingListCard.DEFAULT_OFF_COLOR)||'#808080';
-    const icon=isOn?onI:offI,bg=isOn?this._toRgba(onC,0.2):this._toRgba(offC,0.2),fg=isOn?onC:offC;
+    const icon=isOn?onI:offI;
+    const bg=isOn?this._toRgba(onC,0.2):this._toRgba(offC,0.2);
+    const fg=isOn?onC:offC;
     let qc='';if(isOn&&this._config.enable_quantity){if(qty>1){qc=`<div class='quantity-controls'><div class='quantity-btn' data-action='decrement'><ha-icon icon='mdi:minus'></ha-icon></div><span class='quantity'>${qty}</span><div class='quantity-btn' data-action='increment'><ha-icon icon='mdi:plus'></ha-icon></div></div>`;}else{qc=`<div class='quantity-controls'><span class='quantity'>${qty}</span><div class='quantity-btn' data-action='increment'><ha-icon icon='mdi:plus'></ha-icon></div></div>`;}}
-    this.content.innerHTML=`<div class='card-container ${isOn?'is-on':'is-off'}'><div class='icon-wrapper' style='background:${bg};color:${fg};'><ha-icon icon='${icon}'></ha-icon></div><div class='info-container'><div class='primary'>${this._config.title}</div>${this._config.subtitle?`<div class='secondary'>${this._config.subtitle}</div>`:''}</div>${qc}</div>`;
-    this.content.querySelector('.card-container').onclick=ev=>this._handleTap(ev,isOn,match,qty,full);
-  }
-
-  async _handleTap(ev,isOn,match,qty,full){if(this._isUpdating)return;ev.stopPropagation();const act=ev.target.closest('.quantity-btn')?.dataset.action;this._isUpdating=true;this.content.querySelector('.card-container').classList.add('is-updating');let call; if(act==='increment')call=this._updateQuantity(match,qty+1,full);else if(act==='decrement'&&qty>1)call=this._updateQuantity(match,qty-1,full); else {if(isOn){if(!this._config.enable_quantity||qty===1)call=this._removeItem(match);}else call=this._addItem(full);}if(call){try{await call;this._lastUpdated=null;await this._render();}catch{} }this._isUpdating=false;this.content.querySelector('.card-container')?.classList.remove('is-updating');}
-
-  _addItem(n){return this._hass.callService('todo','add_item',{entity_id:this._config.todo_list,item:n});}
-  _removeItem(i){return i?this._hass.callService('todo','remove_item',{entity_id:this._config.todo_list,item:i}):Promise.resolve();}
-  _updateQuantity(o,q,f){const nn=q>1?`${f} (${q})`:f;return this._hass.callService('todo','update_item',{entity_id:this._config.todo_list,item:o,rename:nn});}
-
-  _attachStyles(){if(this.querySelector('style'))return;const s=document.createElement('style');s.textContent=`ha-card{border-radius:var(--ha-card-border-radius,12px);background:var(--card-background-color);box-shadow:var(--ha-card-box-shadow);overflow:hidden}.card-content{padding:0!important}.card-container{display:flex;align-items:center;padding:10px;gap:10px;cursor:pointer;transition:background-color .2s}.card-container:hover{background:var(--secondary-background-color)}.icon-wrapper{display:flex;align-items:center;justify-content:center;width:36px;height:36px;border-radius:50%;flex-shrink:0}.info-container{flex-grow:1;overflow:hidden;min-width:0}.primary{font-size:14px;font
+    this.content.innerHTML=`<div class='card-container ${isOn?'is-on':'is-off'}'><div class='icon-wrapper' style='background:${bg};color:${fg};'><ha-icon icon='${icon
