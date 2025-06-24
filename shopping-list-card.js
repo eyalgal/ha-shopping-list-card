@@ -36,12 +36,13 @@ class ShoppingListCardEditor extends HTMLElement {
         ha-textfield, ha-entity-picker, ha-icon-picker { flex-grow: 1; }
         .picker-row { display: flex; align-items: center; gap: 8px; margin-bottom: 16px; }
         input[type="color"] {
-          width: 32px;
-          height: 32px;
+          width: 40px;
+          height: 40px;
           padding: 0;
           border: 1px solid var(--divider-color, #888);
-          border-radius: 50%;
+          border-radius: 4px; /* Changed from 50% */
           cursor: pointer;
+          background: none;
         }
       </style>
 
@@ -139,8 +140,6 @@ class ShoppingListCardEditor extends HTMLElement {
     this.dispatchEvent(new CustomEvent('config-changed', { detail: { config: cfg }, bubbles: true, composed: true }));
   }
 }
-
-// FIX: Removed the extra comma and object from the end of this line.
 customElements.define('shopping-list-card-editor', ShoppingListCardEditor);
 
 // ── Card ─────────────────────────────────────────────────────────────────────
