@@ -1,39 +1,12 @@
-/*
+/**
  * Shopping List Card
  *
  * A Home Assistant Lovelace card to manage items on a to-do list with a
  * clean, modern interface and a visual editor.
  *
- * Author: eyalgal
- * License: MIT License
- *
+ * Author: eyalgal (extended)
+ * License: MIT
  */
-
-console.log("Shopping List Card: File loaded. Version 39 (Conditional Config Saving).");
-
-const colorMap = {
-    'red': { name: 'Red', hex: '#F44336' },
-    'pink': { name: 'Pink', hex: '#E91E63' },
-    'purple': { name: 'Purple', hex: '#9C27B0' },
-    'deep-purple': { name: 'Deep Purple', hex: '#673AB7' },
-    'indigo': { name: 'Indigo', hex: '#3F51B5' },
-    'blue': { name: 'Blue', hex: '#2196F3' },
-    'light-blue': { name: 'Light Blue', hex: '#03A9F4' },
-    'cyan': { name: 'Cyan', hex: '#00BCD4' },
-    'teal': { name: 'Teal', hex: '#009688' },
-    'green': { name: 'Green', hex: '#4CAF50' },
-    'light-green': { name: 'Light Green', hex: '#8BC34A' },
-    'lime': { name: 'Lime', hex: '#CDDC39' },
-    'yellow': { name: 'Yellow', hex: '#FFEB3B' },
-    'amber': { name: 'Amber', hex: '#FFC107' },
-    'orange': { name: 'Orange', hex: '#FF9800' },
-    'deep-orange': { name: 'Deep Orange', hex: '#FF5722' },
-    'brown': { name: 'Brown', hex: '#795548' },
-    'grey': { name: 'Grey', hex: '#9E9E9E' },
-    'blue-grey': { name: 'Blue Grey', hex: '#607D8B' },
-    'disabled': { name: 'Disabled', hex: '#808080' }
-};
-
 
 class ShoppingListCardEditor extends HTMLElement {
   constructor() {
@@ -44,126 +17,147 @@ class ShoppingListCardEditor extends HTMLElement {
 
   set hass(hass) {
     this._hass = hass;
-    if (!this._rendered) {
-      this._render();
-    }
+    if (!this._rendered) this._render();
   }
 
   setConfig(config) {
     this._config = config;
-    if (this._rendered) {
-      this._updateFormValues();
-    }
+    if (this._rendered) this._updateFormValues();
   }
   
   _render() {
     if (!this.shadowRoot || !this._hass) return;
-    
+
     this.shadowRoot.innerHTML = `
       <style>
-        .form { display: flex; flex-direction: column; gap: 16px; }
-        .grid-container { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; align-items: end; }
-        .switch-row { display: flex; align-items: center; justify-content: space-between; }
+        .form-row { margin-bottom: 16px; }
+        .switch-row { display: flex; align-items: center; justify-content: space-between; margin-top: 24px; }
         .switch-row span { font-weight: 500; font-size: 14px; }
-        ha-textfield, ha-entity-picker, ha-icon-picker { display: block; }
-        .color-input-container { display: flex; flex-direction: column; }
-        .color-input-container label { font-size: 12px; color: var(--secondary-text-color); margin-bottom: 8px;}
-        input[type="color"] { width: 100%; height: 40px; border: 1px solid var(--divider-color); border-radius: 4px; padding: 4px; box-sizing: border-box; background: var(--card-background-color, white); }
+        ha-textfield, ha-entity-picker, ha-icon-picker { display: block; margin-bottom: 8px; }
       </style>
-      <div class="form">
+
+      <!-- Required fields -->
+      <div class="form-row">
         <ha-textfield id="title" label="Title (Required)" required></ha-textfield>
+      </div>
+      <div class="form-row">
+        <ha-entity-picker
+          id="todo_list"
+          label="To-do List Entity (Required)"
+          required>
+        </ha-entity-picker>
+      </div>
+
+      <!-- Optional fields -->
+      <div class="form-row">
         <ha-textfield id="subtitle" label="Subtitle (Optional)"></ha-textfield>
-        <ha-entity-picker id="todo_list" label="To-do List Entity (Required)" required></ha-entity-picker>
-        <div class="grid-container">
-            <ha-icon-picker id="off_icon" label="Off-list Icon"></ha-icon-picker>
-            <div class="form-row color-input-container">
-              <label for="off_color">Off-list Color</label>
-              <input type="color" id="off_color">
-            </div>
-            <ha-icon-picker id="on_icon" label="On-list Icon"></ha-icon-picker>
-            <div class="form-row color-input-container">
-              <label for="on_color">On-list Color</label>
-              <input type="color" id="on_color">
-            </div>
-        </div>
-        <div class="switch-row">
-          <span>Enable Quantity Controls</span>
-          <ha-switch id="enable_quantity"></ha-switch>
-        </div>
+      </div>
+      <div class="switch-row">
+        <span>Enable Quantity Controls</span>
+        <ha-switch id="enable_quantity"></ha-switch>
+      </div>
+
+      <!-- Custom icon selectors -->
+      <div class="form-row">
+        <ha-icon-picker id="on_icon" label="On Icon (default: mdi:check)"></ha-icon-picker>
+      </div>
+      <div class="form-row">
+        <ha-icon-picker id="off_icon" label="Off Icon (default: mdi:plus)"></ha-icon-picker>
+      </div>
+
+      <!-- Custom color inputs -->
+      <div class="form-row">
+        <ha-textfield id="on_color" label="On Color (name or #hex)"></ha-textfield>
+      </div>
+      <div class="form-row">
+        <ha-textfield id="off_color" label="Off Color (name or #hex)"></ha-textfield>
       </div>
     `;
-    this._rendered = true;
-    
-    const entityPicker = this.shadowRoot.querySelector('#todo_list');
-    entityPicker.hass = this._hass;
-    entityPicker.includeDomains = ['todo'];
-    entityPicker.allowCustomEntity = false;
 
-    this.shadowRoot.querySelector('.form').addEventListener('input', () => this._handleConfigChanged());
-    
-    if (this._config) {
-      this._updateFormValues();
-    }
+    // wire up entity picker
+    const ep = this.shadowRoot.querySelector('#todo_list');
+    ep.hass = this._hass;
+    ep.includeDomains = ['todo'];
+    ep.allowCustomEntity = false;
+
+    // listeners
+    this.shadowRoot.querySelector('#title')
+      .addEventListener('input', () => this._handleConfigChanged());
+    this.shadowRoot.querySelector('#subtitle')
+      .addEventListener('input', () => this._handleConfigChanged());
+    this.shadowRoot.querySelector('#enable_quantity')
+      .addEventListener('change', () => this._handleConfigChanged());
+    ep.addEventListener('value-changed', () => this._handleConfigChanged());
+    ['on_color','off_color'].forEach(id => {
+      this.shadowRoot.querySelector('#'+id)
+        .addEventListener('input', () => this._handleConfigChanged());
+    });
+    ['on_icon','off_icon'].forEach(id => {
+      this.shadowRoot.querySelector('#'+id)
+        .addEventListener('value-changed', () => this._handleConfigChanged());
+    });
+
+    this._rendered = true;
+    if (this._config) this._updateFormValues();
   }
-  
+
   _updateFormValues() {
-    this.shadowRoot.querySelector('#title').value = this._config.title || '';
-    this.shadowRoot.querySelector('#subtitle').value = this._config.subtitle || '';
-    this.shadowRoot.querySelector('#todo_list').value = this._config.todo_list || '';
-    this.shadowRoot.querySelector('#on_icon').value = this._config.on_icon || 'mdi:check';
-    this.shadowRoot.querySelector('#off_icon').value = this._config.off_icon || 'mdi:plus';
-    this.shadowRoot.querySelector('#on_color').value = this._config.on_color || colorMap.green.hex;
-    this.shadowRoot.querySelector('#off_color').value = this._config.off_color || colorMap.disabled.hex;
-    this.shadowRoot.querySelector('#enable_quantity').checked = this._config.enable_quantity || false;
+    const s = this.shadowRoot;
+    s.querySelector('#title').value          = this._config.title        || '';
+    s.querySelector('#todo_list').value      = this._config.todo_list    || '';
+    s.querySelector('#subtitle').value       = this._config.subtitle     || '';
+    s.querySelector('#enable_quantity').checked = this._config.enable_quantity || false;
+    s.querySelector('#on_icon').value        = this._config.on_icon      || '';
+    s.querySelector('#off_icon').value       = this._config.off_icon     || '';
+    s.querySelector('#on_color').value       = this._config.on_color     || '';
+    s.querySelector('#off_color').value      = this._config.off_color    || '';
   }
 
   _handleConfigChanged() {
-    const newConfig = {
+    const s = this.shadowRoot;
+    const cfg = {
       type: 'custom:shopping-list-card',
-      title: this.shadowRoot.querySelector('#title').value,
-      todo_list: this.shadowRoot.querySelector('#todo_list').value,
+      title: s.querySelector('#title').value,
+      todo_list: s.querySelector('#todo_list').value,
     };
-    
-    const subtitle = this.shadowRoot.querySelector('#subtitle').value;
-    if (subtitle) {
-        newConfig.subtitle = subtitle;
-    }
 
-    const onIcon = this.shadowRoot.querySelector('#on_icon').value;
-    if (onIcon && onIcon !== 'mdi:check') {
-        newConfig.on_icon = onIcon;
-    }
+    // only include subtitle if non-empty
+    if (s.querySelector('#subtitle').value)       cfg.subtitle        = s.querySelector('#subtitle').value;
+    // only include quantity flag if true
+    if (s.querySelector('#enable_quantity').checked) cfg.enable_quantity = true;
 
-    const offIcon = this.shadowRoot.querySelector('#off_icon').value;
-    if (offIcon && offIcon !== 'mdi:plus') {
-        newConfig.off_icon = offIcon;
-    }
-    
-    const onColor = this.shadowRoot.querySelector('#on_color').value;
-    if (onColor && onColor !== colorMap.green.hex) {
-        newConfig.on_color = onColor;
-    }
+    // only include icons if non-default
+    const onI  = s.querySelector('#on_icon').value;
+    if (onI && onI !== ShoppingListCard.DEFAULT_ON_ICON)  cfg.on_icon  = onI;
+    const offI = s.querySelector('#off_icon').value;
+    if (offI && offI !== ShoppingListCard.DEFAULT_OFF_ICON) cfg.off_icon = offI;
 
-    const offColor = this.shadowRoot.querySelector('#off_color').value;
-    if (offColor && offColor !== colorMap.disabled.hex) {
-        newConfig.off_color = offColor;
-    }
+    // include colors if specified
+    const onC  = s.querySelector('#on_color').value.trim();
+    if (onC) cfg.on_color  = onC;
+    const offC = s.querySelector('#off_color').value.trim();
+    if (offC) cfg.off_color = offC;
 
-    const enableQuantity = this.shadowRoot.querySelector('#enable_quantity').checked;
-    if (enableQuantity) {
-        newConfig.enable_quantity = true;
-    }
-    
-    const event = new CustomEvent('config-changed', {
-      bubbles: true,
-      composed: true,
-      detail: { config: newConfig },
-    });
-    this.dispatchEvent(event);
+    this.dispatchEvent(new CustomEvent('config-changed', {
+      detail: { config: cfg },
+      bubbles: true, composed: true,
+    }));
   }
 }
 
 class ShoppingListCard extends HTMLElement {
+  static COLOR_MAP = {
+    red: '#F44336', pink: '#E91E63', purple: '#9C27B0',
+    'deep-purple': '#673AB7', indigo: '#3F51B5',
+    blue: '#2196F3', 'light-blue': '#03A9F4',
+    cyan: '#00BCD4', teal: '#009688', green: '#4CAF50',
+    lime: '#CDDC39', yellow: '#FFEB3B', amber: '#FFC107',
+    orange: '#FF9800', brown: '#795548', grey: '#9E9E9E',
+    'blue-grey': '#607D8B',
+  };
+  static DEFAULT_ON_ICON  = 'mdi:check';
+  static DEFAULT_OFF_ICON = 'mdi:plus';
+
   constructor() {
     super();
     this._isUpdating = false;
@@ -173,25 +167,24 @@ class ShoppingListCard extends HTMLElement {
   set hass(hass) {
     this._hass = hass;
     if (!this._config) return;
-
     const newState = hass.states[this._config.todo_list];
-    if (newState && newState.last_updated !== this._lastUpdated) {
-      this._lastUpdated = newState.last_updated;
-      if (!this.content) {
-        this.innerHTML = `<ha-card><div class="card-content"></div></ha-card>`;
-        this.content = this.querySelector("div.card-content");
-        this._attachStyles();
-      }
-      this._render();
+    if (!newState || newState.last_updated === this._lastUpdated) return;
+    this._lastUpdated = newState.last_updated;
+
+    if (!this.content) {
+      this.innerHTML = `<ha-card><div class="card-content"></div></ha-card>`;
+      this.content = this.querySelector("div.card-content");
+      this._attachStyles();
     }
+    this._render();
   }
 
   setConfig(config) {
-    if (!config.title)      throw new Error("You must define a title.");
-    if (!config.todo_list)  throw new Error("You must define a todo_list entity_id.");
+    if (!config.title)     throw new Error("You must define a title.");
+    if (!config.todo_list) throw new Error("You must define a todo_list entity_id.");
     this._config = config;
   }
-  
+
   static getConfigElement() {
     return document.createElement('shopping-list-card-editor');
   }
@@ -208,19 +201,37 @@ class ShoppingListCard extends HTMLElement {
     return string.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
   }
 
+  _getColorValue(val) {
+    if (!val) return null;
+    if (val.startsWith('#')) return val;
+    return ShoppingListCard.COLOR_MAP[val] || val;
+  }
+
+  _hexToRgb(hex) {
+    const m = hex.replace('#','').match(/^(.{2})(.{2})(.{2})$/);
+    return m && { r: parseInt(m[1],16), g: parseInt(m[2],16), b: parseInt(m[3],16) };
+  }
+
+  _toRgba(hex, alpha) {
+    const c = this._hexToRgb(hex);
+    return c
+      ? `rgba(${c.r}, ${c.g}, ${c.b}, ${alpha})`
+      : hex;
+  }
+
   async _render() {
     this._isUpdating = false;
     const container = this.content.querySelector('.card-container');
     if (container) container.classList.remove('is-updating');
-
     if (!this._config || !this._hass) return;
+
     const state = this._hass.states[this._config.todo_list];
     if (!state) {
       this.content.innerHTML = `<div class="warning">Entity not found: ${this._config.todo_list}</div>`;
       return;
     }
 
-    const fullItemName = this._config.subtitle
+    const fullName = this._config.subtitle
       ? `${this._config.title} - ${this._config.subtitle}`
       : this._config.title;
 
@@ -237,7 +248,7 @@ class ShoppingListCard extends HTMLElement {
       return;
     }
 
-    const rx = new RegExp(`^${this._escapeRegExp(fullItemName)}(?: \\((\\d+)\\))?$`, 'i');
+    const rx = new RegExp(`^${this._escapeRegExp(fullName)}(?: \\((\\d+)\\))?$`, 'i');
     let isOn = false, qty = 0, matched = null;
     for (const s of summaries) {
       const m = s.match(rx);
@@ -249,45 +260,55 @@ class ShoppingListCard extends HTMLElement {
       }
     }
 
-    const onIcon = this._config.on_icon || 'mdi:check';
-    const offIcon = this._config.off_icon || 'mdi:plus';
-    
-    const onColor = this._config.on_color || colorMap.green.hex;
-    const offColor = this._config.off_color || colorMap.disabled.hex;
+    // icons & colors
+    const onIcon  = this._config.on_icon  || ShoppingListCard.DEFAULT_ON_ICON;
+    const offIcon = this._config.off_icon || ShoppingListCard.DEFAULT_OFF_ICON;
+    const onColorHex  = this._getColorValue(this._config.on_color)  || '#4CAF50';
+    const offColorHex = this._getColorValue(this._config.off_color) || '#808080';
 
-    const icon = isOn ? onIcon : offIcon;
-    const color = isOn ? onColor : offColor;
-    const bgColor = `${color}33`;
-    
+    const icon    = isOn ? onIcon  : offIcon;
+    const styleBg = isOn
+      ? this._toRgba(onColorHex, 0.2)
+      : this._toRgba(offColorHex, 0.2);
+    const styleFg = isOn ? onColorHex : offColorHex;
+
     let qtyControls = '';
     if (isOn && this._config.enable_quantity) {
-      const decBtn = qty > 1
-        ? `<div class="quantity-btn" data-action="decrement"><ha-icon icon="mdi:minus"></ha-icon></div>`
-        : ``;
-      qtyControls = `
-        <div class="quantity-controls">
-          ${decBtn}
-          <span class="quantity">${qty}</span>
-          <div class="quantity-btn" data-action="increment"><ha-icon icon="mdi:plus"></ha-icon></div>
-        </div>
-      `;
+      if (qty > 1) {
+        qtyControls = `
+          <div class="quantity-controls">
+            <div class="quantity-btn" data-action="decrement"><ha-icon icon="mdi:minus"></ha-icon></div>
+            <span class="quantity">${qty}</span>
+            <div class="quantity-btn" data-action="increment"><ha-icon icon="mdi:plus"></ha-icon></div>
+          </div>
+        `;
+      } else {
+        qtyControls = `
+          <div class="quantity-controls">
+            <span class="quantity">${qty}</span>
+            <div class="quantity-btn" data-action="increment"><ha-icon icon="mdi:plus"></ha-icon></div>
+          </div>
+        `;
+      }
     }
 
     this.content.innerHTML = `
-      <div class="card-container">
-        <div class="icon-wrapper" style="color: ${color}; background-color: ${bgColor};">
-            <ha-icon icon="${icon}"></ha-icon>
+      <div class="card-container ${isOn?'is-on':'is-off'}">
+        <div class="icon-wrapper" style="background-color: ${styleBg}; color: ${styleFg};">
+          <ha-icon icon="${icon}"></ha-icon>
         </div>
         <div class="info-container">
           <div class="primary">${this._config.title}</div>
-          ${this._config.subtitle ? `<div class="secondary">${this._config.subtitle}</div>` : ''}
+          ${this._config.subtitle
+            ? `<div class="secondary">${this._config.subtitle}</div>`
+            : ''}
         </div>
         ${qtyControls}
       </div>
     `;
 
     this.content.querySelector('.card-container')
-      .onclick = ev => this._handleTap(ev, isOn, matched, qty, fullItemName);
+      .onclick = ev => this._handleTap(ev, isOn, matched, qty, fullName);
   }
 
   async _handleTap(ev, isOn, matched, qty, fullItemName) {
@@ -317,23 +338,15 @@ class ShoppingListCard extends HTMLElement {
       try {
         await call;
         this._lastUpdated = null;
-        this._render();
+        await this._render();
       } catch (e) {
         console.error("Shopping List Card: Service call failed", e);
-      } finally {
-        this._isUpdating = false;
-        const container = this.content.querySelector('.card-container');
-        if (container) {
-          container.classList.remove('is-updating');
-        }
-      }
-    } else {
-      this._isUpdating = false;
-      const container = this.content.querySelector('.card-container');
-      if (container) {
-          container.classList.remove('is-updating');
       }
     }
+
+    this._isUpdating = false;
+    const container = this.content.querySelector('.card-container');
+    if (container) container.classList.remove('is-updating');
   }
 
   _addItem(name) {
@@ -344,11 +357,12 @@ class ShoppingListCard extends HTMLElement {
   }
 
   _removeItem(item) {
-    if (!item) return Promise.resolve();
-    return this._hass.callService("todo", "remove_item", {
-      entity_id: this._config.todo_list,
-      item,
-    });
+    return item
+      ? this._hass.callService("todo", "remove_item", {
+          entity_id: this._config.todo_list,
+          item,
+        })
+      : Promise.resolve();
   }
 
   _updateQuantity(oldItem, newQty, fullName) {
@@ -364,100 +378,18 @@ class ShoppingListCard extends HTMLElement {
     if (this.querySelector("style")) return;
     const style = document.createElement('style');
     style.textContent = `
-      ha-card {
-        border-radius: var(--ha-card-border-radius, 12px);
-        background:     var(--card-background-color);
-        box-shadow:     var(--ha-card-box-shadow);
-        overflow:       hidden;
-      }
-      .card-content { padding: 0 !important; }
-
-      .card-container {
-        display:        flex;
-        align-items:    center;
-        padding:        10px;
-        gap:            10px;
-        cursor:         pointer;
-        transition:     background-color 0.2s;
-      }
-      .card-container:hover {
-        background-color: var(--secondary-background-color);
-      }
-      .card-container.is-updating {
-        opacity:         0.5;
-        pointer-events:  none;
-      }
-      
-      .icon-wrapper {
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        width: 36px;
-        height: 36px;
-        border-radius: 50%;
-        flex-shrink: 0;
-      }
-      .icon-wrapper ha-icon {
-        --mdc-icon-size: 22px;
-      }
-      
-      .info-container { 
-        flex-grow: 1; 
-        overflow: hidden; 
-        min-width: 0;
-      }
-      .primary, .secondary {
-        white-space: nowrap;
-        overflow: hidden;
-        text-overflow: ellipsis;
-      }
-      .primary {
-        font-family:    var(--primary-font-family);
-        font-size:      14px;
-        font-weight:    500;
-        line-height:    20px;
-        color:          var(--primary-text-color);
-      }
-      .secondary {
-        font-family:    var(--secondary-font-family);
-        font-size:      12px;
-        font-weight:    400;
-        line-height:    16px;
-        color:          var(--secondary-text-color);
-      }
-
-      .quantity-controls {
-        display:        flex;
-        align-items:    center;
-        gap:            4px;
-        flex-shrink: 0;
-      }
-      .quantity {
-        font-size:      14px;
-        font-weight:    500;
-        min-width:      1.2em;
-        text-align:     center;
-      }
-      .quantity-btn {
-        width: 24px;
-        height: 24px;
-        background-color: rgba(128, 128, 128, 0.2);
-        border-radius: 5px;
-        color: var(--secondary-text-color);
-        display: flex;
-        align-items: center;
-        justify-content: center;
-      }
-      .quantity-btn ha-icon {
-        --mdc-icon-size: 20px;
-      }
-
-      .warning {
-        padding:        12px;
-        background:     var(--error-color);
-        color:          var(--text-primary-color);
-        border-radius:  var(--ha-card-border-radius, 12px);
-      }
+      ha-card { border-radius: var(--ha-card-border-radius,12px); background: var(--card-background-color); box-shadow: var(--ha-card-box-shadow); overflow:hidden; }
+      .card-content { padding:0 !important; }
+      .card-container { display:flex; align-items:center; padding:10px; gap:10px; cursor:pointer; transition:background-color .2s; }
+      .card-container:hover { background: var(--secondary-background-color); }
+      .icon-wrapper { display:flex; align-items:center; justify-content:center; width:36px; height:36px; border-radius:50%; flex-shrink:0; }
+      .info-container { flex-grow:1; overflow:hidden; min-width:0; }
+      .primary { font-size:14px; font-weight:500; line-height:20px; color:var(--primary-text-color); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+      .secondary { font-size:12px; font-weight:400; line-height:16px; color:var(--secondary-text-color); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+      .quantity-controls { display:flex; align-items:center; gap:4px; flex-shrink:0; }
+      .quantity { font-size:14px; font-weight:500; min-width:20px; text-align:center; }
+      .quantity-btn { width:24px; height:24px; background:rgba(128,128,128,0.2); border-radius:5px; display:flex; align-items:center; justify-content:center; }
+      .warning { padding:12px; background:var(--error-color); color:var(--text-primary-color); border-radius:var(--ha-card-border-radius,12px); }
     `;
     this.appendChild(style);
   }
@@ -467,9 +399,9 @@ class ShoppingListCard extends HTMLElement {
   }
 }
 
-// Register both custom elements
-customElements.define("shopping-list-card", ShoppingListCard);
+// Register custom elements
 customElements.define('shopping-list-card-editor', ShoppingListCardEditor);
+customElements.define('shopping-list-card', ShoppingListCard);
 
 window.customCards = window.customCards || [];
 window.customCards.push({
