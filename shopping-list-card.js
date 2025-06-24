@@ -4,7 +4,7 @@
  * A Home Assistant Lovelace card to manage items on a to-do list with a
  * clean, modern interface and a visual editor.
  *
- * Extended by: eyalgal
+ * Created by: eyalgal
  * License: MIT
  */
 
@@ -32,13 +32,16 @@ class ShoppingListCardEditor extends HTMLElement {
 
     this.shadowRoot.innerHTML = `
       <style>
-        .row { display: flex; gap: 8px; margin-bottom: 16px; }
-        ha-textfield, ha-entity-picker, ha-icon-picker {
-          display: block;
-          width: 100%;
+        .row { display: flex; align-items: center; gap: 8px; margin-bottom: 16px; }
+        ha-textfield, ha-entity-picker, ha-icon-picker { display: block; width: 100%; }
+        .picker-row { display: flex; align-items: center; gap: 8px; margin-bottom: 16px; }
+        .picker-row input[type="color"] {
+          width: 24px;
+          height: 24px;
+          padding: 0;
+          border: 1px solid var(--divider-color, #888);
+          border-radius: 50%;
         }
-        .picker-row { display: flex; gap: 8px; align-items: center; margin-bottom: 16px; }
-        .picker-row input[type="color"] { width: 40px; height: 40px; padding: 0; border: none; }
       </style>
 
       <!-- Title + Subtitle -->
@@ -48,30 +51,28 @@ class ShoppingListCardEditor extends HTMLElement {
       </div>
 
       <!-- Entity Picker -->
-      <ha-entity-picker
-        id="todo_list"
-        label="To-Do List Entity (Required)"
-        required
-      ></ha-entity-picker>
+      <div class="row">
+        <ha-entity-picker id="todo_list" label="To-Do List Entity (Required)" required></ha-entity-picker>
+      </div>
 
       <!-- Quantity -->
       <div class="row">
-        <span style="align-self:center; font-weight:500;">Enable Quantity</span>
         <ha-switch id="enable_quantity"></ha-switch>
+        <span style="font-weight:500;">Enable Quantity</span>
       </div>
 
       <!-- Off state icon + color picker -->
       <div class="picker-row">
         <ha-icon-picker id="off_icon" label="Off Icon"></ha-icon-picker>
         <ha-textfield id="off_color" label="Off Color (name or hex)"></ha-textfield>
-        <input type="color" id="off_color_picker" title="Pick off-state color">
+        <input type="color" id="off_color_picker" title="Pick off-state color" />
       </div>
 
       <!-- On state icon + color picker -->
       <div class="picker-row">
         <ha-icon-picker id="on_icon" label="On Icon"></ha-icon-picker>
         <ha-textfield id="on_color" label="On Color (name or hex)"></ha-textfield>
-        <input type="color" id="on_color_picker" title="Pick on-state color">
+        <input type="color" id="on_color_picker" title="Pick on-state color" />
       </div>
     `;
 
@@ -81,23 +82,24 @@ class ShoppingListCardEditor extends HTMLElement {
     ep.includeDomains = ['todo'];
     ep.allowCustomEntity = false;
 
-    // Delay icon-picker hass assignment (fix dropdown init)
-    ['off_icon','on_icon'].forEach(id => {
+    // Initialize both icon-pickers and force icon list fetch
+    ['off_icon', 'on_icon'].forEach(id => {
       const ip = this.shadowRoot.querySelector(`#${id}`);
-      setTimeout(() => { ip.hass = this._hass; }, 0);
+      ip.hass = this._hass;
+      if (ip._fetchIcons) {
+        ip._fetchIcons();
+      }
     });
 
     // Link color pickers + textfields
     ['off','on'].forEach(type => {
       const tf = this.shadowRoot.querySelector(`#${type}_color`);
       const cp = this.shadowRoot.querySelector(`#${type}_color_picker`);
-      // on picker change, update textfield and trigger config
       cp.value = this._getEditorHex(this._config?.[`${type}_color`]);
       cp.addEventListener('input', () => {
         tf.value = cp.value;
         this._handleConfigChanged();
       });
-      // on textfield change, parse name/hex to hex for picker
       tf.addEventListener('input', () => {
         const hex = this._getEditorHex(tf.value);
         if (hex) cp.value = hex;
@@ -107,15 +109,13 @@ class ShoppingListCardEditor extends HTMLElement {
 
     // Other listeners
     ['title','subtitle'].forEach(id => {
-      this.shadowRoot.querySelector(`#${id}`)
-        .addEventListener('input', () => this._handleConfigChanged());
+      this.shadowRoot.querySelector(`#${id}`).addEventListener('input', () => this._handleConfigChanged());
     });
     this.shadowRoot.querySelector('#enable_quantity')
       .addEventListener('change', () => this._handleConfigChanged());
     ep.addEventListener('value-changed', () => this._handleConfigChanged());
     ['off_icon','on_icon'].forEach(id => {
-      this.shadowRoot.querySelector(`#${id}`)
-        .addEventListener('value-changed', () => this._handleConfigChanged());
+      this.shadowRoot.querySelector(`#${id}`).addEventListener('value-changed', () => this._handleConfigChanged());
     });
 
     this._rendered = true;
@@ -149,28 +149,20 @@ class ShoppingListCardEditor extends HTMLElement {
 
   _handleConfigChanged() {
     const s = this.shadowRoot;
-    const cfg = {
-      type: 'custom:shopping-list-card',
-      title: s.querySelector('#title').value,
-      todo_list: s.querySelector('#todo_list').value,
-    };
+    const cfg = { type: 'custom:shopping-list-card', title: s.querySelector('#title').value, todo_list: s.querySelector('#todo_list').value };
     if (s.querySelector('#subtitle').value) cfg.subtitle = s.querySelector('#subtitle').value;
     if (s.querySelector('#enable_quantity').checked) cfg.enable_quantity = true;
-
     ['off','on'].forEach(type => {
       const icon = s.querySelector(`#${type}_icon`).value;
       if (icon && icon !== ShoppingListCard[`DEFAULT_${type.toUpperCase()}_ICON`]) cfg[`${type}_icon`] = icon;
       const col = s.querySelector(`#${type}_color`).value;
       if (col && col !== ShoppingListCard[`DEFAULT_${type.toUpperCase()}_COLOR`]) cfg[`${type}_color`] = col;
     });
-
-    this.dispatchEvent(new CustomEvent('config-changed', {
-      detail: { config: cfg }, bubbles: true, composed: true,
-    }));
+    this.dispatchEvent(new CustomEvent('config-changed', { detail: { config: cfg }, bubbles: true, composed: true }));
   }
 }
 
-customElements.define('shopping-list-card-editor', ShoppingListCardEditor);
+customElements.define('shopping-list-card-editor', ShoppingListCardEditor);, ShoppingListCardEditor);
 
 // ── Card ─────────────────────────────────────────────────────────────────────
 
