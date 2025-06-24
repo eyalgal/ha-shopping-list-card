@@ -33,9 +33,12 @@ class ShoppingListCardEditor extends HTMLElement {
     this.shadowRoot.innerHTML = `
       <style>
         .row { display: flex; gap: 8px; margin-bottom: 16px; }
-        .row-full { display: flex; margin-bottom: 16px; }
-        .row-full ha-entity-picker { flex: 1; }
-        ha-textfield, ha-entity-picker, ha-icon-picker, mwc-select { display: block; }
+        ha-textfield, ha-entity-picker, ha-icon-picker {
+          display: block;
+          width: 100%;
+        }
+        .picker-row { display: flex; gap: 8px; align-items: center; margin-bottom: 16px; }
+        .picker-row input[type="color"] { width: 40px; height: 40px; padding: 0; border: none; }
       </style>
 
       <!-- Title + Subtitle -->
@@ -45,68 +48,85 @@ class ShoppingListCardEditor extends HTMLElement {
       </div>
 
       <!-- Entity Picker -->
-      <div class="row-full">
-        <ha-entity-picker id="todo_list" label="To-Do List Entity (Required)" required></ha-entity-picker>
-      </div>
+      <ha-entity-picker
+        id="todo_list"
+        label="To-Do List Entity (Required)"
+        required
+      ></ha-entity-picker>
 
       <!-- Quantity -->
-      <div class="row-full">
-        <span style="align-self:center; margin-right:8px; font-weight:500;">Enable Quantity Controls</span>
+      <div class="row">
+        <span style="align-self:center; font-weight:500;">Enable Quantity</span>
         <ha-switch id="enable_quantity"></ha-switch>
       </div>
 
-      <!-- Off state icon + color -->
-      <div class="row">
+      <!-- Off state icon + color picker -->
+      <div class="picker-row">
         <ha-icon-picker id="off_icon" label="Off Icon"></ha-icon-picker>
-        <mwc-select id="off_color" label="Off Color"></mwc-select>
+        <ha-textfield id="off_color" label="Off Color (name or hex)"></ha-textfield>
+        <input type="color" id="off_color_picker" title="Pick off-state color">
       </div>
 
-      <!-- On state icon + color -->
-      <div class="row">
+      <!-- On state icon + color picker -->
+      <div class="picker-row">
         <ha-icon-picker id="on_icon" label="On Icon"></ha-icon-picker>
-        <mwc-select id="on_color" label="On Color"></mwc-select>
+        <ha-textfield id="on_color" label="On Color (name or hex)"></ha-textfield>
+        <input type="color" id="on_color_picker" title="Pick on-state color">
       </div>
     `;
 
-    // entity picker setup
+    // Setup entity picker
     const ep = this.shadowRoot.querySelector('#todo_list');
     ep.hass = this._hass;
     ep.includeDomains = ['todo'];
     ep.allowCustomEntity = false;
 
-    // ensure both icon-pickers load
+    // Delay icon-picker hass assignment (fix dropdown init)
     ['off_icon','on_icon'].forEach(id => {
       const ip = this.shadowRoot.querySelector(`#${id}`);
-      ip.hass = this._hass;
+      setTimeout(() => { ip.hass = this._hass; }, 0);
     });
 
-    // populate color selects
+    // Link color pickers + textfields
     ['off','on'].forEach(type => {
-      const sel = this.shadowRoot.querySelector(`#${type}_color`);
-      sel.innerHTML = '';
-      Object.entries(ShoppingListCard.COLOR_MAP).forEach(([name, hex]) => {
-        const item = document.createElement('mwc-list-item');
-        item.setAttribute('value', name);
-        item.setAttribute('graphic', 'icon');
-        item.innerHTML = `<span slot="graphic"><ha-icon icon="mdi:circle" style="color:${hex};"></ha-icon></span>${name}`;
-        sel.appendChild(item);
+      const tf = this.shadowRoot.querySelector(`#${type}_color`);
+      const cp = this.shadowRoot.querySelector(`#${type}_color_picker`);
+      // on picker change, update textfield and trigger config
+      cp.value = this._getEditorHex(this._config?.[`${type}_color`]);
+      cp.addEventListener('input', () => {
+        tf.value = cp.value;
+        this._handleConfigChanged();
+      });
+      // on textfield change, parse name/hex to hex for picker
+      tf.addEventListener('input', () => {
+        const hex = this._getEditorHex(tf.value);
+        if (hex) cp.value = hex;
+        this._handleConfigChanged();
       });
     });
 
-    // listeners
-    ['title','subtitle','enable_quantity'].forEach(id => {
-      const el = this.shadowRoot.querySelector(`#${id}`);
-      const evt = el.tagName === 'HA-SWITCH' ? 'change' : 'input';
-      el.addEventListener(evt, () => this._handleConfigChanged());
+    // Other listeners
+    ['title','subtitle'].forEach(id => {
+      this.shadowRoot.querySelector(`#${id}`)
+        .addEventListener('input', () => this._handleConfigChanged());
     });
+    this.shadowRoot.querySelector('#enable_quantity')
+      .addEventListener('change', () => this._handleConfigChanged());
     ep.addEventListener('value-changed', () => this._handleConfigChanged());
-    ['off_icon','on_icon','off_color','on_color'].forEach(id => {
+    ['off_icon','on_icon'].forEach(id => {
       this.shadowRoot.querySelector(`#${id}`)
         .addEventListener('value-changed', () => this._handleConfigChanged());
     });
 
     this._rendered = true;
     if (this._config) this._updateFormValues();
+  }
+
+  _getEditorHex(val) {
+    if (!val) return '#000000';
+    if (val.startsWith('#')) return val;
+    const hex = ShoppingListCard.COLOR_MAP[val.toLowerCase()];
+    return hex || '#000000';
   }
 
   _updateFormValues() {
@@ -116,10 +136,15 @@ class ShoppingListCardEditor extends HTMLElement {
     s.querySelector('#todo_list').value = this._config.todo_list || '';
     s.querySelector('#enable_quantity').checked = !!this._config.enable_quantity;
 
-    s.querySelector('#off_icon').value = this._config.off_icon || ShoppingListCard.DEFAULT_OFF_ICON;
-    s.querySelector('#on_icon').value = this._config.on_icon || ShoppingListCard.DEFAULT_ON_ICON;
-    s.querySelector('#off_color').value = this._config.off_color || ShoppingListCard.DEFAULT_OFF_COLOR;
-    s.querySelector('#on_color').value = this._config.on_color || ShoppingListCard.DEFAULT_ON_COLOR;
+    ['off','on'].forEach(type => {
+      const ic = this._config[`${type}_icon`] || ShoppingListCard[`DEFAULT_${type.toUpperCase()}_ICON`];
+      s.querySelector(`#${type}_icon`).value = ic;
+      const col = this._config[`${type}_color`] || ShoppingListCard[`DEFAULT_${type.toUpperCase()}_COLOR`];
+      const tf = s.querySelector(`#${type}_color`);
+      const cp = s.querySelector(`#${type}_color_picker`);
+      tf.value = col;
+      cp.value = this._getEditorHex(col);
+    });
   }
 
   _handleConfigChanged() {
@@ -131,20 +156,20 @@ class ShoppingListCardEditor extends HTMLElement {
     };
     if (s.querySelector('#subtitle').value) cfg.subtitle = s.querySelector('#subtitle').value;
     if (s.querySelector('#enable_quantity').checked) cfg.enable_quantity = true;
-    const offIcon = s.querySelector('#off_icon').value;
-    if (offIcon !== ShoppingListCard.DEFAULT_OFF_ICON) cfg.off_icon = offIcon;
-    const onIcon = s.querySelector('#on_icon').value;
-    if (onIcon !== ShoppingListCard.DEFAULT_ON_ICON) cfg.on_icon = onIcon;
-    const offColor = s.querySelector('#off_color').value;
-    if (offColor !== ShoppingListCard.DEFAULT_OFF_COLOR) cfg.off_color = offColor;
-    const onColor = s.querySelector('#on_color').value;
-    if (onColor !== ShoppingListCard.DEFAULT_ON_COLOR) cfg.on_color = onColor;
+
+    ['off','on'].forEach(type => {
+      const icon = s.querySelector(`#${type}_icon`).value;
+      if (icon && icon !== ShoppingListCard[`DEFAULT_${type.toUpperCase()}_ICON`]) cfg[`${type}_icon`] = icon;
+      const col = s.querySelector(`#${type}_color`).value;
+      if (col && col !== ShoppingListCard[`DEFAULT_${type.toUpperCase()}_COLOR`]) cfg[`${type}_color`] = col;
+    });
 
     this.dispatchEvent(new CustomEvent('config-changed', {
-      detail: { config: cfg }, bubbles: true, composed: true
+      detail: { config: cfg }, bubbles: true, composed: true,
     }));
   }
 }
+
 customElements.define('shopping-list-card-editor', ShoppingListCardEditor);
 
 // ── Card ─────────────────────────────────────────────────────────────────────
