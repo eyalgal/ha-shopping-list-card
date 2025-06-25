@@ -83,9 +83,16 @@ class ShoppingListCardEditor extends HTMLElement {
         <ha-textfield id="title" label="Title (Required)" required></ha-textfield>
         <ha-textfield id="subtitle" label="Subtitle (Optional)"></ha-textfield>
       </div>
+      <div class="row">
+        <ha-textfield id="image" label="Image URL (Optional)" placeholder="/local/shopping/milk.png or https://..."></ha-textfield>
+      </div>
       <div class="switch-row">
         <ha-switch id="enable_quantity"></ha-switch>
         <span style="font-weight:500; flex-grow: 1;">Enable Quantity</span>
+      </div>
+      <div class="switch-row">
+        <ha-switch id="vertical_layout"></ha-switch>
+        <span style="font-weight:500; flex-grow: 1;">Use Vertical Layout</span>
       </div>
       <div class="picker-row">
         <ha-icon-picker id="off_icon" label="Off Icon"></ha-icon-picker>
@@ -166,9 +173,11 @@ class ShoppingListCardEditor extends HTMLElement {
     
     s.querySelector('#title').value = this._config.title || '';
     s.querySelector('#subtitle').value = this._config.subtitle || '';
+    s.querySelector('#image').value = this._config.image || '';
     s.querySelector('#todo_list').value = this._config.todo_list || '';
     s.querySelector('#enable_quantity').checked = !!this._config.enable_quantity;
     s.querySelector('#colorize_background').checked = this._config.colorize_background !== false;
+    s.querySelector('#vertical_layout').checked = this._config.layout === 'vertical';
     
     // Only trigger config change if we're auto-populating
     if (shouldAutoPopulate && todoEntity) {
@@ -193,6 +202,7 @@ class ShoppingListCardEditor extends HTMLElement {
     // Update values from the form
     newConfig.title = s.querySelector('#title').value;
     newConfig.subtitle = s.querySelector('#subtitle').value || undefined;
+    newConfig.image = s.querySelector('#image').value || undefined;
     newConfig.todo_list = s.querySelector('#todo_list').value;
 
     // Handle boolean switches, only saving non-default values
@@ -209,6 +219,13 @@ class ShoppingListCardEditor extends HTMLElement {
     } else {
       // Only save if the user explicitly sets it to false
       newConfig.colorize_background = false;
+    }
+
+    const verticalLayout = s.querySelector('#vertical_layout').checked;
+    if (verticalLayout) {
+      newConfig.layout = 'vertical';
+    } else {
+      delete newConfig.layout; // Default is horizontal
     }
     
     ['off','on'].forEach(type => {
@@ -274,6 +291,11 @@ class ShoppingListCard extends HTMLElement {
     if (!config.title)     throw new Error('You must define a title.');
     if (!config.todo_list) throw new Error('You must define a todo_list entity_id.');
     this._config = config;
+    // Force re-render when config changes
+    if (this._hass) {
+      this._lastUpdated = null;
+      this._render();
+    }
   }
 
   static getConfigElement() { return document.createElement('shopping-list-card-editor'); }
@@ -374,11 +396,25 @@ class ShoppingListCard extends HTMLElement {
 	  `;
 	}
 
+    const isVertical = this._config.layout === 'vertical';
+    const layoutClass = isVertical ? 'vertical-layout' : '';
+
     this.content.innerHTML = `
-      <div class="card-container ${isOn?'is-on':'is-off'}" ${cardBgStyle}>
-        <div class="icon-wrapper" style="background:${bg}; color:${fg};">
-          <ha-icon icon="${icon}"></ha-icon>
-        </div>
+      <div class="card-container ${isOn?'is-on':'is-off'} ${layoutClass}" ${cardBgStyle}>
+        ${this._config.image 
+          ? `<div class="image-wrapper ${isVertical ? 'vertical-image' : ''}">
+               <img src="${this._config.image}" 
+                    alt="${this._config.title}" 
+                    crossorigin="anonymous"
+                    onerror="console.error('Failed to load image:', '${this._config.image}'); this.style.display='none'; this.parentElement.querySelector('.icon-wrapper').style.display='flex';" />
+               <div class="icon-wrapper ${isVertical ? 'vertical-icon' : ''}" style="background:${bg}; color:${fg}; display:none;">
+                 <ha-icon icon="${icon}"></ha-icon>
+               </div>
+             </div>`
+          : `<div class="icon-wrapper ${isVertical ? 'vertical-icon' : ''}" style="background:${bg}; color:${fg};">
+               <ha-icon icon="${icon}"></ha-icon>
+             </div>`
+        }
         <div class="info-container">
           <div class="primary">${this._config.title}</div>
           ${this._config.subtitle?`<div class="secondary">${this._config.subtitle}</div>`:''}
@@ -458,8 +494,17 @@ class ShoppingListCard extends HTMLElement {
       .card-content { padding:0 !important }
       .card-container { display:flex; align-items:center; padding:10px; gap:10px; cursor:pointer; transition:background-color .2s }
       .card-container:hover { background: var(--secondary-background-color) }
+      .card-container.vertical-layout { flex-direction:column; text-align:center; padding:16px 10px }
       .icon-wrapper { display:flex; align-items:center; justify-content:center; width:36px; height:36px; border-radius:50%; flex-shrink:0 }
+      .icon-wrapper.vertical-icon { width:48px; height:48px }
+      .icon-wrapper.vertical-icon ha-icon { --mdc-icon-size: 28px; }
+      .image-wrapper { position:relative; width:36px; height:36px; flex-shrink:0 }
+      .image-wrapper.vertical-image { width:auto; height:48px; max-width:100% }
+      .image-wrapper img { width:100%; height:100%; object-fit:cover; border-radius:50% }
+      .image-wrapper.vertical-image img { object-fit:contain; border-radius:4px; width:auto; max-width:100% }
+      .image-wrapper .icon-wrapper { position:absolute; top:0; left:0; width:100%; height:100% }
       .info-container { flex-grow:1; overflow:hidden; min-width:0 }
+      .vertical-layout .info-container { flex-grow:0 }
       .primary { font-size:14px; font-weight:500; line-height:20px; color:var(--primary-text-color); white-space:nowrap; overflow:hidden; text-overflow:ellipsis }
       .secondary { font-size:12px; font-weight:400; line-height:16px; color:var(--secondary-text-color); white-space:nowrap; overflow:hidden; text-overflow:ellipsis }
       .quantity-controls { display:flex; align-items:center; gap:4px; flex-shrink:0 }
