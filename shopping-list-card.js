@@ -6,6 +6,9 @@
  *
  * Author: eyalgal
  * License: MIT
+ * 
+ * Note: This card requires a to-do entity to function properly.
+ * For more information, visit: https://github.com/eyalgal/ha-shopping-list-card
  */
 
 // ── Editor ───────────────────────────────────────────────────────────────────
@@ -15,6 +18,7 @@ class ShoppingListCardEditor extends HTMLElement {
     super();
     this.attachShadow({ mode: 'open' });
     this._rendered = false;
+    this._hasInitialized = false;
   }
 
   set hass(hass) {
@@ -29,6 +33,12 @@ class ShoppingListCardEditor extends HTMLElement {
 
   _render() {
     if (!this.shadowRoot || !this._hass) return;
+
+    // Check if there are any todo entities
+    const todoEntities = Object.keys(this._hass.states).filter(entityId => 
+      entityId.startsWith('todo.')
+    );
+    const hasTodoEntities = todoEntities.length > 0;
 
     this.shadowRoot.innerHTML = `
       <style>
@@ -45,7 +55,26 @@ class ShoppingListCardEditor extends HTMLElement {
           cursor: pointer;
           background: none;
         }
+        .info-box {
+          background: var(--info-color, #039be5);
+          color: white;
+          padding: 12px;
+          border-radius: 4px;
+          margin-bottom: 16px;
+          font-size: 14px;
+        }
+        .info-box a {
+          color: white;
+          text-decoration: underline;
+        }
       </style>
+
+      ${!hasTodoEntities ? `
+        <div class="info-box">
+          <strong>Note:</strong> No to-do entities found. This card requires a to-do entity to function. 
+          <a href="https://github.com/eyalgal/ha-shopping-list-card" target="_blank">View documentation</a>
+        </div>
+      ` : ''}
 
       <div class="row">
         <ha-entity-picker id="todo_list" label="To-Do List Entity (Required)" required></ha-entity-picker>
@@ -118,12 +147,36 @@ class ShoppingListCardEditor extends HTMLElement {
 
   _updateFormValues() {
     const s = this.shadowRoot;
+    
+    // If no todo_list is configured, try to find the first available todo entity
+    let todoEntity = this._config.todo_list;
+    let shouldAutoPopulate = false;
+    
+    if (!todoEntity && this._hass && !this._hasInitialized) {
+      // Only auto-populate on first load, not when user explicitly removes it
+      const todoEntities = Object.keys(this._hass.states).filter(entityId => 
+        entityId.startsWith('todo.')
+      );
+      if (todoEntities.length > 0) {
+        todoEntity = todoEntities[0];
+        shouldAutoPopulate = true;
+      }
+      this._hasInitialized = true;
+    }
+    
     s.querySelector('#title').value = this._config.title || '';
     s.querySelector('#subtitle').value = this._config.subtitle || '';
     s.querySelector('#todo_list').value = this._config.todo_list || '';
     s.querySelector('#enable_quantity').checked = !!this._config.enable_quantity;
-    s.querySelector('#colorize_background').checked = !!this._config.colorize_background;
-
+    s.querySelector('#colorize_background').checked = this._config.colorize_background !== false;
+    
+    // Only trigger config change if we're auto-populating
+    if (shouldAutoPopulate && todoEntity) {
+      s.querySelector('#todo_list').value = todoEntity;
+      // Delay to ensure UI is ready
+      setTimeout(() => this._handleConfigChanged(), 100);
+    }
+	  
     ['off','on'].forEach(type => {
       s.querySelector(`#${type}_icon`).value = this._config[`${type}_icon`] || ShoppingListCard[`DEFAULT_${type.toUpperCase()}_ICON`];
       const col = this._config[`${type}_color`] || ShoppingListCard[`DEFAULT_${type.toUpperCase()}_COLOR`];
@@ -141,8 +194,22 @@ class ShoppingListCardEditor extends HTMLElement {
     newConfig.title = s.querySelector('#title').value;
     newConfig.subtitle = s.querySelector('#subtitle').value || undefined;
     newConfig.todo_list = s.querySelector('#todo_list').value;
-    newConfig.enable_quantity = s.querySelector('#enable_quantity').checked;
-    newConfig.colorize_background = s.querySelector('#colorize_background').checked;
+
+    // Handle boolean switches, only saving non-default values
+    const enableQuantity = s.querySelector('#enable_quantity').checked;
+    if (enableQuantity) { // Default is false, so we only need to save if true
+      newConfig.enable_quantity = true;
+    } else {
+      delete newConfig.enable_quantity;
+    }
+
+    const colorizeBackground = s.querySelector('#colorize_background').checked;
+    if (colorizeBackground) { // New default is true, so we can delete the key
+      delete newConfig.colorize_background;
+    } else {
+      // Only save if the user explicitly sets it to false
+      newConfig.colorize_background = false;
+    }
     
     ['off','on'].forEach(type => {
       const icon = s.querySelector(`#${type}_icon`).value;
@@ -210,7 +277,13 @@ class ShoppingListCard extends HTMLElement {
   }
 
   static getConfigElement() { return document.createElement('shopping-list-card-editor'); }
-  static getStubConfig()    { return { type: 'custom:shopping-list-card', title: 'New Item', todo_list: '' }; }
+  static getStubConfig() {
+    // Return a basic config - the editor will handle finding a todo entity
+    return { 
+      type: 'custom:shopping-list-card', 
+      title: 'New Item'
+    };
+  }
 
   _escapeRegExp(s) { return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); }
 
@@ -280,7 +353,7 @@ class ShoppingListCard extends HTMLElement {
     const fg      = isOn ? onHex : offHex;
 
     let cardBgStyle = '';
-    if (isOn && this._config.colorize_background) {
+    if (isOn && this._config.colorize_background !== false) {
       cardBgStyle = `style="background-color: ${this._toRgba(onHex, 0.1)};"`;
     }
 
