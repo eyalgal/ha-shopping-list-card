@@ -1,17 +1,16 @@
 # 🛍️ Shopping List Card
 [![GitHub Release][release_badge]][release]
+[![Community Forum][forum_badge]][forum] 
 [![Buy Me A Coffee][bmac_badge]][bmac]
-<!--[![Community Forum][forum_badge]][forum] 
--->
+
 
 <!-- Link references -->
 [release_badge]: https://img.shields.io/github/v/release/eyalgal/ha-shopping-list-card
 [release]: https://github.com/eyalgal/ha-shopping-list-card/releases
+[forum_badge]: https://img.shields.io/badge/Community-Forum-5294E2.svg
+[forum]: https://community.home-assistant.io/t/shopping-list-card-a-simple-card-for-quick-adding-items-to-any-to-do-list/905005
 [bmac_badge]: https://img.shields.io/badge/buy_me_a-coffee-yellow
 [bmac]: https://www.buymeacoffee.com/eyalgal
-<!--[forum_badge]: https://img.shields.io/badge/Community-Forum-5294E2.svg
-[forum]: <!-- TODO: Add link to your HA community forum post -->
-
 
 A simple and intuitive Lovelace card for Home Assistant to quickly add and manage items on your shopping list. This card is designed to work with the native `todo` integration and provides a clean, modern interface for your dashboard.
 
