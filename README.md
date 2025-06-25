@@ -1,11 +1,7 @@
 # 🛍️ Shopping List Card
 [![GitHub Release][release_badge]][release]
 [![Buy Me A Coffee][bmac_badge]][bmac]
-<!--
-[![Downloads][downloads_badge]][release]
-[![HACS Status][hacs_badge]][hacs]
-[![License][license_badge]][license]
-[![Community Forum][forum_badge]][forum] 
+<!--[![Community Forum][forum_badge]][forum] 
 -->
 
 <!-- Link references -->
@@ -13,13 +9,7 @@
 [release]: https://github.com/eyalgal/ha-shopping-list-card/releases
 [bmac_badge]: https://img.shields.io/badge/buy_me_a-coffee-yellow
 [bmac]: https://www.buymeacoffee.com/eyalgal
-<!--
-[downloads_badge]: https://img.shields.io/github/downloads/eyalgal/ha-shopping-list-card/total
-[hacs_badge]: https://img.shields.io/badge/HACS-Custom-41BDF5.svg
-[hacs]: https://hacs.xyz
-[license_badge]: https://img.shields.io/github/license/eyalgal/ha-shopping-list-card
-[license]: https://github.com/eyalgal/ha-shopping-list-card/blob/main/LICENSE
-[forum_badge]: https://img.shields.io/badge/Community-Forum-5294E2.svg
+<!--[forum_badge]: https://img.shields.io/badge/Community-Forum-5294E2.svg
 [forum]: <!-- TODO: Add link to your HA community forum post -->
 
 
@@ -42,16 +32,24 @@ A simple and intuitive Lovelace card for Home Assistant to quickly add and manag
 
 ## ✅ Prerequisites
 
-* **To-do List Integration:** You must have a to-do list set up via the `todo` integration. You can add one by going to **Settings > Devices & Services > Add Integration** and searching for **Local To-do**.
+* **To-do List Integration:** You must have a to-do list set up via the `todo` integration. This can be the built-in Local To‑do integration or any third‑party integration that provides a `todo.<your_list>` entity—**e.g. Bring! or Todoist.** Add your preferred integration under **Settings > Devices & Services > Add Integration.**
 
 ## 🚀 Installation (HACS)
 
-1.  Go to HACS in your Home Assistant.
-2.  Click on "Frontend" and then the 3 dots in the top right and "Custom repositories".
-3.  Add the repository URL `https://github.com/eyalgal/ha-shopping-list-card` and select the category "Dashboard".
-4.  Click "ADD".
-5.  You should now see the "Shopping List Card" in your HACS frontend list. Click "INSTALL".
-6.  Refresh your browser.
+### HACS
+
+Shopping List Card is available in [HACS](https://hacs.xyz/) (Home Assistant Community Store).
+
+Use this link to directly go to the repository in HACS:
+
+[![Open your Home Assistant instance and open a repository inside the Home Assistant Community Store.](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=eyalgal&repository=ha-shopping-list-card)
+
+_or_
+
+1. Install HACS if you don't have it already  
+2. Open HACS in Home Assistant  
+3. Search for "Shopping List Card"  
+4. Click the download button. ⬇️
 
 ## ⚙️ Configuration
 
