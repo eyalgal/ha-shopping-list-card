@@ -14,7 +14,7 @@
 
 A simple and intuitive Lovelace card for Home Assistant to quickly add and manage items on your shopping list. This card is designed to work with the native `todo` integration and provides a clean, modern interface for your dashboard.
 
-<img src="https://github.com/user-attachments/assets/af82b676-2032-4395-abab-85696bd93c74" alt="Shopping List Card Preview" width="700"/>
+<img src="https://github.com/user-attachments/assets/005161c4-abdc-4dca-a604-0386e69cae90" alt="Shopping List Card Preview" width="700"/>
 
 > *The list at the bottom of the screenshot is the standard `type: todo-list` [card](https://www.home-assistant.io/lovelace/todo-list/), used here to display the full list.*
 
@@ -68,14 +68,13 @@ For advanced use cases, you can configure the card using YAML:
 ```yaml
 type: custom:shopping-list-card
 title: Feed Guinness
+subtitle: Morning & Evening
 todo_list: todo.daily_chores
-enable_quantity: false
-off_icon: mdi:paw-off
-on_icon: mdi:paw
+layout: vertical
+enable_quantity: true
+image: /local/images/guinness.png
 on_color: brown
 colorize_background: true
-layout: vertical
-image: /local/shopping/pet-food.png
 ```
 
 ### Options
