@@ -283,6 +283,13 @@ class ShoppingListCard extends HTMLElement {
       this.content = this.querySelector('div.card-content');
       this._attachStyles();
     }
+	
+								 
+													   
+																 
+											
+	 
+
     this._render();
   }
 
@@ -328,6 +335,11 @@ class ShoppingListCard extends HTMLElement {
     const container = this.content.querySelector('.card-container');
     if (container) container.classList.remove('is-updating');
     if (!this._config || !this._hass) return;
+	
+								  
+																											   
+			   
+	 
 
     const state = this._hass.states[this._config.todo_list];
     if (!state) {
@@ -510,7 +522,7 @@ class ShoppingListCard extends HTMLElement {
     if (this.querySelector('style')) return;
     const s = document.createElement('style');
     s.textContent = `
-      ha-card { border-radius: var(--ha-card-border-radius,12px); background: var(--card-background-color); box-shadow: var(--ha-card-box-shadow); overflow:hidden; }
+      ha-card { border-radius: var(--ha-card-border-radius,12px); box-shadow: var(--ha-card-box-shadow); overflow:hidden; }
       .card-content { padding:0 !important; }
       .card-container { display:flex; align-items:center; padding:10px 12px; gap:10px; cursor:pointer; transition:background-color .2s; box-sizing: border-box; }
       .card-container:hover { background: var(--secondary-background-color) }
@@ -563,6 +575,7 @@ class ShoppingListCard extends HTMLElement {
   }
 }
 customElements.define('shopping-list-card', ShoppingListCard);
+																		   
 window.customCards = window.customCards || [];
 window.customCards.push({
   type: 'shopping-list-card',
