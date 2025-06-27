@@ -6,8 +6,7 @@
  *
  * Author: eyalgal
  * License: MIT
- * 
- * Note: This card requires a to-do entity to function properly.
+ * * Note: This card requires a to-do entity to function properly.
  * For more information, visit: https://github.com/eyalgal/ha-shopping-list-card
  */
 
@@ -35,7 +34,7 @@ class ShoppingListCardEditor extends HTMLElement {
     if (!this.shadowRoot || !this._hass) return;
 
     // Check if there are any todo entities
-    const todoEntities = Object.keys(this._hass.states).filter(entityId => 
+    const todoEntities = Object.keys(this._hass.states).filter(entityId =>
       entityId.startsWith('todo.')
     );
     const hasTodoEntities = todoEntities.length > 0;
@@ -71,7 +70,7 @@ class ShoppingListCardEditor extends HTMLElement {
 
       ${!hasTodoEntities ? `
         <div class="info-box">
-          <strong>Note:</strong> No to-do entities found. This card requires a to-do entity to function. 
+          <strong>Note:</strong> No to-do entities found. This card requires a to-do entity to function.
           <a href="https://github.com/eyalgal/ha-shopping-list-card" target="_blank">View documentation</a>
         </div>
       ` : ''}
@@ -154,14 +153,14 @@ class ShoppingListCardEditor extends HTMLElement {
 
   _updateFormValues() {
     const s = this.shadowRoot;
-    
+
     // If no todo_list is configured, try to find the first available todo entity
     let todoEntity = this._config.todo_list;
     let shouldAutoPopulate = false;
-    
+
     if (!todoEntity && this._hass && !this._hasInitialized) {
       // Only auto-populate on first load, not when user explicitly removes it
-      const todoEntities = Object.keys(this._hass.states).filter(entityId => 
+      const todoEntities = Object.keys(this._hass.states).filter(entityId =>
         entityId.startsWith('todo.')
       );
       if (todoEntities.length > 0) {
@@ -170,7 +169,7 @@ class ShoppingListCardEditor extends HTMLElement {
       }
       this._hasInitialized = true;
     }
-    
+
     s.querySelector('#title').value = this._config.title || '';
     s.querySelector('#subtitle').value = this._config.subtitle || '';
     s.querySelector('#image').value = this._config.image || '';
@@ -178,14 +177,14 @@ class ShoppingListCardEditor extends HTMLElement {
     s.querySelector('#enable_quantity').checked = !!this._config.enable_quantity;
     s.querySelector('#colorize_background').checked = this._config.colorize_background !== false;
     s.querySelector('#vertical_layout').checked = this._config.layout === 'vertical';
-    
+
     // Only trigger config change if we're auto-populating
     if (shouldAutoPopulate && todoEntity) {
       s.querySelector('#todo_list').value = todoEntity;
       // Delay to ensure UI is ready
       setTimeout(() => this._handleConfigChanged(), 100);
     }
-	  
+
     ['off','on'].forEach(type => {
       s.querySelector(`#${type}_icon`).value = this._config[`${type}_icon`] || ShoppingListCard[`DEFAULT_${type.toUpperCase()}_ICON`];
       const col = this._config[`${type}_color`] || ShoppingListCard[`DEFAULT_${type.toUpperCase()}_COLOR`];
@@ -198,7 +197,7 @@ class ShoppingListCardEditor extends HTMLElement {
     const s = this.shadowRoot;
     // Start with a copy of the existing config to preserve unknown keys
     const newConfig = { ...this._config };
-    
+
     // Update values from the form
     newConfig.title = s.querySelector('#title').value;
     newConfig.subtitle = s.querySelector('#subtitle').value || undefined;
@@ -227,7 +226,7 @@ class ShoppingListCardEditor extends HTMLElement {
     } else {
       delete newConfig.layout; // Default is horizontal
     }
-    
+
     ['off','on'].forEach(type => {
       const icon = s.querySelector(`#${type}_icon`).value;
       if (icon === ShoppingListCard[`DEFAULT_${type.toUpperCase()}_ICON`]) {
@@ -288,10 +287,9 @@ class ShoppingListCard extends HTMLElement {
   }
 
   setConfig(config) {
-    if (!config.title)     throw new Error('You must define a title.');
+    if (!config.title)      throw new Error('You must define a title.');
     if (!config.todo_list) throw new Error('You must define a todo_list entity_id.');
     this._config = config;
-    // Force re-render when config changes
     if (this._hass) {
       this._lastUpdated = null;
       this._render();
@@ -300,10 +298,10 @@ class ShoppingListCard extends HTMLElement {
 
   static getConfigElement() { return document.createElement('shopping-list-card-editor'); }
   static getStubConfig() {
-    // Return a basic config - the editor will handle finding a todo entity
-    return { 
-      type: 'custom:shopping-list-card', 
-      title: 'New Item'
+    return {
+      type: 'custom:shopping-list-card',
+      title: 'New Item',
+      todo_list: '' // Add empty string to pass validation, editor will populate
     };
   }
 
@@ -343,13 +341,13 @@ class ShoppingListCard extends HTMLElement {
 
     let summaries = [];
     try {
-	  const res = await this._hass.callWS({
-	    type: 'todo/item/list',
-	    entity_id: this._config.todo_list,
-	  });
-	  summaries = res.items
-	    .filter(item => item.status === 'needs_action')
-	    .map(item => item.summary);
+      const res = await this._hass.callWS({
+        type: 'todo/item/list',
+        entity_id: this._config.todo_list,
+      });
+      summaries = res.items
+        .filter(item => item.status === 'needs_action')
+        .map(item => item.summary);
     } catch (e) {
       console.error('Error fetching items', e);
       this.content.innerHTML = `<div class="warning">Error fetching items.</div>`;
@@ -363,9 +361,9 @@ class ShoppingListCard extends HTMLElement {
       if (m) { isOn = true; matched = s; qty = m[1] ? +m[1] : 1; break; }
     }
 
-    const onIcon    = this._config.on_icon   || ShoppingListCard.DEFAULT_ON_ICON;
-    const offIcon   = this._config.off_icon  || ShoppingListCard.DEFAULT_OFF_ICON;
-    const onColorN  = this._config.on_color  || ShoppingListCard.DEFAULT_ON_COLOR;
+    const onIcon    = this._config.on_icon    || ShoppingListCard.DEFAULT_ON_ICON;
+    const offIcon   = this._config.off_icon   || ShoppingListCard.DEFAULT_OFF_ICON;
+    const onColorN  = this._config.on_color   || ShoppingListCard.DEFAULT_ON_COLOR;
     const offColorN = this._config.off_color || ShoppingListCard.DEFAULT_OFF_COLOR;
     const onHex     = this._getColorValue(onColorN)  || '#4CAF50';
     const offHex    = this._getColorValue(offColorN) || '#808080';
@@ -379,42 +377,70 @@ class ShoppingListCard extends HTMLElement {
       cardBgStyle = `style="background-color: ${this._toRgba(onHex, 0.1)};"`;
     }
 
-	let qtyControls = '';
-	if (isOn && this._config.enable_quantity) {
-	  qtyControls = `
-		<div class="quantity-controls">
-		  ${qty > 1
-			? `<div class="quantity-btn" data-action="decrement">
-				 <ha-icon icon="mdi:minus"></ha-icon>
-			   </div>`
-			: ''}
-		  <span class="quantity">${qty}</span>
-		  <div class="quantity-btn" data-action="increment">
-			<ha-icon icon="mdi:plus"></ha-icon>
-		  </div>
-		</div>
-	  `;
-	}
-
     const isVertical = this._config.layout === 'vertical';
     const layoutClass = isVertical ? 'vertical-layout' : '';
 
+    let mainContent = '';
+    let qtyControls = '';
+    let topBlock = '';
+
+    if (isVertical) {
+        let quantityBadge = '';
+        if (isOn && this._config.enable_quantity) {
+            quantityBadge = `<span class="quantity-badge">${qty}</span>`;
+        }
+
+        let iconElement;
+        if (this._config.image) {
+            iconElement = `<div class="image-wrapper vertical-image">
+                             <img src="${this._config.image}" alt="${this._config.title}" crossorigin="anonymous" onerror="console.error('Failed to load image:', '${this._config.image}'); this.style.display='none'; this.parentElement.classList.add('image-error');" />
+                             ${quantityBadge}
+                             <div class="icon-wrapper vertical-icon" style="background:${bg}; color:${fg};">
+                               <ha-icon icon="${icon}"></ha-icon>
+                             </div>
+                           </div>`;
+        } else {
+            iconElement = `<div class="icon-wrapper vertical-icon" style="background:${bg}; color:${fg};">
+                             <ha-icon icon="${icon}"></ha-icon>
+                             ${quantityBadge}
+                           </div>`;
+        }
+
+        if (isOn && this._config.enable_quantity) {
+            topBlock = `<div class="vertical-icon-container">
+                                ${qty > 1 ? `<div class="quantity-btn" data-action="decrement"><ha-icon icon="mdi:minus"></ha-icon></div>` : `<div class="quantity-btn-placeholder"></div>`}
+                                ${iconElement}
+                                <div class="quantity-btn" data-action="increment"><ha-icon icon="mdi:plus"></ha-icon></div>
+                             </div>`;
+        } else {
+            topBlock = iconElement;
+        }
+    } else { // Horizontal layout
+        if (this._config.image) {
+            mainContent = `<div class="image-wrapper">
+                             <img src="${this._config.image}" alt="${this._config.title}" crossorigin="anonymous" onerror="console.error('Failed to load image:', '${this._config.image}'); this.style.display='none'; this.parentElement.classList.add('image-error');" />
+                             <div class="icon-wrapper" style="background:${bg}; color:${fg};">
+                               <ha-icon icon="${icon}"></ha-icon>
+                             </div>
+                           </div>`;
+        } else {
+            mainContent = `<div class="icon-wrapper" style="background:${bg}; color:${fg};">
+                             <ha-icon icon="${icon}"></ha-icon>
+                           </div>`;
+        }
+
+        if (isOn && this._config.enable_quantity) {
+            qtyControls = `<div class="quantity-controls">
+                                ${qty > 1 ? `<div class="quantity-btn" data-action="decrement"><ha-icon icon="mdi:minus"></ha-icon></div>` : ''}
+                                <span class="quantity">${qty}</span>
+                                <div class="quantity-btn" data-action="increment"><ha-icon icon="mdi:plus"></ha-icon></div>
+                             </div>`;
+        }
+    }
+
     this.content.innerHTML = `
       <div class="card-container ${isOn?'is-on':'is-off'} ${layoutClass}" ${cardBgStyle}>
-        ${this._config.image 
-          ? `<div class="image-wrapper ${isVertical ? 'vertical-image' : ''}">
-               <img src="${this._config.image}" 
-                    alt="${this._config.title}" 
-                    crossorigin="anonymous"
-                    onerror="console.error('Failed to load image:', '${this._config.image}'); this.style.display='none'; this.parentElement.querySelector('.icon-wrapper').style.display='flex';" />
-               <div class="icon-wrapper ${isVertical ? 'vertical-icon' : ''}" style="background:${bg}; color:${fg}; display:none;">
-                 <ha-icon icon="${icon}"></ha-icon>
-               </div>
-             </div>`
-          : `<div class="icon-wrapper ${isVertical ? 'vertical-icon' : ''}" style="background:${bg}; color:${fg};">
-               <ha-icon icon="${icon}"></ha-icon>
-             </div>`
-        }
+        ${isVertical ? `<div class="vertical-top-block">${topBlock}</div>` : mainContent}
         <div class="info-container">
           <div class="primary">${this._config.title}</div>
           ${this._config.subtitle?`<div class="secondary">${this._config.subtitle}</div>`:''}
@@ -452,19 +478,13 @@ class ShoppingListCard extends HTMLElement {
       try {
         await call;
         this._lastUpdated = null;
-        await this._render();	 
+        await this._render();
       } catch (e) {
         console.error('Service call failed', e);
-				 
-								 
-																					   
       }
-			
-								 
-																					   
     }
     this._isUpdating = false;
-    this.content.querySelector('.card-container')?.classList.remove('is-updating');						 
+    this.content.querySelector('.card-container')?.classList.remove('is-updating');
   }
 
   _addItem(name) {
@@ -490,33 +510,55 @@ class ShoppingListCard extends HTMLElement {
     if (this.querySelector('style')) return;
     const s = document.createElement('style');
     s.textContent = `
-      ha-card { border-radius: var(--ha-card-border-radius,12px); background: var(--card-background-color); box-shadow: var(--ha-card-box-shadow); overflow:hidden }
-      .card-content { padding:0 !important }
-      .card-container { display:flex; align-items:center; padding:10px; gap:10px; cursor:pointer; transition:background-color .2s }
+      ha-card { border-radius: var(--ha-card-border-radius,12px); background: var(--card-background-color); box-shadow: var(--ha-card-box-shadow); overflow:hidden; }
+      .card-content { padding:0 !important; }
+      .card-container { display:flex; align-items:center; padding:10px 12px; gap:10px; cursor:pointer; transition:background-color .2s; box-sizing: border-box; }
       .card-container:hover { background: var(--secondary-background-color) }
-      .card-container.vertical-layout { flex-direction:column; text-align:center; padding:16px 10px }
-      .icon-wrapper { display:flex; align-items:center; justify-content:center; width:36px; height:36px; border-radius:50%; flex-shrink:0 }
-      .icon-wrapper.vertical-icon { width:48px; height:48px }
-      .icon-wrapper.vertical-icon ha-icon { --mdc-icon-size: 28px; }
+
+      /* Vertical Layout */
+      .card-container.vertical-layout { display: block; height: 120px; position: relative; }
+      .vertical-top-block { position: absolute; top: 18px; left: 16px; right: 16px; display: flex; justify-content: center; }
+      .vertical-layout .info-container { position: absolute; bottom: 12px; left: 16px; right: 16px; height: 40px; display: flex; flex-direction: column; justify-content: center; }
+
+      .vertical-icon-container { display: flex; align-items: center; justify-content: center; gap: 8px; }
+
+      .icon-wrapper { display:flex; align-items:center; justify-content:center; width:36px; height:36px; border-radius:50%; flex-shrink:0; position: relative; }
       .image-wrapper { position:relative; width:36px; height:36px; flex-shrink:0 }
-      .image-wrapper.vertical-image { width:auto; height:48px; max-width:100% }
       .image-wrapper img { width:100%; height:100%; object-fit:cover; border-radius:50% }
-      .image-wrapper.vertical-image img { object-fit:contain; border-radius:4px; width:auto; max-width:100% }
-      .image-wrapper .icon-wrapper { position:absolute; top:0; left:0; width:100%; height:100% }
-      .info-container { flex-grow:1; overflow:hidden; min-width:0 }
-      .vertical-layout .info-container { flex-grow:0 }
-      .primary { font-size:14px; font-weight:500; line-height:20px; color:var(--primary-text-color); white-space:nowrap; overflow:hidden; text-overflow:ellipsis }
-      .secondary { font-size:12px; font-weight:400; line-height:16px; color:var(--secondary-text-color); white-space:nowrap; overflow:hidden; text-overflow:ellipsis }
+      .image-wrapper .icon-wrapper { position:absolute; top:0; left:0; width:100%; height:100%; display:none; }
+      .image-wrapper.image-error .icon-wrapper { display:flex; }
+
+      .icon-wrapper.vertical-icon { width: 48px; height: 48px; }
+      .icon-wrapper.vertical-icon ha-icon { --mdc-icon-size: 28px; }
+
+      .image-wrapper.vertical-image { width: auto; height: auto; max-height: 48px; position: relative; }
+      .image-wrapper.vertical-image img { object-fit: contain; border-radius: 4px; width: auto; height: auto; max-width: 100%; max-height: 48px; }
+      .image-wrapper.vertical-image.image-error { width: 48px; height: 48px; }
+      .image-wrapper.vertical-image.image-error .icon-wrapper { position: static; }
+
+      .info-container { flex-grow:1; overflow:hidden; min-width:0; }
+      .primary { font-size:14px; font-weight:500; line-height:20px; color:var(--primary-text-color); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+      .secondary { font-size:12px; font-weight:400; line-height:16px; color:var(--secondary-text-color); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+      .vertical-layout .primary, .vertical-layout .secondary { text-align: center; }
+
+      /* Quantity Controls */
       .quantity-controls { display:flex; align-items:center; gap:4px; flex-shrink:0 }
       .quantity { font-size:14px; font-weight:500; min-width:20px; text-align:center }
-      .quantity-btn { width:24px; height:24px; background:rgba(128,128,128,0.2); border-radius:5px; display:flex; align-items:center; justify-content:center }
+      .quantity-btn { width:24px; height:24px; background:rgba(128,128,128,0.2); border-radius:5px; display:flex; align-items:center; justify-content:center; transition: background-color 0.2s; }
+      .quantity-btn:hover { background:rgba(128,128,128,0.4); }
       .quantity-btn ha-icon { --mdc-icon-size: 20px; }
+      .quantity-badge { position: absolute; top: -4px; right: -4px; background-color: var(--primary-color); color: white; border-radius: 50%; width: 18px; height: 18px; font-size: 11px; display: flex; align-items: center; justify-content: center; font-weight: 500; border: 2px solid var(--card-background-color); }
+      .quantity-btn-placeholder { width: 24px; height: 24px; flex-shrink: 0; }
+
       .warning { padding:12px; background:var(--error-color); color:var(--text-primary-color); border-radius:var(--ha-card-border-radius,12px) }
     `;
     this.appendChild(s);
   }
 
   getCardSize() {
+    if (this._config && this._config.layout === 'vertical') {
+      return 3; // A fixed height of 120px usually corresponds to 3 default rows
+    }
     return 1;
   }
 }
