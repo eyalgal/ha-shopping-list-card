@@ -295,7 +295,12 @@ class ShoppingListCard extends HTMLElement {
 
   setConfig(config) {
     if (!config.title)      throw new Error('You must define a title.');
-    if (!config.todo_list) throw new Error('You must define an entity_id (todo or input_text).');
+    if (!config.todo_list) {
+      if (config.entities && Array.isArray(config.entities)) {
+        throw new Error('This card uses "todo_list" not "entities". Please configure a single todo or input_text entity.');
+      }
+      throw new Error('You must define an entity_id (todo or input_text).');
+    }
     this._config = config;
     if (this._hass) {
       this._lastUpdated = null;
