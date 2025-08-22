@@ -33,11 +33,11 @@ class ShoppingListCardEditor extends HTMLElement {
   _render() {
     if (!this.shadowRoot || !this._hass) return;
 
-    // Check if there are any todo entities
-    const todoEntities = Object.keys(this._hass.states).filter(entityId =>
-      entityId.startsWith('todo.')
+    // Check if there are any todo or input_text entities
+    const supportedEntities = Object.keys(this._hass.states).filter(entityId =>
+      entityId.startsWith('todo.') || entityId.startsWith('input_text.')
     );
-    const hasTodoEntities = todoEntities.length > 0;
+    const hasSupportedEntities = supportedEntities.length > 0;
 
     this.shadowRoot.innerHTML = `
       <style>
@@ -68,15 +68,15 @@ class ShoppingListCardEditor extends HTMLElement {
         }
       </style>
 
-      ${!hasTodoEntities ? `
+      ${!hasSupportedEntities ? `
         <div class="info-box">
-          <strong>Note:</strong> No to-do entities found. This card requires a to-do entity to function.
+          <strong>Note:</strong> No supported entities found. This card requires a todo or input_text entity to function.
           <a href="https://github.com/eyalgal/ha-shopping-list-card" target="_blank">View documentation</a>
         </div>
       ` : ''}
 
       <div class="row">
-        <ha-entity-picker id="todo_list" label="To-Do List Entity (Required)" required></ha-entity-picker>
+        <ha-entity-picker id="todo_list" label="Entity (Todo List or Input Text)" required></ha-entity-picker>
       </div>
       <div class="row">
         <ha-textfield id="title" label="Title (Required)" required></ha-textfield>
@@ -112,7 +112,7 @@ class ShoppingListCardEditor extends HTMLElement {
     // Setup pickers
     const ep = this.shadowRoot.querySelector('#todo_list');
     ep.hass = this._hass;
-    ep.includeDomains = ['todo'];
+    ep.includeDomains = ['todo', 'input_text'];
     ep.allowCustomEntity = false;
 
     ['off_icon', 'on_icon'].forEach(id => {
@@ -160,11 +160,11 @@ class ShoppingListCardEditor extends HTMLElement {
 
     if (!todoEntity && this._hass && !this._hasInitialized) {
       // Only auto-populate on first load, not when user explicitly removes it
-      const todoEntities = Object.keys(this._hass.states).filter(entityId =>
-        entityId.startsWith('todo.')
+      const supportedEntities = Object.keys(this._hass.states).filter(entityId =>
+        entityId.startsWith('todo.') || entityId.startsWith('input_text.')
       );
-      if (todoEntities.length > 0) {
-        todoEntity = todoEntities[0];
+      if (supportedEntities.length > 0) {
+        todoEntity = supportedEntities[0];
         shouldAutoPopulate = true;
       }
       this._hasInitialized = true;
@@ -295,7 +295,7 @@ class ShoppingListCard extends HTMLElement {
 
   setConfig(config) {
     if (!config.title)      throw new Error('You must define a title.');
-    if (!config.todo_list) throw new Error('You must define a todo_list entity_id.');
+    if (!config.todo_list) throw new Error('You must define an entity_id (todo or input_text).');
     this._config = config;
     if (this._hass) {
       this._lastUpdated = null;
@@ -352,14 +352,24 @@ class ShoppingListCard extends HTMLElement {
       : this._config.title;
 
     let summaries = [];
+    const entityDomain = this._config.todo_list.split('.')[0];
+    
     try {
-      const res = await this._hass.callWS({
-        type: 'todo/item/list',
-        entity_id: this._config.todo_list,
-      });
-      summaries = res.items
-        .filter(item => item.status === 'needs_action')
-        .map(item => item.summary);
+      if (entityDomain === 'todo') {
+        const res = await this._hass.callWS({
+          type: 'todo/item/list',
+          entity_id: this._config.todo_list,
+        });
+        summaries = res.items
+          .filter(item => item.status === 'needs_action')
+          .map(item => item.summary);
+      } else if (entityDomain === 'input_text') {
+        // For input_text entities, treat the entity state as a single item
+        const entityState = state.state;
+        if (entityState && entityState.trim() !== '') {
+          summaries = [entityState.trim()];
+        }
+      }
     } catch (e) {
       console.error('Error fetching items', e);
       this.content.innerHTML = `<div class="warning">Error fetching items.</div>`;
@@ -500,22 +510,41 @@ class ShoppingListCard extends HTMLElement {
   }
 
   _addItem(name) {
-    return this._hass.callService('todo','add_item',{ entity_id: this._config.todo_list, item: name });
+    const entityDomain = this._config.todo_list.split('.')[0];
+    if (entityDomain === 'todo') {
+      return this._hass.callService('todo','add_item',{ entity_id: this._config.todo_list, item: name });
+    } else if (entityDomain === 'input_text') {
+      return this._hass.callService('input_text','set_value',{ entity_id: this._config.todo_list, value: name });
+    }
+    return Promise.resolve();
   }
 
   _removeItem(item) {
-    return item
-      ? this._hass.callService('todo','remove_item',{ entity_id: this._config.todo_list, item })
-      : Promise.resolve();
+    if (!item) return Promise.resolve();
+    
+    const entityDomain = this._config.todo_list.split('.')[0];
+    if (entityDomain === 'todo') {
+      return this._hass.callService('todo','remove_item',{ entity_id: this._config.todo_list, item });
+    } else if (entityDomain === 'input_text') {
+      return this._hass.callService('input_text','set_value',{ entity_id: this._config.todo_list, value: '' });
+    }
+    return Promise.resolve();
   }
 
   _updateQuantity(oldItem,newQty,fullName) {
-    const newName = newQty>1 ? `${fullName} (${newQty})` : fullName;
-    return this._hass.callService('todo','update_item',{
-      entity_id: this._config.todo_list,
-      item: oldItem,
-      rename: newName,
-    });
+    const entityDomain = this._config.todo_list.split('.')[0];
+    if (entityDomain === 'todo') {
+      const newName = newQty>1 ? `${fullName} (${newQty})` : fullName;
+      return this._hass.callService('todo','update_item',{
+        entity_id: this._config.todo_list,
+        item: oldItem,
+        rename: newName,
+      });
+    } else if (entityDomain === 'input_text') {
+      const newName = newQty>1 ? `${fullName} (${newQty})` : fullName;
+      return this._hass.callService('input_text','set_value',{ entity_id: this._config.todo_list, value: newName });
+    }
+    return Promise.resolve();
   }
 
   _attachStyles() {
