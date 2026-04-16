@@ -1,0 +1,26 @@
+{
+  "name": "ha-shopping-list-card",
+  "version": "1.0.0",
+  "description": "A Home Assistant Lovelace card to manage items on a to-do list",
+  "main": "index.js",
+  "scripts": {
+    "build": "rollup -c"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/eyalgal/ha-shopping-list-card.git"
+  },
+  "keywords": [],
+  "author": "eyalgal",
+  "license": "MIT",
+  "type": "module",
+  "bugs": {
+    "url": "https://github.com/eyalgal/ha-shopping-list-card/issues"
+  },
+  "homepage": "https://github.com/eyalgal/ha-shopping-list-card#readme",
+  "devDependencies": {
+    "@rollup/plugin-node-resolve": "^16.0.3",
+    "@rollup/plugin-terser": "^0.4.4",
+    "rollup": "^4.56.0"
+  }
+}
