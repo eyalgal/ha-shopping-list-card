@@ -522,7 +522,7 @@ class ShoppingListCard extends HTMLElement {
     if (this.querySelector('style')) return;
     const s = document.createElement('style');
     s.textContent = `
-      ha-card { border-radius: var(--ha-card-border-radius,12px); box-shadow: var(--ha-card-box-shadow); overflow:hidden; }
+      ha-card { border-radius: var(--ha-card-border-radius,12px); box-shadow: var(--ha-card-box-shadow); overflow:hidden; background: var(--ha-card-background, var(--card-background-color)); }
       .card-content { padding:0 !important; }
       .card-container { display:flex; align-items:center; padding:10px 12px; gap:10px; cursor:pointer; transition:background-color .2s; box-sizing: border-box; }
       .card-container:hover { background: var(--secondary-background-color) }
@@ -569,9 +569,16 @@ class ShoppingListCard extends HTMLElement {
 
   getCardSize() {
     if (this._config && this._config.layout === 'vertical') {
-      return 3; // A fixed height of 120px usually corresponds to 3 default rows
+      return 3;
     }
     return 1;
+  }
+
+  getLayoutOptions() {
+    if (this._config && this._config.layout === 'vertical') {
+      return { grid_rows: 3, grid_min_rows: 3, grid_columns: 2, grid_min_columns: 2 };
+    }
+    return { grid_rows: 1, grid_min_rows: 1, grid_columns: 4, grid_min_columns: 2 };
   }
 }
 customElements.define('shopping-list-card', ShoppingListCard);
