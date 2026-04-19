@@ -6,13 +6,13 @@
  *
  * Author: eyalgal
  * License: MIT
- * Version: 1.5.0-beta.3
+ * Version: 1.5.0-beta.4
  *
  * Note: This card requires a to-do entity to function properly.
  * For more information, visit: https://github.com/eyalgal/ha-shopping-list-card
  */
 
-const CARD_VERSION = '1.5.0-beta.3';
+const CARD_VERSION = '1.5.0-beta.4';
 
 function escapeHtml(str) {
   if (str == null) return '';
@@ -300,6 +300,10 @@ class ShoppingListCard extends HTMLElement {
       this._attachStyles();
     }
 
+    this._render();
+  }
+
+  setConfig(config) {
     if (!config.title)      throw new Error('You must define a title.');
     if (!config.todo_list) throw new Error('You must define a todo_list entity_id.');
     this._config = config;
