@@ -6,13 +6,13 @@
  *
  * Author: eyalgal
  * License: MIT
- * Version: 1.5.0-beta.2
+ * Version: 1.5.0-beta.3
  *
  * Note: This card requires a to-do entity to function properly.
  * For more information, visit: https://github.com/eyalgal/ha-shopping-list-card
  */
 
-const CARD_VERSION = '1.5.0-beta.2';
+const CARD_VERSION = '1.5.0-beta.3';
 
 function escapeHtml(str) {
   if (str == null) return '';
@@ -260,7 +260,9 @@ class ShoppingListCardEditor extends HTMLElement {
     this.dispatchEvent(new CustomEvent('config-changed', { detail: { config: newConfig }, bubbles: true, composed: true }));
   }
 }
-customElements.define('shopping-list-card-editor', ShoppingListCardEditor);
+if (!customElements.get('shopping-list-card-editor')) {
+  customElements.define('shopping-list-card-editor', ShoppingListCardEditor);
+}
 
 // ── Card ─────────────────────────────────────────────────────────────────────
 
@@ -709,15 +711,19 @@ class ShoppingListCard extends HTMLElement {
     return { grid_rows: 1, grid_min_rows: 1, grid_columns: 4, grid_min_columns: 2 };
   }
 }
-customElements.define('shopping-list-card', ShoppingListCard);
+if (!customElements.get('shopping-list-card')) {
+  customElements.define('shopping-list-card', ShoppingListCard);
+}
 																		   
 window.customCards = window.customCards || [];
-window.customCards.push({
-  type: 'shopping-list-card',
-  name: 'Shopping List Card',
-  preview: true,
-  description: 'A card to manage items on a shopping list.',
-});
+if (!window.customCards.some(c => c.type === 'shopping-list-card')) {
+  window.customCards.push({
+    type: 'shopping-list-card',
+    name: 'Shopping List Card',
+    preview: true,
+    description: 'A card to manage items on a shopping list.',
+  });
+}
 
 console.info(
   `%c SHOPPING-LIST-CARD %c v${CARD_VERSION} `,
