@@ -6,13 +6,13 @@
  *
  * Author: eyalgal
  * License: MIT
- * Version: 1.5.0-beta.4
+ * Version: 1.6.0
  *
  * Note: This card requires a to-do entity to function properly.
  * For more information, visit: https://github.com/eyalgal/ha-shopping-list-card
  */
 
-const CARD_VERSION = '1.5.0-beta.4';
+const CARD_VERSION = '1.6.0';
 
 function escapeHtml(str) {
   if (str == null) return '';
@@ -107,6 +107,10 @@ class ShoppingListCardEditor extends HTMLElement {
         <ha-switch id="vertical_layout"></ha-switch>
         <span style="font-weight:500; flex-grow: 1;">Use Vertical Layout</span>
       </div>
+      <div class="switch-row">
+        <ha-switch id="show_name"></ha-switch>
+        <span style="font-weight:500; flex-grow: 1;">Show Title / Subtitle</span>
+      </div>
       <div class="picker-row">
         <ha-icon-picker id="off_icon" label="Off Icon"></ha-icon-picker>
         <ha-textfield id="off_color" label="Off Color (name or hex)"></ha-textfield>
@@ -191,6 +195,7 @@ class ShoppingListCardEditor extends HTMLElement {
     s.querySelector('#enable_quantity').checked = !!this._config.enable_quantity;
     s.querySelector('#colorize_background').checked = this._config.colorize_background !== false;
     s.querySelector('#vertical_layout').checked = this._config.layout === 'vertical';
+    s.querySelector('#show_name').checked = this._config.show_name !== false;
 
     // Only trigger config change if we're auto-populating
     if (shouldAutoPopulate && todoEntity) {
@@ -232,6 +237,13 @@ class ShoppingListCardEditor extends HTMLElement {
     } else {
       // Only save if the user explicitly sets it to false
       newConfig.colorize_background = false;
+    }
+
+    const showName = s.querySelector('#show_name').checked;
+    if (showName) {
+      delete newConfig.show_name; // default is true
+    } else {
+      newConfig.show_name = false;
     }
 
     const verticalLayout = s.querySelector('#vertical_layout').checked;
@@ -284,33 +296,88 @@ class ShoppingListCard extends HTMLElement {
   constructor() {
     super();
     this._isUpdating = false;
-    this._lastUpdated = null;
+    this._items = null;
+    this._unsubscribe = null;
+    this._subscribedEntity = null;
   }
 
   set hass(hass) {
+    const firstHass = !this._hass;
     this._hass = hass;
     if (!this._config) return;
-    const st = hass.states[this._config.todo_list];
-    if (!st || st.last_updated === this._lastUpdated) return;
-    this._lastUpdated = st.last_updated;
-
-    if (!this.content) {
-      this.innerHTML = `<ha-card><div class="card-content"></div></ha-card>`;
-      this.content = this.querySelector('div.card-content');
-      this._attachStyles();
-    }
-
-    this._render();
+    if (firstHass) this._ensureSubscription();
+    if (this._items !== null) this._render();
   }
 
   setConfig(config) {
     if (!config.title)      throw new Error('You must define a title.');
     if (!config.todo_list) throw new Error('You must define a todo_list entity_id.');
+    const prev = this._config;
     this._config = config;
-    if (this._hass) {
-      this._lastUpdated = null;
-      this._render();
+    if (prev && prev.todo_list !== config.todo_list) {
+      this._items = null;
+      this._teardownSubscription();
     }
+    if (this._hass) {
+      this._ensureSubscription();
+      if (this._items !== null) this._render();
+    }
+  }
+
+  connectedCallback() {
+    if (this._hass && this._config) this._ensureSubscription();
+  }
+
+  disconnectedCallback() {
+    this._teardownSubscription();
+  }
+
+  _ensureSubscription() {
+    if (!this._hass || !this._config?.todo_list) return;
+    if (this._subscribedEntity === this._config.todo_list && this._unsubscribe) return;
+    this._teardownSubscription();
+    this._subscribedEntity = this._config.todo_list;
+    const entityId = this._config.todo_list;
+
+    try {
+      const unsubPromise = this._hass.connection.subscribeMessage(
+        (msg) => {
+          const items = msg?.items || [];
+          this._items = items.filter(i => i.status === 'needs_action');
+          this._render();
+        },
+        { type: 'todo/item/subscribe', entity_id: entityId }
+      );
+      this._unsubscribe = () => {
+        unsubPromise.then(unsub => { try { unsub(); } catch (_) {} }).catch(() => {});
+      };
+    } catch (e) {
+      console.error('Shopping List Card: subscription failed, falling back to polling', e);
+      this._fallbackFetch();
+    }
+  }
+
+  async _fallbackFetch() {
+    if (!this._hass || !this._config?.todo_list) return;
+    try {
+      const res = await this._hass.callWS({
+        type: 'todo/item/list',
+        entity_id: this._config.todo_list,
+      });
+      this._items = (res.items || []).filter(i => i.status === 'needs_action');
+      this._render();
+    } catch (e) {
+      console.error('Shopping List Card: fetch failed', e);
+      this._renderError('Error fetching items.');
+    }
+  }
+
+  _teardownSubscription() {
+    if (this._unsubscribe) {
+      try { this._unsubscribe(); } catch (_) {}
+      this._unsubscribe = null;
+    }
+    this._subscribedEntity = null;
   }
 
   static getConfigElement() { return document.createElement('shopping-list-card-editor'); }
@@ -340,39 +407,42 @@ class ShoppingListCard extends HTMLElement {
     return c ? `rgba(${c.r}, ${c.g}, ${c.b}, ${a})` : hex;
   }
 
-  async _render() {
+  _ensureShell() {
+    if (this.content) return;
+    this.innerHTML = `<ha-card><div class="card-content"></div></ha-card>`;
+    this.content = this.querySelector('div.card-content');
+    this._attachStyles();
+  }
+
+  _renderError(message) {
+    this._ensureShell();
+    this.content.innerHTML = `<ha-alert alert-type="error">${escapeHtml(message)}</ha-alert>`;
+  }
+
+  _render() {
+    this._ensureShell();
     this._isUpdating = false;
     const container = this.content.querySelector('.card-container');
     if (container) container.classList.remove('is-updating');
     if (!this._config || !this._hass) return;
 
-
     const state = this._hass.states[this._config.todo_list];
     if (!state) {
-      this.content.innerHTML = `<div class="warning">Entity not found: ${this._config.todo_list}</div>`;
+      this._renderError(`Entity not found: ${this._config.todo_list}`);
       return;
+    }
+
+    if (this._items === null) {
+      return; // waiting for subscription
     }
 
     const fullName = this._config.subtitle
       ? `${this._config.title} - ${this._config.subtitle}`
       : this._config.title;
 
-    let items = [];
-    try {
-      const res = await this._hass.callWS({
-        type: 'todo/item/list',
-        entity_id: this._config.todo_list,
-      });
-      items = res.items.filter(item => item.status === 'needs_action');
-    } catch (e) {
-      console.error('Error fetching items', e);
-      this.content.innerHTML = `<div class="warning">Error fetching items.</div>`;
-      return;
-    }
-
     const rx = new RegExp(`^${this._escapeRegExp(fullName)}(?: \\((\\d+)\\))?$`, 'i');
     let isOn = false, qty = 0, matched = null, matchedUid = null;
-    for (const item of items) {
+    for (const item of this._items) {
       const m = item.summary.match(rx);
       if (m) { isOn = true; matched = item.summary; matchedUid = item.uid; qty = m[1] ? +m[1] : 1; break; }
     }
@@ -469,15 +539,21 @@ class ShoppingListCard extends HTMLElement {
     ariaLabelParts.push(isOn ? (this._config.enable_quantity ? `quantity ${qty}` : 'on list') : 'not on list');
     const ariaLabel = escapeHtml(ariaLabelParts.join(', '));
 
+    const showName = this._config.show_name !== false;
+    const nameBlock = showName
+      ? `<div class="info-container">
+          <div class="primary">${escapeHtml(this._config.title)}</div>
+          ${this._config.subtitle?`<div class="secondary">${escapeHtml(this._config.subtitle)}</div>`:''}
+        </div>`
+      : '';
+    const nameClass = showName ? '' : 'no-name';
+
     this.content.innerHTML = `
-      <div class="card-container ${isOn?'is-on':'is-off'} ${layoutClass}"
+      <div class="card-container ${isOn?'is-on':'is-off'} ${layoutClass} ${nameClass}"
            role="button" tabindex="0" aria-pressed="${isOn ? 'true' : 'false'}" aria-label="${ariaLabel}"
            ${cardBgStyle}>
         ${isVertical ? `<div class="vertical-top-block">${topBlock}</div>` : mainContent}
-        <div class="info-container">
-          <div class="primary">${escapeHtml(this._config.title)}</div>
-          ${this._config.subtitle?`<div class="secondary">${escapeHtml(this._config.subtitle)}</div>`:''}
-        </div>
+        ${nameBlock}
         ${qtyControls}
       </div>
     `;
@@ -581,10 +657,8 @@ class ShoppingListCard extends HTMLElement {
 
     // Default: remove the item entirely if it is on the list.
     if (action === 'default') {
-      if (isOn) this._removeByUidOrSummary(matchedUid, matched).then(() => {
-        this._lastUpdated = null;
-        this._render();
-      }).catch(e => console.error('Hold remove failed', e));
+      if (isOn) this._removeByUidOrSummary(matchedUid, matched)
+        .catch(e => console.error('Hold remove failed', e));
     }
   }
 
@@ -617,8 +691,7 @@ class ShoppingListCard extends HTMLElement {
     if (call) {
       try {
         await call;
-        this._lastUpdated = null;
-        await this._render();
+        // Subscription will push the update; no manual re-render needed.
       } catch (e) {
         console.error('Service call failed', e);
       }
@@ -660,6 +733,11 @@ class ShoppingListCard extends HTMLElement {
       .card-container:focus-visible { box-shadow: 0 0 0 2px var(--primary-color); }
       .quantity-btn { cursor: pointer; }
       .quantity-btn:focus-visible { outline: 2px solid var(--primary-color); outline-offset: 1px; }
+
+      /* Icon-only mode */
+      .card-container.no-name { justify-content: center; }
+      .card-container.vertical-layout.no-name { height: 80px; }
+      .card-container.vertical-layout.no-name .vertical-top-block { top: 50%; transform: translateY(-50%); }
 
       /* Vertical Layout */
       .card-container.vertical-layout { display: block; height: 120px; position: relative; }
@@ -703,14 +781,15 @@ class ShoppingListCard extends HTMLElement {
 
   getCardSize() {
     if (this._config && this._config.layout === 'vertical') {
-      return 3;
+      return this._config.show_name === false ? 2 : 3;
     }
     return 1;
   }
 
   getLayoutOptions() {
     if (this._config && this._config.layout === 'vertical') {
-      return { grid_rows: 3, grid_min_rows: 3, grid_columns: 2, grid_min_columns: 2 };
+      const rows = this._config.show_name === false ? 2 : 3;
+      return { grid_rows: rows, grid_min_rows: rows, grid_columns: 2, grid_min_columns: 2 };
     }
     return { grid_rows: 1, grid_min_rows: 1, grid_columns: 4, grid_min_columns: 2 };
   }
