@@ -6,9 +6,23 @@
  *
  * Author: eyalgal
  * License: MIT
- * * Note: This card requires a to-do entity to function properly.
+ * Version: 1.5.0-beta.1
+ *
+ * Note: This card requires a to-do entity to function properly.
  * For more information, visit: https://github.com/eyalgal/ha-shopping-list-card
  */
+
+const CARD_VERSION = '1.5.0-beta.1';
+
+function escapeHtml(str) {
+  if (str == null) return '';
+  return String(str)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
 
 // ── Editor ───────────────────────────────────────────────────────────────────
 
@@ -283,17 +297,7 @@ class ShoppingListCard extends HTMLElement {
       this.content = this.querySelector('div.card-content');
       this._attachStyles();
     }
-	
-								 
-													   
-																 
-											
-	 
 
-    this._render();
-  }
-
-  setConfig(config) {
     if (!config.title)      throw new Error('You must define a title.');
     if (!config.todo_list) throw new Error('You must define a todo_list entity_id.');
     this._config = config;
@@ -335,11 +339,7 @@ class ShoppingListCard extends HTMLElement {
     const container = this.content.querySelector('.card-container');
     if (container) container.classList.remove('is-updating');
     if (!this._config || !this._hass) return;
-	
-								  
-																											   
-			   
-	 
+
 
     const state = this._hass.states[this._config.todo_list];
     if (!state) {
@@ -402,10 +402,15 @@ class ShoppingListCard extends HTMLElement {
             quantityBadge = `<span class="quantity-badge">${qty}</span>`;
         }
 
+        const safeImage = escapeHtml(this._config.image || '');
+        const safeTitle = escapeHtml(this._config.title || '');
+        const decBtn = `<div class="quantity-btn" role="button" tabindex="0" aria-label="Decrease quantity" data-action="decrement"><ha-icon icon="mdi:minus"></ha-icon></div>`;
+        const incBtn = `<div class="quantity-btn" role="button" tabindex="0" aria-label="Increase quantity" data-action="increment"><ha-icon icon="mdi:plus"></ha-icon></div>`;
+
         let iconElement;
         if (this._config.image) {
             iconElement = `<div class="image-wrapper vertical-image">
-                             <img src="${this._config.image}" alt="${this._config.title}" crossorigin="anonymous" onerror="console.error('Failed to load image:', '${this._config.image}'); this.style.display='none'; this.parentElement.classList.add('image-error');" />
+                             <img src="${safeImage}" alt="${safeTitle}" crossorigin="anonymous" />
                              ${quantityBadge}
                              <div class="icon-wrapper vertical-icon" style="background:${bg}; color:${fg};">
                                <ha-icon icon="${icon}"></ha-icon>
@@ -420,17 +425,22 @@ class ShoppingListCard extends HTMLElement {
 
         if (isOn && this._config.enable_quantity) {
             topBlock = `<div class="vertical-icon-container">
-                                ${qty > 1 ? `<div class="quantity-btn" data-action="decrement"><ha-icon icon="mdi:minus"></ha-icon></div>` : `<div class="quantity-btn-placeholder"></div>`}
+                                ${qty > 1 ? decBtn : `<div class="quantity-btn-placeholder"></div>`}
                                 ${iconElement}
-                                <div class="quantity-btn" data-action="increment"><ha-icon icon="mdi:plus"></ha-icon></div>
+                                ${incBtn}
                              </div>`;
         } else {
             topBlock = iconElement;
         }
     } else { // Horizontal layout
+        const safeImage = escapeHtml(this._config.image || '');
+        const safeTitle = escapeHtml(this._config.title || '');
+        const decBtn = `<div class="quantity-btn" role="button" tabindex="0" aria-label="Decrease quantity" data-action="decrement"><ha-icon icon="mdi:minus"></ha-icon></div>`;
+        const incBtn = `<div class="quantity-btn" role="button" tabindex="0" aria-label="Increase quantity" data-action="increment"><ha-icon icon="mdi:plus"></ha-icon></div>`;
+
         if (this._config.image) {
             mainContent = `<div class="image-wrapper">
-                             <img src="${this._config.image}" alt="${this._config.title}" crossorigin="anonymous" onerror="console.error('Failed to load image:', '${this._config.image}'); this.style.display='none'; this.parentElement.classList.add('image-error');" />
+                             <img src="${safeImage}" alt="${safeTitle}" crossorigin="anonymous" />
                              <div class="icon-wrapper" style="background:${bg}; color:${fg};">
                                <ha-icon icon="${icon}"></ha-icon>
                              </div>
@@ -443,26 +453,96 @@ class ShoppingListCard extends HTMLElement {
 
         if (isOn && this._config.enable_quantity) {
             qtyControls = `<div class="quantity-controls">
-                                ${qty > 1 ? `<div class="quantity-btn" data-action="decrement"><ha-icon icon="mdi:minus"></ha-icon></div>` : ''}
-                                <span class="quantity">${qty}</span>
-                                <div class="quantity-btn" data-action="increment"><ha-icon icon="mdi:plus"></ha-icon></div>
+                                ${qty > 1 ? decBtn : ''}
+                                <span class="quantity" aria-label="Quantity: ${qty}">${qty}</span>
+                                ${incBtn}
                              </div>`;
         }
     }
 
+    const ariaLabelParts = [this._config.title];
+    if (this._config.subtitle) ariaLabelParts.push(this._config.subtitle);
+    ariaLabelParts.push(isOn ? (this._config.enable_quantity ? `quantity ${qty}` : 'on list') : 'not on list');
+    const ariaLabel = escapeHtml(ariaLabelParts.join(', '));
+
     this.content.innerHTML = `
-      <div class="card-container ${isOn?'is-on':'is-off'} ${layoutClass}" ${cardBgStyle}>
+      <div class="card-container ${isOn?'is-on':'is-off'} ${layoutClass}"
+           role="button" tabindex="0" aria-pressed="${isOn ? 'true' : 'false'}" aria-label="${ariaLabel}"
+           ${cardBgStyle}>
         ${isVertical ? `<div class="vertical-top-block">${topBlock}</div>` : mainContent}
         <div class="info-container">
-          <div class="primary">${this._config.title}</div>
-          ${this._config.subtitle?`<div class="secondary">${this._config.subtitle}</div>`:''}
+          <div class="primary">${escapeHtml(this._config.title)}</div>
+          ${this._config.subtitle?`<div class="secondary">${escapeHtml(this._config.subtitle)}</div>`:''}
         </div>
         ${qtyControls}
       </div>
     `;
 
-    this.content.querySelector('.card-container')
-      .onclick = ev => this._handleTap(ev, isOn, matched, qty, fullName);
+    const card = this.content.querySelector('.card-container');
+    this._wireInteractions(card, isOn, matched, qty, fullName);
+    this._wireImageError(card);
+  }
+
+  _wireImageError(card) {
+    const img = card.querySelector('img');
+    if (!img) return;
+    img.addEventListener('error', () => {
+      img.style.display = 'none';
+      img.parentElement?.classList.add('image-error');
+    });
+  }
+
+  _wireInteractions(card, isOn, matched, qty, fullName) {
+    const tap = (ev) => this._handleTap(ev, isOn, matched, qty, fullName);
+    card.addEventListener('click', tap);
+    card.addEventListener('keydown', (ev) => {
+      if (ev.target.closest('.quantity-btn')) {
+        if (ev.key === 'Enter' || ev.key === ' ') {
+          ev.preventDefault();
+          tap(ev);
+        }
+        return;
+      }
+      if (ev.target === card && (ev.key === 'Enter' || ev.key === ' ')) {
+        ev.preventDefault();
+        tap(ev);
+      }
+    });
+
+    const holdAction = this._config.hold_action;
+    if (holdAction !== undefined && holdAction?.action === 'none') return;
+    let holdTimer = null;
+    let heldFired = false;
+    const startHold = () => {
+      heldFired = false;
+      clearTimeout(holdTimer);
+      holdTimer = setTimeout(() => {
+        heldFired = true;
+        this._vibrate();
+        this._handleHold();
+      }, 500);
+    };
+    const cancelHold = () => { clearTimeout(holdTimer); holdTimer = null; };
+    card.addEventListener('mousedown', startHold);
+    card.addEventListener('touchstart', startHold, { passive: true });
+    ['mouseup', 'mouseleave', 'touchend', 'touchcancel'].forEach(e =>
+      card.addEventListener(e, cancelHold)
+    );
+    card.addEventListener('click', (ev) => { if (heldFired) { ev.stopPropagation(); ev.preventDefault(); heldFired = false; } }, true);
+  }
+
+  _handleHold() {
+    const action = this._config.hold_action?.action || 'more-info';
+    if (action === 'none') return;
+    if (action === 'more-info') {
+      const event = new Event('hass-more-info', { bubbles: true, composed: true });
+      event.detail = { entityId: this._config.todo_list };
+      this.dispatchEvent(event);
+    }
+  }
+
+  _vibrate() {
+    if (this._config?.haptic && navigator.vibrate) navigator.vibrate(50);
   }
 
   async _handleTap(ev, isOn, matched, qty, fullName) {
@@ -470,6 +550,7 @@ class ShoppingListCard extends HTMLElement {
     ev.stopPropagation();
     const action = ev.target.closest('.quantity-btn')?.dataset.action;
 
+    this._vibrate();
     this._isUpdating = true;
     this.content.querySelector('.card-container').classList.add('is-updating');
 
@@ -524,8 +605,11 @@ class ShoppingListCard extends HTMLElement {
     s.textContent = `
       ha-card { border-radius: var(--ha-card-border-radius,12px); box-shadow: var(--ha-card-box-shadow); overflow:hidden; background: var(--ha-card-background, var(--card-background-color)); }
       .card-content { padding:0 !important; }
-      .card-container { display:flex; align-items:center; padding:10px 12px; gap:10px; cursor:pointer; transition:background-color .2s; box-sizing: border-box; }
+      .card-container { display:flex; align-items:center; padding:10px 12px; gap:10px; cursor:pointer; transition:background-color .2s; box-sizing: border-box; outline: none; }
       .card-container:hover { background: var(--secondary-background-color) }
+      .card-container:focus-visible { box-shadow: 0 0 0 2px var(--primary-color); }
+      .quantity-btn { cursor: pointer; }
+      .quantity-btn:focus-visible { outline: 2px solid var(--primary-color); outline-offset: 1px; }
 
       /* Vertical Layout */
       .card-container.vertical-layout { display: block; height: 120px; position: relative; }
@@ -590,3 +674,9 @@ window.customCards.push({
   preview: true,
   description: 'A card to manage items on a shopping list.',
 });
+
+console.info(
+  `%c SHOPPING-LIST-CARD %c v${CARD_VERSION} `,
+  'color: white; background: #4CAF50; font-weight: 700;',
+  'color: #4CAF50; background: white; font-weight: 700;'
+);
