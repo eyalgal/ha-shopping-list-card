@@ -6,13 +6,13 @@
  *
  * Author: eyalgal
  * License: MIT
- * Version: 1.5.0-beta.1
+ * Version: 1.5.0-beta.2
  *
  * Note: This card requires a to-do entity to function properly.
  * For more information, visit: https://github.com/eyalgal/ha-shopping-list-card
  */
 
-const CARD_VERSION = '1.5.0-beta.1';
+const CARD_VERSION = '1.5.0-beta.2';
 
 function escapeHtml(str) {
   if (str == null) return '';
@@ -351,15 +351,13 @@ class ShoppingListCard extends HTMLElement {
       ? `${this._config.title} - ${this._config.subtitle}`
       : this._config.title;
 
-    let summaries = [];
+    let items = [];
     try {
       const res = await this._hass.callWS({
         type: 'todo/item/list',
         entity_id: this._config.todo_list,
       });
-      summaries = res.items
-        .filter(item => item.status === 'needs_action')
-        .map(item => item.summary);
+      items = res.items.filter(item => item.status === 'needs_action');
     } catch (e) {
       console.error('Error fetching items', e);
       this.content.innerHTML = `<div class="warning">Error fetching items.</div>`;
@@ -367,10 +365,10 @@ class ShoppingListCard extends HTMLElement {
     }
 
     const rx = new RegExp(`^${this._escapeRegExp(fullName)}(?: \\((\\d+)\\))?$`, 'i');
-    let isOn = false, qty = 0, matched = null;
-    for (const s of summaries) {
-      const m = s.match(rx);
-      if (m) { isOn = true; matched = s; qty = m[1] ? +m[1] : 1; break; }
+    let isOn = false, qty = 0, matched = null, matchedUid = null;
+    for (const item of items) {
+      const m = item.summary.match(rx);
+      if (m) { isOn = true; matched = item.summary; matchedUid = item.uid; qty = m[1] ? +m[1] : 1; break; }
     }
 
     const onIcon    = this._config.on_icon    || ShoppingListCard.DEFAULT_ON_ICON;
@@ -479,7 +477,7 @@ class ShoppingListCard extends HTMLElement {
     `;
 
     const card = this.content.querySelector('.card-container');
-    this._wireInteractions(card, isOn, matched, qty, fullName);
+    this._wireInteractions(card, isOn, matched, matchedUid, qty, fullName);
     this._wireImageError(card);
   }
 
@@ -492,8 +490,8 @@ class ShoppingListCard extends HTMLElement {
     });
   }
 
-  _wireInteractions(card, isOn, matched, qty, fullName) {
-    const tap = (ev) => this._handleTap(ev, isOn, matched, qty, fullName);
+  _wireInteractions(card, isOn, matched, matchedUid, qty, fullName) {
+    const tap = (ev) => this._handleTap(ev, isOn, matched, matchedUid, qty, fullName);
     card.addEventListener('click', tap);
     card.addEventListener('keydown', (ev) => {
       if (ev.target.closest('.quantity-btn')) {
@@ -509,35 +507,78 @@ class ShoppingListCard extends HTMLElement {
       }
     });
 
-    const holdAction = this._config.hold_action;
-    if (holdAction !== undefined && holdAction?.action === 'none') return;
+    const holdCfg = this._config.hold_action;
+    if (holdCfg?.action === 'none') return;
+
     let holdTimer = null;
     let heldFired = false;
-    const startHold = () => {
+    let startX = 0, startY = 0;
+
+    const startHold = (ev) => {
+      // Don't start hold on quantity buttons
+      if (ev.target.closest('.quantity-btn')) return;
       heldFired = false;
+      const touch = ev.touches?.[0];
+      startX = touch ? touch.clientX : ev.clientX;
+      startY = touch ? touch.clientY : ev.clientY;
       clearTimeout(holdTimer);
       holdTimer = setTimeout(() => {
         heldFired = true;
+        holdTimer = null;
         this._vibrate();
-        this._handleHold();
+        this._handleHold(isOn, matched, matchedUid);
       }, 500);
     };
+
     const cancelHold = () => { clearTimeout(holdTimer); holdTimer = null; };
+
+    const maybeCancelOnMove = (ev) => {
+      if (!holdTimer) return;
+      const touch = ev.touches?.[0];
+      const x = touch ? touch.clientX : ev.clientX;
+      const y = touch ? touch.clientY : ev.clientY;
+      if (Math.abs(x - startX) > 10 || Math.abs(y - startY) > 10) cancelHold();
+    };
+
     card.addEventListener('mousedown', startHold);
     card.addEventListener('touchstart', startHold, { passive: true });
+    card.addEventListener('mousemove', maybeCancelOnMove);
+    card.addEventListener('touchmove', maybeCancelOnMove, { passive: true });
     ['mouseup', 'mouseleave', 'touchend', 'touchcancel'].forEach(e =>
       card.addEventListener(e, cancelHold)
     );
-    card.addEventListener('click', (ev) => { if (heldFired) { ev.stopPropagation(); ev.preventDefault(); heldFired = false; } }, true);
+    // Swallow the synthesized click after a successful hold.
+    card.addEventListener('click', (ev) => {
+      if (heldFired) {
+        ev.stopImmediatePropagation();
+        ev.preventDefault();
+        heldFired = false;
+      }
+    }, true);
   }
 
-  _handleHold() {
-    const action = this._config.hold_action?.action || 'more-info';
+  _handleHold(isOn, matched, matchedUid) {
+    const cfg = this._config.hold_action;
+    const action = cfg?.action || 'default';
+
     if (action === 'none') return;
+
     if (action === 'more-info') {
-      const event = new Event('hass-more-info', { bubbles: true, composed: true });
-      event.detail = { entityId: this._config.todo_list };
+      const event = new CustomEvent('hass-more-info', {
+        bubbles: true,
+        composed: true,
+        detail: { entityId: this._config.todo_list },
+      });
       this.dispatchEvent(event);
+      return;
+    }
+
+    // Default: remove the item entirely if it is on the list.
+    if (action === 'default') {
+      if (isOn) this._removeByUidOrSummary(matchedUid, matched).then(() => {
+        this._lastUpdated = null;
+        this._render();
+      }).catch(e => console.error('Hold remove failed', e));
     }
   }
 
@@ -545,7 +586,7 @@ class ShoppingListCard extends HTMLElement {
     if (this._config?.haptic && navigator.vibrate) navigator.vibrate(50);
   }
 
-  async _handleTap(ev, isOn, matched, qty, fullName) {
+  async _handleTap(ev, isOn, matched, matchedUid, qty, fullName) {
     if (this._isUpdating) return;
     ev.stopPropagation();
     const action = ev.target.closest('.quantity-btn')?.dataset.action;
@@ -556,12 +597,12 @@ class ShoppingListCard extends HTMLElement {
 
     let call;
     if (action === 'increment') {
-      call = this._updateQuantity(matched, qty+1, fullName);
+      call = this._updateQuantity(matchedUid, matched, qty+1, fullName);
     } else if (action === 'decrement') {
-      if (qty>1) call = this._updateQuantity(matched, qty-1, fullName);
+      if (qty>1) call = this._updateQuantity(matchedUid, matched, qty-1, fullName);
     } else {
       if (isOn) {
-        if (!this._config.enable_quantity || qty===1) call = this._removeItem(matched);
+        if (!this._config.enable_quantity || qty===1) call = this._removeByUidOrSummary(matchedUid, matched);
       } else {
         call = this._addItem(fullName);
       }
@@ -584,17 +625,20 @@ class ShoppingListCard extends HTMLElement {
     return this._hass.callService('todo','add_item',{ entity_id: this._config.todo_list, item: name });
   }
 
-  _removeItem(item) {
-    return item
-      ? this._hass.callService('todo','remove_item',{ entity_id: this._config.todo_list, item })
-      : Promise.resolve();
+  _removeByUidOrSummary(uid, summary) {
+    const target = uid || summary;
+    if (!target) return Promise.resolve();
+    return this._hass.callService('todo','remove_item',{
+      entity_id: this._config.todo_list,
+      item: target,
+    });
   }
 
-  _updateQuantity(oldItem,newQty,fullName) {
+  _updateQuantity(uid, oldSummary, newQty, fullName) {
     const newName = newQty>1 ? `${fullName} (${newQty})` : fullName;
     return this._hass.callService('todo','update_item',{
       entity_id: this._config.todo_list,
-      item: oldItem,
+      item: uid || oldSummary,
       rename: newName,
     });
   }
