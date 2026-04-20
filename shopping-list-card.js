@@ -6,13 +6,13 @@
  *
  * Author: eyalgal
  * License: MIT
- * Version: 1.7.2
+ * Version: 1.7.3
  *
  * Note: This card requires a to-do entity to function properly.
  * For more information, visit: https://github.com/eyalgal/ha-shopping-list-card
  */
 
-const CARD_VERSION = '1.7.2';
+const CARD_VERSION = '1.7.3';
 
 function escapeHtml(str) {
   if (str == null) return '';
@@ -111,7 +111,6 @@ class ShoppingListCardEditor extends HTMLElement {
 
     const todoEntities = Object.keys(this._hass.states).filter(id => id.startsWith('todo.'));
     const hasTodoEntities = todoEntities.length > 0;
-    const hasPictureUpload = !!customElements.get('ha-picture-upload');
 
     this.shadowRoot.innerHTML = `
       <style>
@@ -209,16 +208,11 @@ class ShoppingListCardEditor extends HTMLElement {
               <ha-textfield id="title" label="Title" required></ha-textfield>
               <ha-textfield id="subtitle" label="Subtitle"></ha-textfield>
             </div>
-            ${hasPictureUpload ? `
-              <ha-picture-upload id="image_upload"></ha-picture-upload>
-              <div class="image-fallback">
-                <ha-textfield id="image" label="Image URL (optional)" placeholder="/local/... or https://..."></ha-textfield>
-                <div class="hint">Upload an image above or paste a URL. Leave blank to use the icon.</div>
-              </div>
-            ` : `
+            <ha-picture-upload id="image_upload"></ha-picture-upload>
+            <div class="image-fallback">
               <ha-textfield id="image" label="Image URL (optional)" placeholder="/local/... or https://..."></ha-textfield>
-              <div class="hint">Point to an image in <code>/local/</code> or a full URL. Falls back to the icon if loading fails.</div>
-            `}
+              <div class="hint">Upload an image above or paste a URL. Leave blank to use the icon.</div>
+            </div>
           </div>
         </ha-expansion-panel>
 
@@ -305,6 +299,9 @@ class ShoppingListCardEditor extends HTMLElement {
     ep.includeDomains = ['todo'];
     ep.allowCustomEntity = false;
     this.shadowRoot.querySelectorAll('ha-icon-picker').forEach(el => { el.hass = this._hass; });
+
+    // Trigger lazy-loading of ha-picture-upload if HA hasn't loaded it yet.
+    this._ensurePictureUploadLoaded();
     const pu = this.shadowRoot.querySelector('#image_upload');
     if (pu) {
       pu.hass = this._hass;
@@ -317,15 +314,28 @@ class ShoppingListCardEditor extends HTMLElement {
       });
     }
 
-    // Field change listeners
+    // Field change listeners (non-select)
     this.shadowRoot.querySelectorAll(
-      'ha-textfield, ha-switch, ha-entity-picker, ha-icon-picker, ha-select'
+      'ha-textfield, ha-switch, ha-entity-picker, ha-icon-picker'
     ).forEach(el => {
       const handler = () => this._handleConfigChanged();
       el.addEventListener('input', handler);
       el.addEventListener('change', handler);
       el.addEventListener('value-changed', handler);
-      el.addEventListener('selected', handler);
+    });
+
+    // ha-select needs special handling. HA 2026.2+ fires `selected` with
+    // ev.detail.value but does NOT update target.value first. Read detail
+    // and sync it back onto the element so later reads are accurate.
+    this.shadowRoot.querySelectorAll('ha-select').forEach(el => {
+      el.addEventListener('selected', (ev) => {
+        ev.stopPropagation();
+        const v = ev?.detail?.value;
+        if (v !== undefined && v !== null && v !== '') {
+          el.value = v;
+        }
+        this._handleConfigChanged();
+      });
       el.addEventListener('closed', (e) => e.stopPropagation());
     });
 
@@ -346,6 +356,35 @@ class ShoppingListCardEditor extends HTMLElement {
 
     this._rendered = true;
     if (this._config) this._updateFormValues();
+  }
+
+  /**
+   * Force-load ha-picture-upload by creating a hidden ha-form whose schema
+   * uses the image-upload media selector. HA lazy-loads ha-picture-upload
+   * the first time that selector is rendered, after which the browser will
+   * upgrade our existing <ha-picture-upload> placeholder.
+   */
+  _ensurePictureUploadLoaded() {
+    if (customElements.get('ha-picture-upload')) return;
+    try {
+      const loader = document.createElement('ha-form');
+      loader.style.display = 'none';
+      loader.schema = [{
+        name: 'image',
+        selector: { media: { accept: ['image/*'], image_upload: true, clearable: true, hide_content_type: true } },
+      }];
+      loader.data = {};
+      loader.hass = this._hass;
+      this.shadowRoot.appendChild(loader);
+      customElements.whenDefined('ha-picture-upload').then(() => {
+        const pu = this.shadowRoot.querySelector('#image_upload');
+        if (pu) {
+          pu.hass = this._hass;
+          if (this._config?.image) pu.value = this._config.image;
+        }
+      }).catch(() => {});
+      setTimeout(() => loader.remove(), 0);
+    } catch (_) { /* ignore */ }
   }
 
   _getEditorHex(val) {
