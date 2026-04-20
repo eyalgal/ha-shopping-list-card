@@ -1,0 +1,56 @@
+{
+  "Fruits": [
+    { "title": "Apple" },
+    { "title": "Avocado" },
+    { "title": "Banana" },
+    { "title": "Blueberries" },
+    { "title": "Grapes", "subtitle": "Green" },
+    { "title": "Grapes", "subtitle": "Purple" },
+    { "title": "Lemons" },
+    { "title": "Strawberries" },
+    { "title": "Watermelon" }
+  ],
+  "Vegetables": [
+    { "title": "Baby Carrots" },
+    { "title": "Broccoli" },
+    { "title": "Cucumber" },
+    { "title": "Mushrooms" },
+    { "title": "Onions" },
+    { "title": "Peppers" },
+    { "title": "Sweet Potato" },
+    { "title": "Zucchini" }
+  ],
+  "Frozen": [
+    { "title": "Blueberries", "subtitle": "Frozen" },
+    { "title": "Peas", "subtitle": "Frozen" },
+    { "title": "Strawberries", "subtitle": "Frozen" }
+  ],
+  "Dairy and Eggs": [
+    { "title": "Almond Milk" },
+    { "title": "Eggs" },
+    { "title": "Milk" },
+    { "title": "Milk", "subtitle": "Lactose-free" },
+    { "title": "Yogurt" }
+  ],
+  "Meat": [
+    { "title": "Chicken Breast" },
+    { "title": "Ground Beef" },
+    { "title": "Ground Turkey" }
+  ],
+  "Condiments, Herbs & Spices": [
+    { "title": "Avocado Oil" },
+    { "title": "Honey" },
+    { "title": "Olive Oil" },
+    { "title": "Salt" },
+    { "title": "Soy Sauce" }
+  ],
+  "Grains": [
+    { "title": "Almonds" },
+    { "title": "Oatmeal" },
+    { "title": "Pasta" },
+    { "title": "Rice" }
+  ],
+  "Snacks": [
+    { "title": "Berries", "subtitle": "Freeze-dried" }
+  ]
+}

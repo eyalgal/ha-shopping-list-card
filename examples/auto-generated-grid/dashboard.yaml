@@ -1,0 +1,58 @@
+# Auto-generated categorized shopping grid.
+#
+# Requires:
+#   - custom:shopping-list-card  (this repo)
+#   - custom:layout-card         https://github.com/thomasloven/lovelace-layout-card
+#   - custom:auto-entities       https://github.com/thomasloven/lovelace-auto-entities
+#   - sensor.shopping_list_items from sensor.yaml in this folder
+#
+# The JSON file defines your category → items catalog, and the template below
+# renders one grid per non-empty category, with a shopping-list-card for each
+# item. Sort, add, and remove items by editing the JSON file; HA will pick up
+# changes on the next scan_interval.
+
+type: custom:layout-card
+layout_type: custom:grid-layout
+layout:
+  grid-template-columns: 25% 75%
+cards:
+  - type: todo-list
+    entity: todo.shopping_list
+  - type: custom:auto-entities
+    card_param: cards
+    card:
+      type: vertical-stack
+    filter:
+      template: >
+        {%- set sensor_id = 'sensor.shopping_list_items' %}
+        {%- set categories = [
+             'Fruits', 'Vegetables', 'Frozen', 'Dairy and Eggs', 'Meat',
+             'Condiments, Herbs & Spices', 'Grains', 'Snacks', 'Costco'
+           ] %}
+        {%- set ns = namespace(result = []) %}
+        {%- for cat in categories %}
+          {%- set items = (state_attr(sensor_id, cat) or []) | sort(attribute='title') %}
+          {%- if items | length > 0 %}
+            {%- set ns2 = namespace(cards = []) %}
+            {%- for item in items %}
+              {%- set ns2.cards = ns2.cards + [{
+                   "type": "custom:shopping-list-card",
+                   "title": item.title,
+                   "subtitle": item.subtitle | default(''),
+                   "todo_list": "todo.shopping_list",
+                   "enable_quantity": true,
+                   "colorize_background": true,
+                   "image_base": "/local/images/shopping-list/",
+                   "grid_options": {"columns": 6}
+                 }] %}
+            {%- endfor %}
+            {%- set ns.result = ns.result + [{
+                 "type": "grid",
+                 "title": cat,
+                 "columns": 5,
+                 "square": false,
+                 "cards": ns2.cards
+               }] %}
+          {%- endif %}
+        {%- endfor %}
+        {{ ns.result }}

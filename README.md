@@ -162,6 +162,12 @@ todo_list: todo.shopping_list
 
 ---
 
+## 📚 Examples
+
+- **[Auto-generated categorized grid](examples/auto-generated-grid/)** - drive an entire categorized shopping dashboard from a single JSON file. One `custom:shopping-list-card` per item, grouped into category grids, rebuilt automatically when you edit the JSON. Combines this card with [`layout-card`](https://github.com/thomasloven/lovelace-layout-card) and [`auto-entities`](https://github.com/thomasloven/lovelace-auto-entities).
+
+---
+
 ### ❤️ Support
 
 If you find this card useful and would like to show your support, you can buy me a coffee:

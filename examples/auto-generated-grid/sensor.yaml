@@ -1,0 +1,24 @@
+# Load the shopping_items.json file into a sensor's attributes.
+# Save this file to /config/shopping_items.json, then include this snippet
+# in your configuration.yaml (or add it to an existing `command_line:` block).
+#
+# `value_template: "{{ now().timestamp() }}"` forces the sensor state to change
+# every time it's polled so dashboards re-render even when the JSON itself is
+# unchanged.
+
+command_line:
+  - sensor:
+      name: "Shopping List Items"
+      command: "cat /config/shopping_items.json"
+      value_template: "{{ now().timestamp() }}"
+      json_attributes:
+        - Fruits
+        - Vegetables
+        - Frozen
+        - "Dairy and Eggs"
+        - Meat
+        - "Condiments, Herbs & Spices"
+        - Grains
+        - Snacks
+        - Costco
+      scan_interval: 300
