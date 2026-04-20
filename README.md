@@ -55,8 +55,6 @@ _or_
 
 The card ships with a full visual editor. Just add it to your dashboard and fill out the form.
 
-<img src="https://github.com/user-attachments/assets/3bb78f0e-22cc-4a7b-81f4-abadbd6654a5" alt="Visual Editor" width="600"/>
-
 ### YAML example
 
 ```yaml
