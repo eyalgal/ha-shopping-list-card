@@ -6,13 +6,13 @@
  *
  * Author: eyalgal
  * License: MIT
- * Version: 1.7.5
+ * Version: 1.8.0
  *
  * Note: This card requires a to-do entity to function properly.
  * For more information, visit: https://github.com/eyalgal/ha-shopping-list-card
  */
 
-const CARD_VERSION = '1.7.5';
+const CARD_VERSION = '1.8.0';
 
 function escapeHtml(str) {
   if (str == null) return '';
@@ -211,8 +211,10 @@ class ShoppingListCardEditor extends HTMLElement {
             <ha-picture-upload id="image_upload"></ha-picture-upload>
             <div class="image-fallback">
               <ha-textfield id="image" label="Image URL (optional)" placeholder="/local/... or https://..."></ha-textfield>
-              <div class="hint">Upload an image above or paste a URL. Leave blank to use the icon.</div>
+              <ha-textfield id="image_base" label="Image base path (optional)" placeholder="/local/images/shopping-list/"></ha-textfield>
+              <div class="hint">Upload an image above or paste a URL. Or set a base path and the card will look for <code>&lt;base&gt;&lt;slug&gt;.png</code> derived from the title.</div>
             </div>
+            <ha-textfield id="list_prefix" label="List prefix (optional)" placeholder="e.g. Dairy" helper="Stored in the list as 'Prefix - Title' for category sorting; display is unchanged."></ha-textfield>
           </div>
         </ha-expansion-panel>
 
@@ -324,21 +326,40 @@ class ShoppingListCardEditor extends HTMLElement {
       el.addEventListener('value-changed', handler);
     });
 
-    // ha-select needs special handling. HA 2026.2+ fires `selected` with
-    // ev.detail.value but does NOT update target.value first. Read detail
-    // and sync it back onto the element so later reads are accurate.
+    // ha-select needs special handling. In HA 2026.x, ha-select was rewritten
+    // to use ha-dropdown internally and IGNORES slotted <mwc-list-item>
+    // children - it only renders from the `.options` property. Older HA uses
+    // slotted children and fires `selected` with ev.detail.index (not value).
+    // We set `.options` for the new component and keep the children for the
+    // old one, then normalize the event shape.
+    const SELECT_OPTIONS = {
+      layout: [
+        { value: 'horizontal', label: 'Horizontal' },
+        { value: 'vertical', label: 'Vertical' },
+      ],
+      hold_action: [
+        { value: 'default', label: 'Remove item (default)' },
+        { value: 'more-info', label: 'Open more-info' },
+        { value: 'none', label: 'None' },
+      ],
+    };
     this.shadowRoot.querySelectorAll('ha-select').forEach(el => {
-      // Cache value from the event detail because setting el.value can race
-      // with mwc-select's own internal state. _selectVal reads this cache
-      // first and only falls back to el.value.
+      const opts = SELECT_OPTIONS[el.id];
+      if (opts) {
+        try { el.options = opts; } catch (_) {}
+      }
       const capture = (ev) => {
         ev.stopPropagation();
-        const v = ev?.detail?.value;
+        let v = ev?.detail?.value;
+        // Older mwc-select fires `selected` with ev.detail.index. Map it.
+        if ((v == null || v === '') && ev?.detail && typeof ev.detail.index === 'number' && opts) {
+          v = opts[ev.detail.index]?.value;
+        }
+        // Final fallback: whatever the element itself reports.
+        if (v == null || v === '') v = el.value;
         if (typeof v === 'string' && v !== '') {
           el._slcValue = v;
           try { if (el.value !== v) el.value = v; } catch (_) {}
-        } else if (typeof el.value === 'string' && el.value !== '') {
-          el._slcValue = el.value;
         }
         this._handleConfigChanged();
       };
@@ -431,6 +452,8 @@ class ShoppingListCardEditor extends HTMLElement {
     s.querySelector('#title').value = c.title || '';
     s.querySelector('#subtitle').value = c.subtitle || '';
     s.querySelector('#image').value = c.image || '';
+    s.querySelector('#image_base').value = c.image_base || '';
+    s.querySelector('#list_prefix').value = c.list_prefix || '';
     const pu = s.querySelector('#image_upload');
     if (pu) pu.value = c.image || '';
     s.querySelector('#todo_list').value = c.todo_list || '';
@@ -471,6 +494,10 @@ class ShoppingListCardEditor extends HTMLElement {
     if (sub) n.subtitle = sub; else delete n.subtitle;
     const img = s.querySelector('#image').value;
     if (img) n.image = img; else delete n.image;
+    const imgBase = s.querySelector('#image_base').value.trim();
+    if (imgBase) n.image_base = imgBase; else delete n.image_base;
+    const prefix = s.querySelector('#list_prefix').value.trim();
+    if (prefix) n.list_prefix = prefix; else delete n.list_prefix;
     n.todo_list = s.querySelector('#todo_list').value;
 
     const enableQty = s.querySelector('#enable_quantity').checked;
@@ -635,6 +662,35 @@ class ShoppingListCard extends HTMLElement {
 
   _escapeRegExp(s) { return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); }
 
+  /** Slugify a title for use in auto-derived image paths. */
+  _slugify(s) {
+    return String(s || '')
+      .toLowerCase()
+      .trim()
+      .replace(/[^\p{Letter}\p{Number}]+/gu, '-')
+      .replace(/^-+|-+$/g, '');
+  }
+
+  /** Build the todo item summary to match / write, honoring list_prefix. */
+  _buildFullName() {
+    const c = this._config;
+    const base = c.subtitle ? `${c.title} - ${c.subtitle}` : c.title;
+    return c.list_prefix ? `${c.list_prefix} - ${base}` : base;
+  }
+
+  /** Resolve the effective image URL: explicit `image` wins, otherwise
+   *  derive from `image_base` + slug(title) + '.png' when image_base is set. */
+  _resolveImage() {
+    const c = this._config;
+    if (c.image) return c.image;
+    if (c.image_base) {
+      const base = c.image_base.endsWith('/') ? c.image_base : c.image_base + '/';
+      const slug = this._slugify(c.title);
+      if (slug) return `${base}${slug}.png`;
+    }
+    return '';
+  }
+
   _getColorValue(val) {
     if (!val) return null;
     if (val.startsWith('#')) return val;
@@ -711,9 +767,7 @@ class ShoppingListCard extends HTMLElement {
       return; // waiting for subscription
     }
 
-    const fullName = this._config.subtitle
-      ? `${this._config.title} - ${this._config.subtitle}`
-      : this._config.title;
+    const fullName = this._buildFullName();
 
     const rx = new RegExp(`^${this._escapeRegExp(fullName)}(?: \\((\\d+)\\))?$`, 'i');
     let isOn = false, qty = 0, matched = null, matchedUid = null;
@@ -739,6 +793,7 @@ class ShoppingListCard extends HTMLElement {
 
     const isVertical = this._config.layout === 'vertical';
     const layoutClass = isVertical ? 'vertical-layout' : '';
+    const effectiveImage = this._resolveImage();
 
     let mainContent = '';
     let qtyControls = '';
@@ -750,13 +805,13 @@ class ShoppingListCard extends HTMLElement {
             quantityBadge = `<span class="quantity-badge">${qty}</span>`;
         }
 
-        const safeImage = escapeHtml(this._config.image || '');
+        const safeImage = escapeHtml(effectiveImage);
         const safeTitle = escapeHtml(this._config.title || '');
         const decBtn = `<div class="quantity-btn" role="button" tabindex="0" aria-label="Decrease quantity" data-action="decrement"><ha-icon icon="mdi:minus"></ha-icon></div>`;
         const incBtn = `<div class="quantity-btn" role="button" tabindex="0" aria-label="Increase quantity" data-action="increment"><ha-icon icon="mdi:plus"></ha-icon></div>`;
 
         let iconElement;
-        if (this._config.image) {
+        if (effectiveImage) {
             iconElement = `<div class="image-wrapper vertical-image">
                              <img src="${safeImage}" alt="${safeTitle}" crossorigin="anonymous" />
                              ${quantityBadge}
@@ -781,12 +836,12 @@ class ShoppingListCard extends HTMLElement {
             topBlock = iconElement;
         }
     } else { // Horizontal layout
-        const safeImage = escapeHtml(this._config.image || '');
+        const safeImage = escapeHtml(effectiveImage);
         const safeTitle = escapeHtml(this._config.title || '');
         const decBtn = `<div class="quantity-btn" role="button" tabindex="0" aria-label="Decrease quantity" data-action="decrement"><ha-icon icon="mdi:minus"></ha-icon></div>`;
         const incBtn = `<div class="quantity-btn" role="button" tabindex="0" aria-label="Increase quantity" data-action="increment"><ha-icon icon="mdi:plus"></ha-icon></div>`;
 
-        if (this._config.image) {
+        if (effectiveImage) {
             mainContent = `<div class="image-wrapper">
                              <img src="${safeImage}" alt="${safeTitle}" crossorigin="anonymous" />
                              <div class="icon-wrapper" style="background:${bg}; color:${fg};">
