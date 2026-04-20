@@ -6,13 +6,13 @@
  *
  * Author: eyalgal
  * License: MIT
- * Version: 1.6.1
+ * Version: 1.6.2
  *
  * Note: This card requires a to-do entity to function properly.
  * For more information, visit: https://github.com/eyalgal/ha-shopping-list-card
  */
 
-const CARD_VERSION = '1.6.1';
+const CARD_VERSION = '1.6.2';
 
 function escapeHtml(str) {
   if (str == null) return '';
@@ -22,6 +22,65 @@ function escapeHtml(str) {
     .replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;')
     .replace(/'/g, '&#39;');
+}
+
+// ── Shared subscription manager ──────────────────────────────────────────────
+// Multiple cards on the same dashboard often point at the same todo entity.
+// Opening one WebSocket subscription per card causes a load-time storm (dozens
+// of `todo/item/subscribe` messages at once) which can crash the frontend.
+// This manager opens a single subscription per (connection, entity) pair and
+// multicasts updates to every subscribed card, with reference counting so the
+// subscription is closed when the last card detaches.
+const _slcSubs = new WeakMap(); // connection -> Map<entityId, SubRecord>
+
+function _slcSubscribe(hass, entityId, listener) {
+  const conn = hass.connection;
+  let perConn = _slcSubs.get(conn);
+  if (!perConn) { perConn = new Map(); _slcSubs.set(conn, perConn); }
+
+  let rec = perConn.get(entityId);
+  if (!rec) {
+    rec = {
+      listeners: new Set(),
+      lastItems: null,
+      unsub: null,
+      unsubPromise: null,
+    };
+    perConn.set(entityId, rec);
+    rec.unsubPromise = conn.subscribeMessage(
+      (msg) => {
+        rec.lastItems = msg?.items || [];
+        for (const l of rec.listeners) {
+          try { l(rec.lastItems); } catch (e) { console.error('Shopping List Card listener error', e); }
+        }
+      },
+      { type: 'todo/item/subscribe', entity_id: entityId }
+    );
+    rec.unsubPromise
+      .then(unsub => { rec.unsub = unsub; })
+      .catch(err => {
+        console.error('Shopping List Card: subscription failed', err);
+        perConn.delete(entityId);
+        for (const l of rec.listeners) { try { l(null, err); } catch (_) {} }
+      });
+  }
+
+  rec.listeners.add(listener);
+  if (rec.lastItems) {
+    // Immediately deliver the cached snapshot to the new subscriber.
+    queueMicrotask(() => { if (rec.listeners.has(listener)) listener(rec.lastItems); });
+  }
+
+  return () => {
+    rec.listeners.delete(listener);
+    if (rec.listeners.size === 0) {
+      perConn.delete(entityId);
+      if (rec.unsub) { try { rec.unsub(); } catch (_) {} }
+      else if (rec.unsubPromise) {
+        rec.unsubPromise.then(u => { try { u(); } catch (_) {} }).catch(() => {});
+      }
+    }
+  };
 }
 
 // ── Editor ───────────────────────────────────────────────────────────────────
@@ -342,21 +401,15 @@ class ShoppingListCard extends HTMLElement {
     if (!this._hass || !this._config?.todo_list) return;
     if (this._subscribedEntity === this._config.todo_list && this._unsubscribe) return;
     this._teardownSubscription();
-    this._subscribedEntity = this._config.todo_list;
     const entityId = this._config.todo_list;
+    this._subscribedEntity = entityId;
 
     try {
-      const unsubPromise = this._hass.connection.subscribeMessage(
-        (msg) => {
-          const items = msg?.items || [];
-          this._items = items.filter(i => i.status === 'needs_action');
-          this._render();
-        },
-        { type: 'todo/item/subscribe', entity_id: entityId }
-      );
-      this._unsubscribe = () => {
-        unsubPromise.then(unsub => { try { unsub(); } catch (_) {} }).catch(() => {});
-      };
+      this._unsubscribe = _slcSubscribe(this._hass, entityId, (items, err) => {
+        if (err) { this._fallbackFetch(); return; }
+        this._items = (items || []).filter(i => i.status === 'needs_action');
+        this._render();
+      });
     } catch (e) {
       console.error('Shopping List Card: subscription failed, falling back to polling', e);
       this._fallbackFetch();
