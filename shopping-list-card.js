@@ -6,13 +6,13 @@
  *
  * Author: eyalgal
  * License: MIT
- * Version: 1.6.0
+ * Version: 1.6.1
  *
  * Note: This card requires a to-do entity to function properly.
  * For more information, visit: https://github.com/eyalgal/ha-shopping-list-card
  */
 
-const CARD_VERSION = '1.6.0';
+const CARD_VERSION = '1.6.1';
 
 function escapeHtml(str) {
   if (str == null) return '';
@@ -303,10 +303,16 @@ class ShoppingListCard extends HTMLElement {
 
   set hass(hass) {
     const firstHass = !this._hass;
+    const prevState = this._hass?.states?.[this._config?.todo_list];
     this._hass = hass;
     if (!this._config) return;
     if (firstHass) this._ensureSubscription();
-    if (this._items !== null) this._render();
+    // Only re-render if the entity's availability changed (exists / unavailable).
+    // Item changes are pushed via subscription; avoid re-rendering on unrelated state updates.
+    const newState = hass.states?.[this._config.todo_list];
+    const prevAvail = !!prevState && prevState.state !== 'unavailable';
+    const newAvail = !!newState && newState.state !== 'unavailable';
+    if (prevAvail !== newAvail && this._items !== null) this._render();
   }
 
   setConfig(config) {
