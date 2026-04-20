@@ -6,13 +6,13 @@
  *
  * Author: eyalgal
  * License: MIT
- * Version: 1.8.0
+ * Version: 1.8.1
  *
  * Note: This card requires a to-do entity to function properly.
  * For more information, visit: https://github.com/eyalgal/ha-shopping-list-card
  */
 
-const CARD_VERSION = '1.8.0';
+const CARD_VERSION = '1.8.1';
 
 function escapeHtml(str) {
   if (str == null) return '';
@@ -662,12 +662,13 @@ class ShoppingListCard extends HTMLElement {
 
   _escapeRegExp(s) { return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); }
 
-  /** Slugify a title for use in auto-derived image paths. */
+  /** Slugify a title for use in auto-derived image paths. Preserves
+   *  underscores so titles like "ice_cream" map to "ice_cream.png". */
   _slugify(s) {
     return String(s || '')
       .toLowerCase()
       .trim()
-      .replace(/[^\p{Letter}\p{Number}]+/gu, '-')
+      .replace(/[^\p{Letter}\p{Number}_]+/gu, '-')
       .replace(/^-+|-+$/g, '');
   }
 
