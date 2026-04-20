@@ -6,13 +6,13 @@
  *
  * Author: eyalgal
  * License: MIT
- * Version: 2.0.0
+ * Version: 2.0.1
  *
  * Note: This card requires a to-do entity to function properly.
  * For more information, visit: https://github.com/eyalgal/ha-shopping-list-card
  */
 
-const CARD_VERSION = '2.0.0';
+const CARD_VERSION = '2.0.1';
 
 function escapeHtml(str) {
   if (str == null) return '';
