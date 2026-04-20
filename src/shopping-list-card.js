@@ -6,13 +6,13 @@
  *
  * Author: eyalgal
  * License: MIT
- * Version: 1.7.4
+ * Version: 1.7.5
  *
  * Note: This card requires a to-do entity to function properly.
  * For more information, visit: https://github.com/eyalgal/ha-shopping-list-card
  */
 
-const CARD_VERSION = '1.7.4';
+const CARD_VERSION = '1.7.5';
 
 function escapeHtml(str) {
   if (str == null) return '';
@@ -328,14 +328,22 @@ class ShoppingListCardEditor extends HTMLElement {
     // ev.detail.value but does NOT update target.value first. Read detail
     // and sync it back onto the element so later reads are accurate.
     this.shadowRoot.querySelectorAll('ha-select').forEach(el => {
-      el.addEventListener('selected', (ev) => {
+      // Cache value from the event detail because setting el.value can race
+      // with mwc-select's own internal state. _selectVal reads this cache
+      // first and only falls back to el.value.
+      const capture = (ev) => {
         ev.stopPropagation();
         const v = ev?.detail?.value;
-        if (v !== undefined && v !== null && v !== '') {
-          el.value = v;
+        if (typeof v === 'string' && v !== '') {
+          el._slcValue = v;
+          try { if (el.value !== v) el.value = v; } catch (_) {}
+        } else if (typeof el.value === 'string' && el.value !== '') {
+          el._slcValue = el.value;
         }
         this._handleConfigChanged();
-      });
+      };
+      el.addEventListener('selected', capture);
+      el.addEventListener('change', capture);
       el.addEventListener('closed', (e) => e.stopPropagation());
     });
 
@@ -387,6 +395,20 @@ class ShoppingListCardEditor extends HTMLElement {
     } catch (_) { /* ignore */ }
   }
 
+  /** Robust ha-select value reader. Prefers the value captured from the
+   *  `selected`/`change` event (stashed on the element as _slcValue) because
+   *  mwc-select in newer HA sometimes fires `selected` before updating its
+   *  own .value. Falls back to .value, then to the selected item's value. */
+  _selectVal(id) {
+    const el = this.shadowRoot.querySelector('#' + id);
+    if (!el) return '';
+    if (typeof el._slcValue === 'string' && el._slcValue !== '') return el._slcValue;
+    if (typeof el.value === 'string' && el.value !== '') return el.value;
+    const sel = el.selected;
+    if (sel && typeof sel.value === 'string' && sel.value !== '') return sel.value;
+    return '';
+  }
+
   _getEditorHex(val) {
     if (!val) return '#000000';
     if (val.startsWith('#')) return val;
@@ -415,9 +437,15 @@ class ShoppingListCardEditor extends HTMLElement {
     s.querySelector('#enable_quantity').checked = !!c.enable_quantity;
     s.querySelector('#colorize_background').checked = c.colorize_background !== false;
     s.querySelector('#show_name').checked = c.show_name !== false;
-    s.querySelector('#layout').value = c.layout === 'vertical' ? 'vertical' : 'horizontal';
+    const layoutVal = c.layout === 'vertical' ? 'vertical' : 'horizontal';
+    const layoutEl = s.querySelector('#layout');
+    layoutEl.value = layoutVal;
+    layoutEl._slcValue = layoutVal;
     s.querySelector('#haptic').checked = !!c.haptic;
-    s.querySelector('#hold_action').value = (c.hold_action?.action) || 'default';
+    const holdVal = (c.hold_action?.action) || 'default';
+    const holdEl = s.querySelector('#hold_action');
+    holdEl.value = holdVal;
+    holdEl._slcValue = holdVal;
     s.querySelector('#quantity_step').value = c.quantity_step != null ? c.quantity_step : '';
     s.querySelector('#quantity_max').value = c.quantity_max != null ? c.quantity_max : '';
 
@@ -457,10 +485,10 @@ class ShoppingListCardEditor extends HTMLElement {
     const haptic = s.querySelector('#haptic').checked;
     if (haptic) n.haptic = true; else delete n.haptic;
 
-    const layoutVal = s.querySelector('#layout').value;
+    const layoutVal = this._selectVal('layout');
     if (layoutVal === 'vertical') n.layout = 'vertical'; else delete n.layout;
 
-    const holdVal = s.querySelector('#hold_action').value || 'default';
+    const holdVal = this._selectVal('hold_action') || 'default';
     if (holdVal === 'default') delete n.hold_action;
     else n.hold_action = { action: holdVal };
 
