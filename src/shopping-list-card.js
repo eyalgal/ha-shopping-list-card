@@ -6,13 +6,13 @@
  *
  * Author: eyalgal
  * License: MIT
- * Version: 1.7.1
+ * Version: 1.7.2
  *
  * Note: This card requires a to-do entity to function properly.
  * For more information, visit: https://github.com/eyalgal/ha-shopping-list-card
  */
 
-const CARD_VERSION = '1.7.1';
+const CARD_VERSION = '1.7.2';
 
 function escapeHtml(str) {
   if (str == null) return '';
@@ -935,8 +935,8 @@ class ShoppingListCard extends HTMLElement {
     if (this.querySelector('style')) return;
     const s = document.createElement('style');
     s.textContent = `
-      ha-card { border-radius: var(--ha-card-border-radius,12px); box-shadow: var(--ha-card-box-shadow); overflow:hidden; background: var(--ha-card-background, var(--card-background-color)); }
-      .card-content { padding:0 !important; }
+      ha-card { box-sizing: border-box; border-radius: var(--ha-card-border-radius,12px); box-shadow: var(--ha-card-box-shadow); overflow:hidden; background: var(--ha-card-background, var(--card-background-color)); }
+      .card-content { padding:0 !important; margin: -1px 0; }
       .card-container { display:flex; align-items:center; padding:10px 12px; gap:10px; cursor:pointer; transition:background-color .2s; box-sizing: border-box; outline: none; }
       .card-container:hover { background: var(--secondary-background-color) }
       .card-container:focus-visible { box-shadow: 0 0 0 2px var(--primary-color); }
