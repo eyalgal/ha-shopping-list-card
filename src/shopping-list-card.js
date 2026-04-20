@@ -6,13 +6,13 @@
  *
  * Author: eyalgal
  * License: MIT
- * Version: 1.7.3
+ * Version: 1.7.4
  *
  * Note: This card requires a to-do entity to function properly.
  * For more information, visit: https://github.com/eyalgal/ha-shopping-list-card
  */
 
-const CARD_VERSION = '1.7.3';
+const CARD_VERSION = '1.7.4';
 
 function escapeHtml(str) {
   if (str == null) return '';
@@ -623,7 +623,7 @@ class ShoppingListCard extends HTMLElement {
     return c ? `rgba(${c.r}, ${c.g}, ${c.b}, ${a})` : hex;
   }
 
-  /** Returns an RGB triplet string ("R, G, B" or "var(--rgb-name)") or null. */
+  /** Returns an RGB triplet string ("R, G, B" or a var() with hex fallback) or null. */
   _colorRgbTriplet(val) {
     if (!val) return null;
     if (val.startsWith('#')) {
@@ -631,8 +631,12 @@ class ShoppingListCard extends HTMLElement {
       return c ? `${c.r}, ${c.g}, ${c.b}` : null;
     }
     const key = val.toLowerCase();
-    if (key in ShoppingListCard.COLOR_MAP) return `var(--rgb-${key})`;
-    return null;
+    const hex = ShoppingListCard.COLOR_MAP[key];
+    if (!hex) return null;
+    const rgb = this._hexToRgb(hex);
+    if (!rgb) return `var(--rgb-${key})`;
+    // Hex-triplet fallback so unknown/unset theme vars still render.
+    return `var(--rgb-${key}, ${rgb.r}, ${rgb.g}, ${rgb.b})`;
   }
 
   /** Theme-aware rgba() string. Falls back to hex when unknown. */
