@@ -6,13 +6,13 @@
  *
  * Author: eyalgal
  * License: MIT
- * Version: 1.8.1
+ * Version: 1.8.2
  *
  * Note: This card requires a to-do entity to function properly.
  * For more information, visit: https://github.com/eyalgal/ha-shopping-list-card
  */
 
-const CARD_VERSION = '1.8.1';
+const CARD_VERSION = '1.8.2';
 
 function escapeHtml(str) {
   if (str == null) return '';
@@ -212,7 +212,7 @@ class ShoppingListCardEditor extends HTMLElement {
             <div class="image-fallback">
               <ha-textfield id="image" label="Image URL (optional)" placeholder="/local/... or https://..."></ha-textfield>
               <ha-textfield id="image_base" label="Image base path (optional)" placeholder="/local/images/shopping-list/"></ha-textfield>
-              <div class="hint">Upload an image above or paste a URL. Or set a base path and the card will look for <code>&lt;base&gt;&lt;slug&gt;.png</code> derived from the title.</div>
+              <div class="hint">Upload an image above or paste a URL. Or set a base path and the card will try <code>title.png</code> in several variants (dash, underscore, space, joined) from the title.</div>
             </div>
             <ha-textfield id="list_prefix" label="List prefix (optional)" placeholder="e.g. Dairy" helper="Stored in the list as 'Prefix - Title' for category sorting; display is unchanged."></ha-textfield>
           </div>
@@ -662,16 +662,6 @@ class ShoppingListCard extends HTMLElement {
 
   _escapeRegExp(s) { return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); }
 
-  /** Slugify a title for use in auto-derived image paths. Preserves
-   *  underscores so titles like "ice_cream" map to "ice_cream.png". */
-  _slugify(s) {
-    return String(s || '')
-      .toLowerCase()
-      .trim()
-      .replace(/[^\p{Letter}\p{Number}_]+/gu, '-')
-      .replace(/^-+|-+$/g, '');
-  }
-
   /** Build the todo item summary to match / write, honoring list_prefix. */
   _buildFullName() {
     const c = this._config;
@@ -680,16 +670,39 @@ class ShoppingListCard extends HTMLElement {
   }
 
   /** Resolve the effective image URL: explicit `image` wins, otherwise
-   *  derive from `image_base` + slug(title) + '.png' when image_base is set. */
+   *  derive from `image_base` + slug(title) + '.png'. Returns the first
+   *  candidate; use `_imageCandidates()` for the full fallback list. */
   _resolveImage() {
+    const list = this._imageCandidates();
+    return list[0] || '';
+  }
+
+  /** Ordered list of image URL candidates to try. When `image` is set it is
+   *  the sole candidate. Otherwise, when `image_base` is set, we generate
+   *  multiple slug variants of the title so a file named any of
+   *  `ice-cream.png`, `ice_cream.png`, `ice cream.png`, or `icecream.png`
+   *  is picked up automatically. */
+  _imageCandidates() {
     const c = this._config;
-    if (c.image) return c.image;
-    if (c.image_base) {
-      const base = c.image_base.endsWith('/') ? c.image_base : c.image_base + '/';
-      const slug = this._slugify(c.title);
-      if (slug) return `${base}${slug}.png`;
+    if (c.image) return [c.image];
+    if (!c.image_base) return [];
+    const base = c.image_base.endsWith('/') ? c.image_base : c.image_base + '/';
+    const raw = String(c.title || '').toLowerCase().trim();
+    if (!raw) return [];
+    // Split on any non-letter/number run to get word tokens, preserving
+    // Unicode letters/numbers only.
+    const tokens = raw.split(/[^\p{Letter}\p{Number}]+/gu).filter(Boolean);
+    if (!tokens.length) return [];
+    const joiners = ['-', '_', ' ', ''];
+    const seen = new Set();
+    const out = [];
+    for (const j of joiners) {
+      const slug = tokens.join(j);
+      if (!slug || seen.has(slug)) continue;
+      seen.add(slug);
+      out.push(`${base}${encodeURI(slug)}.png`);
     }
-    return '';
+    return out;
   }
 
   _getColorValue(val) {
@@ -896,9 +909,18 @@ class ShoppingListCard extends HTMLElement {
   _wireImageError(card) {
     const img = card.querySelector('img');
     if (!img) return;
+    // Try each candidate in order; when all fail, hide the image so the
+    // icon-only fallback shows through.
+    const candidates = this._imageCandidates();
+    let idx = 0;
     img.addEventListener('error', () => {
-      img.style.display = 'none';
-      img.parentElement?.classList.add('image-error');
+      idx += 1;
+      if (idx < candidates.length) {
+        img.src = candidates[idx];
+      } else {
+        img.style.display = 'none';
+        img.parentElement?.classList.add('image-error');
+      }
     });
   }
 
