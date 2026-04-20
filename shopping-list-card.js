@@ -736,8 +736,13 @@ class ShoppingListCard extends HTMLElement {
 
       /* Icon-only mode */
       .card-container.no-name { justify-content: center; }
-      .card-container.vertical-layout.no-name { height: 80px; }
+      .card-container.vertical-layout.no-name { height: 56px; }
       .card-container.vertical-layout.no-name .vertical-top-block { top: 50%; transform: translateY(-50%); }
+      .card-container.vertical-layout.no-name .icon-wrapper.vertical-icon { width: 36px; height: 36px; }
+      .card-container.vertical-layout.no-name .icon-wrapper.vertical-icon ha-icon { --mdc-icon-size: 22px; }
+      .card-container.vertical-layout.no-name .image-wrapper.vertical-image { max-height: 36px; }
+      .card-container.vertical-layout.no-name .image-wrapper.vertical-image img { max-height: 36px; }
+      .card-container.vertical-layout.no-name .image-wrapper.vertical-image.image-error { width: 36px; height: 36px; }
 
       /* Vertical Layout */
       .card-container.vertical-layout { display: block; height: 120px; position: relative; }
@@ -781,14 +786,14 @@ class ShoppingListCard extends HTMLElement {
 
   getCardSize() {
     if (this._config && this._config.layout === 'vertical') {
-      return this._config.show_name === false ? 2 : 3;
+      return this._config.show_name === false ? 1 : 2;
     }
     return 1;
   }
 
   getLayoutOptions() {
     if (this._config && this._config.layout === 'vertical') {
-      const rows = this._config.show_name === false ? 2 : 3;
+      const rows = this._config.show_name === false ? 1 : 2;
       return { grid_rows: rows, grid_min_rows: rows, grid_columns: 2, grid_min_columns: 2 };
     }
     return { grid_rows: 1, grid_min_rows: 1, grid_columns: 4, grid_min_columns: 2 };
