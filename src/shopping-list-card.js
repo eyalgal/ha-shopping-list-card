@@ -6,13 +6,13 @@
  *
  * Author: eyalgal
  * License: MIT
- * Version: 1.7.0
+ * Version: 1.7.1
  *
  * Note: This card requires a to-do entity to function properly.
  * For more information, visit: https://github.com/eyalgal/ha-shopping-list-card
  */
 
-const CARD_VERSION = '1.7.0';
+const CARD_VERSION = '1.7.1';
 
 function escapeHtml(str) {
   if (str == null) return '';
@@ -95,11 +95,10 @@ class ShoppingListCardEditor extends HTMLElement {
 
   set hass(hass) {
     this._hass = hass;
-    if (!this._rendered) this._render();
-    // refresh entity pickers on first hass
-    if (this._rendered) {
-      this.shadowRoot.querySelectorAll('ha-entity-picker, ha-icon-picker').forEach(el => { el.hass = hass; });
-    }
+    if (!this._rendered) { this._render(); return; }
+    this.shadowRoot.querySelectorAll(
+      'ha-entity-picker, ha-icon-picker, ha-picture-upload'
+    ).forEach(el => { el.hass = hass; });
   }
 
   setConfig(config) {
@@ -112,197 +111,226 @@ class ShoppingListCardEditor extends HTMLElement {
 
     const todoEntities = Object.keys(this._hass.states).filter(id => id.startsWith('todo.'));
     const hasTodoEntities = todoEntities.length > 0;
+    const hasPictureUpload = !!customElements.get('ha-picture-upload');
 
     this.shadowRoot.innerHTML = `
       <style>
         :host { display: block; }
-        .card-config { display: flex; flex-direction: column; gap: 4px; }
-        .section { background: var(--card-background-color); border-radius: 8px; overflow: hidden; margin-bottom: 4px; }
-        .section-header {
-          display: flex; align-items: center; justify-content: space-between;
-          padding: 14px 16px; cursor: pointer; user-select: none;
-          transition: background-color 0.15s;
+        .card-config { display: flex; flex-direction: column; gap: 12px; }
+        ha-expansion-panel {
+          --expansion-panel-summary-padding: 0 16px;
+          --expansion-panel-content-padding: 0;
+          border: 1px solid var(--divider-color);
+          border-radius: 8px;
+          background: var(--card-background-color);
+          overflow: hidden;
         }
-        .section-header:hover { background: rgba(var(--rgb-primary-text-color), 0.04); }
-        .section-title { font-weight: 500; font-size: 15px; color: var(--primary-text-color); }
-        .section-header ha-icon { color: var(--secondary-text-color); transition: transform 0.2s; }
-        .section-content {
+        .panel-body {
           padding: 0 16px 16px 16px;
-          display: flex; flex-direction: column; gap: 14px;
-          animation: slideDown 0.2s ease-out;
+          display: flex;
+          flex-direction: column;
+          gap: 16px;
         }
-        @keyframes slideDown {
-          from { opacity: 0; transform: translateY(-6px); }
-          to { opacity: 1; transform: translateY(0); }
-        }
-        .row { display: flex; gap: 12px; align-items: center; }
+        .row { display: flex; gap: 12px; }
         .row > * { flex: 1; min-width: 0; }
-        ha-textfield, ha-entity-picker, ha-icon-picker, ha-select { width: 100%; }
-        .switch-wrapper {
+        ha-textfield,
+        ha-entity-picker,
+        ha-icon-picker,
+        ha-select,
+        ha-picture-upload { width: 100%; display: block; }
+        .toggle-row {
           display: flex; align-items: center; gap: 16px;
-          cursor: pointer; padding: 2px 0;
+          padding: 4px 0;
+          cursor: pointer;
+          user-select: none;
         }
-        .switch-label { display: flex; flex-direction: column; flex: 1; }
-        .switch-label > span:first-child {
-          font-weight: 500; color: var(--primary-text-color); font-size: 14px;
+        .toggle-row ha-switch { flex-shrink: 0; }
+        .toggle-text { display: flex; flex-direction: column; flex: 1; min-width: 0; }
+        .toggle-title {
+          font-size: 14px; font-weight: 500;
+          color: var(--primary-text-color);
         }
-        .switch-description {
-          font-size: 12px; color: var(--secondary-text-color); margin-top: 2px; line-height: 1.4;
+        .toggle-desc {
+          font-size: 12px; line-height: 1.4;
+          color: var(--secondary-text-color); margin-top: 2px;
+        }
+        .color-group { display: flex; flex-direction: column; gap: 8px; }
+        .color-group-label {
+          font-size: 13px; font-weight: 500;
+          color: var(--secondary-text-color);
+          text-transform: uppercase; letter-spacing: 0.04em;
+          margin-bottom: -4px;
         }
         .color-row {
-          display: grid; grid-template-columns: 1fr 1fr auto; gap: 8px; align-items: center;
+          display: grid;
+          grid-template-columns: 1fr auto;
+          gap: 8px; align-items: center;
         }
-        input[type="color"] {
+        .swatch {
           width: 40px; height: 40px; padding: 0;
-          border: 1px solid var(--divider-color, #888);
+          border: 1px solid var(--divider-color);
           border-radius: 6px; cursor: pointer; background: none;
+          flex-shrink: 0;
+        }
+        .hint {
+          font-size: 12px; line-height: 1.4;
+          color: var(--secondary-text-color);
+        }
+        .hint code {
+          background: rgba(var(--rgb-primary-text-color, 0, 0, 0), 0.08);
+          padding: 1px 4px; border-radius: 3px;
+          font-size: 11px;
         }
         .info-box {
-          background: var(--info-color, #039be5); color: white;
-          padding: 12px 14px; border-radius: 8px;
-          font-size: 14px; line-height: 1.4;
+          background: var(--warning-color);
+          color: var(--primary-background-color);
+          padding: 10px 14px; border-radius: 8px;
+          font-size: 13px; line-height: 1.5;
         }
-        .info-box a { color: white; text-decoration: underline; }
-        .field-hint {
-          font-size: 12px; color: var(--secondary-text-color); margin-top: -6px;
+        .info-box a { color: inherit; text-decoration: underline; }
+        .image-fallback {
+          display: flex; flex-direction: column; gap: 6px;
         }
       </style>
 
       <div class="card-config">
         ${!hasTodoEntities ? `
           <div class="info-box">
-            <strong>No to-do entities found.</strong> This card requires a to-do list entity.
-            <a href="https://github.com/eyalgal/ha-shopping-list-card" target="_blank">View documentation</a>
+            <strong>No to-do lists found.</strong>
+            You need a to-do entity before this card will work.
+            <a href="https://www.home-assistant.io/integrations/todo/" target="_blank" rel="noopener">Learn more</a>
           </div>
         ` : ''}
 
-        <div class="section">
-          <div class="section-header" data-section="basic">
-            <span class="section-title">Basic</span>
-            <ha-icon data-chevron="basic" icon="mdi:chevron-up"></ha-icon>
-          </div>
-          <div class="section-content" data-content="basic">
-            <ha-entity-picker id="todo_list" label="To-Do List Entity (Required)" required></ha-entity-picker>
+        <ha-expansion-panel outlined expanded header="Content" data-panel="content">
+          <div class="panel-body">
+            <ha-entity-picker id="todo_list" label="To-do list entity" required></ha-entity-picker>
             <div class="row">
-              <ha-textfield id="title" label="Title (Required)" required></ha-textfield>
-              <ha-textfield id="subtitle" label="Subtitle (Optional)"></ha-textfield>
+              <ha-textfield id="title" label="Title" required></ha-textfield>
+              <ha-textfield id="subtitle" label="Subtitle"></ha-textfield>
             </div>
-            <ha-textfield id="image" label="Image URL (Optional)" placeholder="/local/shopping/milk.png or https://..."></ha-textfield>
-            <div class="field-hint">If set, the image replaces the icon. Falls back to the icon if loading fails.</div>
+            ${hasPictureUpload ? `
+              <ha-picture-upload id="image_upload"></ha-picture-upload>
+              <div class="image-fallback">
+                <ha-textfield id="image" label="Image URL (optional)" placeholder="/local/... or https://..."></ha-textfield>
+                <div class="hint">Upload an image above or paste a URL. Leave blank to use the icon.</div>
+              </div>
+            ` : `
+              <ha-textfield id="image" label="Image URL (optional)" placeholder="/local/... or https://..."></ha-textfield>
+              <div class="hint">Point to an image in <code>/local/</code> or a full URL. Falls back to the icon if loading fails.</div>
+            `}
           </div>
-        </div>
+        </ha-expansion-panel>
 
-        <div class="section">
-          <div class="section-header" data-section="layout">
-            <span class="section-title">Layout</span>
-            <ha-icon data-chevron="layout" icon="mdi:chevron-down"></ha-icon>
-          </div>
-          <div class="section-content" data-content="layout" hidden>
+        <ha-expansion-panel outlined header="Layout &amp; Display" data-panel="layout">
+          <div class="panel-body">
             <ha-select id="layout" label="Layout" naturalMenuWidth fixedMenuPosition>
               <mwc-list-item value="horizontal">Horizontal</mwc-list-item>
               <mwc-list-item value="vertical">Vertical</mwc-list-item>
             </ha-select>
-            <label class="switch-wrapper">
+            <label class="toggle-row">
               <ha-switch id="show_name"></ha-switch>
-              <div class="switch-label">
-                <span>Show Title &amp; Subtitle</span>
-                <span class="switch-description">Turn off for a compact icon-only card.</span>
+              <div class="toggle-text">
+                <span class="toggle-title">Show title and subtitle</span>
+                <span class="toggle-desc">Turn off for an icon-only card.</span>
               </div>
             </label>
-            <label class="switch-wrapper">
-              <ha-switch id="enable_quantity"></ha-switch>
-              <div class="switch-label">
-                <span>Enable Quantity</span>
-                <span class="switch-description">Show + / - buttons to track how many of this item you need.</span>
-              </div>
-            </label>
-            <label class="switch-wrapper">
+            <label class="toggle-row">
               <ha-switch id="colorize_background"></ha-switch>
-              <div class="switch-label">
-                <span>Colorize Background When On</span>
-                <span class="switch-description">Tints the card with the "on" color when the item is on the list.</span>
+              <div class="toggle-text">
+                <span class="toggle-title">Tint background when on</span>
+                <span class="toggle-desc">Subtle wash of the on-color across the card.</span>
               </div>
             </label>
           </div>
-        </div>
+        </ha-expansion-panel>
 
-        <div class="section">
-          <div class="section-header" data-section="appearance">
-            <span class="section-title">Icon &amp; Colors</span>
-            <ha-icon data-chevron="appearance" icon="mdi:chevron-down"></ha-icon>
-          </div>
-          <div class="section-content" data-content="appearance" hidden>
-            <div class="row">
-              <ha-icon-picker id="off_icon" label="Off Icon"></ha-icon-picker>
-              <ha-icon-picker id="on_icon" label="On Icon"></ha-icon-picker>
-            </div>
-            <div class="color-row">
-              <ha-textfield id="off_color" label="Off Color" helper="name or hex"></ha-textfield>
-              <ha-textfield id="on_color" label="On Color" helper="name or hex"></ha-textfield>
-              <div style="display:flex; gap:8px;">
-                <input type="color" id="off_color_picker" title="Pick off-state color" />
-                <input type="color" id="on_color_picker" title="Pick on-state color" />
+        <ha-expansion-panel outlined header="Icons &amp; Colors" data-panel="icons">
+          <div class="panel-body">
+            <div class="color-group">
+              <span class="color-group-label">Off state</span>
+              <ha-icon-picker id="off_icon" label="Off icon"></ha-icon-picker>
+              <div class="color-row">
+                <ha-textfield id="off_color" label="Off color"></ha-textfield>
+                <input type="color" class="swatch" id="off_color_picker" title="Pick off color" />
               </div>
             </div>
-            <div class="field-hint">Named colors (red, blue, green, etc.) will track your theme's <code>--rgb-*</code> variables.</div>
+            <div class="color-group">
+              <span class="color-group-label">On state</span>
+              <ha-icon-picker id="on_icon" label="On icon"></ha-icon-picker>
+              <div class="color-row">
+                <ha-textfield id="on_color" label="On color"></ha-textfield>
+                <input type="color" class="swatch" id="on_color_picker" title="Pick on color" />
+              </div>
+            </div>
+            <div class="hint">
+              Use an HA color name (<code>red</code>, <code>blue</code>, <code>green</code>...) to follow the theme, or a <code>#hex</code> value.
+            </div>
           </div>
-        </div>
+        </ha-expansion-panel>
 
-        <div class="section">
-          <div class="section-header" data-section="behavior">
-            <span class="section-title">Behavior</span>
-            <ha-icon data-chevron="behavior" icon="mdi:chevron-down"></ha-icon>
-          </div>
-          <div class="section-content" data-content="behavior" hidden>
-            <ha-select id="hold_action" label="Hold Action" naturalMenuWidth fixedMenuPosition>
+        <ha-expansion-panel outlined header="Behavior" data-panel="behavior">
+          <div class="panel-body">
+            <label class="toggle-row">
+              <ha-switch id="enable_quantity"></ha-switch>
+              <div class="toggle-text">
+                <span class="toggle-title">Enable quantity</span>
+                <span class="toggle-desc">Show + / - buttons to track how many of this item you need.</span>
+              </div>
+            </label>
+            <div class="row">
+              <ha-textfield id="quantity_step" label="Quantity step" type="number" min="1" max="99" helper="How much +/- adjusts"></ha-textfield>
+              <ha-textfield id="quantity_max" label="Quantity max" type="number" min="1" max="999" helper="Optional cap"></ha-textfield>
+            </div>
+            <ha-select id="hold_action" label="Hold action" naturalMenuWidth fixedMenuPosition>
               <mwc-list-item value="default">Remove item (default)</mwc-list-item>
               <mwc-list-item value="more-info">Open more-info</mwc-list-item>
               <mwc-list-item value="none">None</mwc-list-item>
             </ha-select>
-            <label class="switch-wrapper">
+            <label class="toggle-row">
               <ha-switch id="haptic"></ha-switch>
-              <div class="switch-label">
-                <span>Haptic Feedback</span>
-                <span class="switch-description">Short vibration on tap and hold (mobile only).</span>
+              <div class="toggle-text">
+                <span class="toggle-title">Haptic feedback</span>
+                <span class="toggle-desc">Short vibration on tap and hold (mobile only).</span>
               </div>
             </label>
-            <ha-textfield id="quantity_step" label="Quantity Step" type="number" min="1" max="99" helper="How much +/- adjusts (default 1)"></ha-textfield>
-            <ha-textfield id="quantity_max" label="Quantity Max" type="number" min="1" max="999" helper="Cap the + button (optional)"></ha-textfield>
           </div>
-        </div>
+        </ha-expansion-panel>
       </div>
     `;
 
-    // Wire entity/icon pickers
+    // Wire hass-consuming components
     const ep = this.shadowRoot.querySelector('#todo_list');
     ep.hass = this._hass;
     ep.includeDomains = ['todo'];
     ep.allowCustomEntity = false;
     this.shadowRoot.querySelectorAll('ha-icon-picker').forEach(el => { el.hass = this._hass; });
-
-    // Section toggling
-    this.shadowRoot.querySelectorAll('.section-header').forEach(header => {
-      header.addEventListener('click', () => {
-        const name = header.dataset.section;
-        const content = this.shadowRoot.querySelector(`[data-content="${name}"]`);
-        const chevron = this.shadowRoot.querySelector(`[data-chevron="${name}"]`);
-        const open = !content.hidden;
-        content.hidden = open;
-        chevron.setAttribute('icon', open ? 'mdi:chevron-down' : 'mdi:chevron-up');
+    const pu = this.shadowRoot.querySelector('#image_upload');
+    if (pu) {
+      pu.hass = this._hass;
+      pu.original = false;
+      pu.crop = undefined;
+      pu.addEventListener('change', () => {
+        const tf = this.shadowRoot.querySelector('#image');
+        tf.value = pu.value || '';
+        this._handleConfigChanged();
       });
-    });
+    }
 
-    // Change listeners
-    this.shadowRoot.querySelectorAll('ha-textfield, ha-switch, ha-entity-picker, ha-icon-picker, ha-select').forEach(el => {
-      el.addEventListener('input', () => this._handleConfigChanged());
-      el.addEventListener('change', () => this._handleConfigChanged());
-      el.addEventListener('value-changed', () => this._handleConfigChanged());
-      el.addEventListener('selected', () => this._handleConfigChanged());
+    // Field change listeners
+    this.shadowRoot.querySelectorAll(
+      'ha-textfield, ha-switch, ha-entity-picker, ha-icon-picker, ha-select'
+    ).forEach(el => {
+      const handler = () => this._handleConfigChanged();
+      el.addEventListener('input', handler);
+      el.addEventListener('change', handler);
+      el.addEventListener('value-changed', handler);
+      el.addEventListener('selected', handler);
       el.addEventListener('closed', (e) => e.stopPropagation());
     });
 
-    // Color pickers
-    ['off','on'].forEach(type => {
+    // Color swatch <-> textfield sync
+    ['off', 'on'].forEach(type => {
       const tf = this.shadowRoot.querySelector(`#${type}_color`);
       const cp = this.shadowRoot.querySelector(`#${type}_color_picker`);
       cp.addEventListener('input', () => {
@@ -331,7 +359,6 @@ class ShoppingListCardEditor extends HTMLElement {
     const s = this.shadowRoot;
     const c = this._config;
 
-    // Auto-populate todo_list on first load
     let todoEntity = c.todo_list;
     let shouldAutoPopulate = false;
     if (!todoEntity && this._hass && !this._hasInitialized) {
@@ -343,6 +370,8 @@ class ShoppingListCardEditor extends HTMLElement {
     s.querySelector('#title').value = c.title || '';
     s.querySelector('#subtitle').value = c.subtitle || '';
     s.querySelector('#image').value = c.image || '';
+    const pu = s.querySelector('#image_upload');
+    if (pu) pu.value = c.image || '';
     s.querySelector('#todo_list').value = c.todo_list || '';
     s.querySelector('#enable_quantity').checked = !!c.enable_quantity;
     s.querySelector('#colorize_background').checked = c.colorize_background !== false;
@@ -371,13 +400,12 @@ class ShoppingListCardEditor extends HTMLElement {
     const n = { ...this._config };
 
     n.title = s.querySelector('#title').value;
-    n.subtitle = s.querySelector('#subtitle').value || undefined;
-    if (!n.subtitle) delete n.subtitle;
-    n.image = s.querySelector('#image').value || undefined;
-    if (!n.image) delete n.image;
+    const sub = s.querySelector('#subtitle').value;
+    if (sub) n.subtitle = sub; else delete n.subtitle;
+    const img = s.querySelector('#image').value;
+    if (img) n.image = img; else delete n.image;
     n.todo_list = s.querySelector('#todo_list').value;
 
-    // Booleans - only persist non-default
     const enableQty = s.querySelector('#enable_quantity').checked;
     if (enableQty) n.enable_quantity = true; else delete n.enable_quantity;
 
@@ -390,16 +418,13 @@ class ShoppingListCardEditor extends HTMLElement {
     const haptic = s.querySelector('#haptic').checked;
     if (haptic) n.haptic = true; else delete n.haptic;
 
-    // Layout
     const layoutVal = s.querySelector('#layout').value;
     if (layoutVal === 'vertical') n.layout = 'vertical'; else delete n.layout;
 
-    // Hold action
     const holdVal = s.querySelector('#hold_action').value || 'default';
     if (holdVal === 'default') delete n.hold_action;
     else n.hold_action = { action: holdVal };
 
-    // Quantity step / max
     const stepRaw = s.querySelector('#quantity_step').value;
     const stepNum = parseInt(stepRaw, 10);
     if (stepRaw && !isNaN(stepNum) && stepNum > 1) n.quantity_step = stepNum;
@@ -410,7 +435,6 @@ class ShoppingListCardEditor extends HTMLElement {
     if (maxRaw && !isNaN(maxNum) && maxNum > 0) n.quantity_max = maxNum;
     else delete n.quantity_max;
 
-    // Icons / colors
     ['off','on'].forEach(type => {
       const icon = s.querySelector(`#${type}_icon`).value;
       if (icon === ShoppingListCard[`DEFAULT_${type.toUpperCase()}_ICON`]) delete n[`${type}_icon`];
@@ -927,6 +951,8 @@ class ShoppingListCard extends HTMLElement {
       .card-container.vertical-layout.no-name .image-wrapper.vertical-image { max-height: 36px; }
       .card-container.vertical-layout.no-name .image-wrapper.vertical-image img { max-height: 36px; }
       .card-container.vertical-layout.no-name .image-wrapper.vertical-image.image-error { width: 36px; height: 36px; }
+      /* Horizontal no-name: keep icon at left, quantity at right */
+      .card-container:not(.vertical-layout).no-name .quantity-controls { margin-left: auto; }
 
       /* Vertical Layout */
       .card-container.vertical-layout { display: block; height: 120px; position: relative; }
