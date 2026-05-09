@@ -6,13 +6,13 @@
  *
  * Author: eyalgal
  * License: MIT
- * Version: 2.0.0
+ * Version: 2.0.1
  *
  * Note: This card requires a to-do entity to function properly.
  * For more information, visit: https://github.com/eyalgal/ha-shopping-list-card
  */
 
-const CARD_VERSION = '2.0.0';
+const CARD_VERSION = '2.0.1';
 
 function escapeHtml(str) {
   if (str == null) return '';
@@ -570,6 +570,7 @@ class ShoppingListCard extends HTMLElement {
     this._items = null;
     this._unsubscribe = null;
     this._subscribedEntity = null;
+    this._lastRenderKey = null;
   }
 
   set hass(hass) {
@@ -591,6 +592,8 @@ class ShoppingListCard extends HTMLElement {
     if (!config.todo_list) throw new Error('You must define a todo_list entity_id.');
     const prev = this._config;
     this._config = config;
+    // Any config change can affect what we render; invalidate the memo.
+    this._lastRenderKey = null;
     if (prev && prev.todo_list !== config.todo_list) {
       this._items = null;
       this._teardownSubscription();
@@ -762,6 +765,8 @@ class ShoppingListCard extends HTMLElement {
   _renderError(message) {
     this._ensureShell();
     this.content.innerHTML = `<ha-alert alert-type="error">${escapeHtml(message)}</ha-alert>`;
+    // Error replaces the card DOM, so the next normal render must rebuild from scratch.
+    this._lastRenderKey = null;
   }
 
   _render() {
@@ -789,6 +794,14 @@ class ShoppingListCard extends HTMLElement {
       const m = item.summary.match(rx);
       if (m) { isOn = true; matched = item.summary; matchedUid = item.uid; qty = m[1] ? +m[1] : 1; break; }
     }
+
+    // Memoize: skip the DOM rewrite when nothing visible (or interaction-relevant)
+    // changed for this card. Config changes invalidate _lastRenderKey via setConfig().
+    // This avoids rebuilding innerHTML on every WebSocket push that doesn't affect us
+    // (e.g. a sibling item being added on a 50-card dashboard).
+    const renderKey = `${isOn}|${qty}|${matchedUid || ''}|${matched || ''}`;
+    if (this._lastRenderKey === renderKey) return;
+    this._lastRenderKey = renderKey;
 
     const onIcon    = this._config.on_icon    || ShoppingListCard.DEFAULT_ON_ICON;
     const offIcon   = this._config.off_icon   || ShoppingListCard.DEFAULT_OFF_ICON;
@@ -827,7 +840,7 @@ class ShoppingListCard extends HTMLElement {
         let iconElement;
         if (effectiveImage) {
             iconElement = `<div class="image-wrapper vertical-image">
-                             <img src="${safeImage}" alt="${safeTitle}" crossorigin="anonymous" />
+                             <img src="${safeImage}" alt="${safeTitle}" />
                              ${quantityBadge}
                              <div class="icon-wrapper vertical-icon" style="background:${bg}; color:${fg};">
                                <ha-icon icon="${icon}"></ha-icon>
@@ -857,7 +870,7 @@ class ShoppingListCard extends HTMLElement {
 
         if (effectiveImage) {
             mainContent = `<div class="image-wrapper">
-                             <img src="${safeImage}" alt="${safeTitle}" crossorigin="anonymous" />
+                             <img src="${safeImage}" alt="${safeTitle}" />
                              <div class="icon-wrapper" style="background:${bg}; color:${fg};">
                                <ha-icon icon="${icon}"></ha-icon>
                              </div>
