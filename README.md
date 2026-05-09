@@ -1,11 +1,13 @@
 # 🛍️ Shopping List Card
 [![GitHub Release][release_badge]][release]
+[![Downloads][downloads_badge]][release]
 [![Community Forum][forum_badge]][forum]
 [![Buy Me A Coffee][bmac_badge]][bmac]
 
 <!-- Link references -->
 [release_badge]: https://img.shields.io/github/v/release/eyalgal/ha-shopping-list-card
 [release]: https://github.com/eyalgal/ha-shopping-list-card/releases
+[downloads_badge]: https://img.shields.io/github/downloads/eyalgal/ha-shopping-list-card/total.svg
 [forum_badge]: https://img.shields.io/badge/Community-Forum-5294E2.svg
 [forum]: https://community.home-assistant.io/t/shopping-list-card-a-simple-card-for-quick-adding-items-to-any-to-do-list/905005
 [bmac_badge]: https://img.shields.io/badge/buy_me_a-coffee-yellow
@@ -78,10 +80,10 @@ haptic: true
 
 | Name | Type | Required | Description | Default |
 |---|---|---|---|---|
-| `type` | string | yes | Must be `custom:shopping-list-card`. | — |
-| `title` | string | yes | The item name. | — |
+| `type` | string | yes | Must be `custom:shopping-list-card`. | - |
+| `title` | string | yes | The item name. | - |
 | `subtitle` | string | no | A secondary line of text. Included when matching/writing: the stored item is `"<title> - <subtitle>"`. | `''` |
-| `todo_list` | string | yes | The `todo.<name>` entity to manage. | — |
+| `todo_list` | string | yes | The `todo.<name>` entity to manage. | - |
 | `list_prefix` | string | no | When set, items are stored as `"<prefix> - <title>"` for category sorting. Display is unchanged. | `''` |
 | `image` | string | no | URL to a custom image. Replaces the icon when set. | `''` |
 | `image_base` | string | no | Base path for auto-derived images. When set and `image` is empty, the card tries `<image_base><slug>.png` in several slug variants of the title. | `''` |
@@ -89,7 +91,7 @@ haptic: true
 | `show_name` | boolean | no | Set to `false` for an icon-only card. | `true` |
 | `enable_quantity` | boolean | no | Show `+` / `-` buttons when the item is on the list. | `false` |
 | `quantity_step` | number | no | How much `+` / `-` adjusts per tap. | `1` |
-| `quantity_max` | number | no | Optional cap for the quantity. | — |
+| `quantity_max` | number | no | Optional cap for the quantity. | - |
 | `on_icon` | string | no | Icon when the item is on the list. | `mdi:check` |
 | `on_color` | string | no | Color for the on state (HA name like `green`, `teal`, or `#4CAF50`). | `green` |
 | `off_icon` | string | no | Icon when the item is not on the list. | `mdi:plus` |
@@ -168,7 +170,7 @@ todo_list: todo.shopping_list
 
 ---
 
-### ❤️ Support
+## ❤️ Support
 
 If you find this card useful and would like to show your support, you can buy me a coffee:
 
