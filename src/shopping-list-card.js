@@ -6,13 +6,13 @@
  *
  * Author: eyalgal
  * License: MIT
- * Version: 2.0.1
+ * Version: 2.0.2
  *
  * Note: This card requires a to-do entity to function properly.
  * For more information, visit: https://github.com/eyalgal/ha-shopping-list-card
  */
 
-const CARD_VERSION = '2.0.1';
+const CARD_VERSION = '2.0.2';
 
 function escapeHtml(str) {
   if (str == null) return '';
@@ -1180,6 +1180,10 @@ if (!window.customCards.some(c => c.type === 'shopping-list-card')) {
     name: 'Shopping List Card',
     preview: true,
     description: 'A card to manage items on a shopping list.',
+    getEntitySuggestion: (hass, entityId) => {
+      if (typeof entityId !== 'string' || entityId.split('.')[0] !== 'todo') return null;
+      return { config: { type: 'custom:shopping-list-card', title: 'New item', todo_list: entityId } };
+    },
   });
 }
 
