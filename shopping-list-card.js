@@ -1018,13 +1018,28 @@ class ShoppingListCard extends HTMLElement {
     const onColorN  = this._config.on_color   || ShoppingListCard.DEFAULT_ON_COLOR;
     const offColorN = this._config.off_color  || ShoppingListCard.DEFAULT_OFF_COLOR;
 
-    const states = types.map(t => ({ ...t, ...this._typeState(t.name) }));
+    // Build the row entries. When `base_item` is set, the first row toggles the
+    // bare title (no subtitle) so an item can have a "plain" variant alongside
+    // its named types (e.g. Apple, plus Apple - Pink Lady). `subtitle: null`
+    // marks the base row; its stored summary is just the title.
+    const entries = [];
+    if (this._config.base_item) {
+      const baseLabel = typeof this._config.base_item === 'string'
+        ? this._config.base_item : 'Regular';
+      entries.push({ label: baseLabel, subtitle: null });
+    }
+    for (const t of types) {
+      entries.push({ label: t.name, subtitle: t.name, image: t.image, icon: t.icon });
+    }
+    const states = entries.map(e => ({ ...e, ...this._typeState(e.subtitle) }));
+    // Cache the subtitle (or null for base) per row index for tap handling.
+    this._typeEntries = states.map(e => e.subtitle);
     const activeCount = states.filter(s => s.isOn).length;
 
-    // Memoize on the per-type states. Expansion is a pure CSS toggle applied
+    // Memoize on the per-row states. Expansion is a pure CSS toggle applied
     // outside render, so it is intentionally excluded from the key.
     const renderKey = 'types|' + activeCount + '|' +
-      states.map(s => `${s.name}:${s.isOn ? 1 : 0}:${s.qty}`).join('|');
+      states.map(s => `${s.label}:${s.isOn ? 1 : 0}:${s.qty}`).join('|');
     if (this._lastRenderKey === renderKey) { this._applyExpanded(); return; }
     this._lastRenderKey = renderKey;
 
@@ -1071,7 +1086,7 @@ class ShoppingListCard extends HTMLElement {
 
     // Parent secondary line: active selections, else the configured subtitle.
     const activeNames = states.filter(s => s.isOn)
-      .map(s => s.qty > 1 ? `${s.name} (${s.qty})` : s.name).join(', ');
+      .map(s => s.qty > 1 ? `${s.label} (${s.qty})` : s.label).join(', ');
     const secondary = activeNames || this._config.subtitle || '';
 
     let cardBgStyle = '';
@@ -1098,15 +1113,21 @@ class ShoppingListCard extends HTMLElement {
             ${incBtn}
           </div>`;
       }
-      return `<div class="type-row ${s.isOn ? 'is-on' : 'is-off'}" data-type-index="${i}"
-                   role="button" tabindex="0" aria-pressed="${s.isOn ? 'true' : 'false'}"
-                   aria-label="${escapeHtml(s.name)}">
-                ${thumb}
-                <div class="type-name">${escapeHtml(s.name)}</div>
-                ${qtyHtml}
-                <div class="type-toggle" style="background:${rBg}; color:${rFg};">
+      const isBase = s.subtitle == null;
+      // When an active type shows quantity controls, the toggle button is
+      // redundant - the +/- buttons already cover add and remove.
+      const toggleHtml = qtyHtml
+        ? ''
+        : `<div class="type-toggle" style="background:${rBg}; color:${rFg};">
                   <ha-icon icon="${rIcon}"></ha-icon>
-                </div>
+                </div>`;
+      return `<div class="type-row ${s.isOn ? 'is-on' : 'is-off'}${isBase ? ' type-row-base' : ''}" data-type-index="${i}"
+                   role="button" tabindex="0" aria-pressed="${s.isOn ? 'true' : 'false'}"
+                   aria-label="${escapeHtml(s.label)}">
+                ${thumb}
+                <div class="type-name">${escapeHtml(s.label)}</div>
+                ${qtyHtml}
+                ${toggleHtml}
               </div>`;
     }).join('');
 
@@ -1169,10 +1190,10 @@ class ShoppingListCard extends HTMLElement {
   async _handleTypeTap(ev, idx) {
     ev.stopPropagation();
     if (this._isUpdating) return;
-    const types = this._getTypes();
-    const t = types[idx];
-    if (!t) return;
-    const { fullName, isOn, qty, matched, matchedUid } = this._typeState(t.name);
+    const entries = this._typeEntries || [];
+    if (idx < 0 || idx >= entries.length) return;
+    const subtitle = entries[idx]; // string, or null for the base item
+    const { fullName, isOn, qty, matched, matchedUid } = this._typeState(subtitle);
     const action = ev.target.closest('.quantity-btn')?.dataset.action;
 
     this._vibrate();
@@ -1449,12 +1470,12 @@ class ShoppingListCard extends HTMLElement {
       .types-list { max-height: 0; overflow: hidden; transition: max-height .25s ease; }
       .card-container.types-mode.expanded .types-list { max-height: 1000px; }
 
-      /* Vertical types header: icon on top, name centered, chevron pinned top-right */
-      .types-header.vertical-header { flex-direction: column; align-items: center; gap: 8px; padding: 16px 12px 12px; text-align: center; position: relative; }
-      .types-header.vertical-header .info-container { width: 100%; align-items: center; }
+      /* Vertical types header: icon on top, name centered, chevron pinned bottom-right */
+      .types-header.vertical-header { flex-direction: column; align-items: center; gap: 6px; padding: 16px 12px 14px; text-align: center; position: relative; }
+      .types-header.vertical-header .info-container { width: 100%; align-items: center; text-align: center; }
       .types-header.vertical-header .primary,
-      .types-header.vertical-header .secondary { text-align: center; }
-      .types-header.vertical-header .types-chevron { position: absolute; top: 6px; right: 6px; }
+      .types-header.vertical-header .secondary { text-align: center; width: 100%; }
+      .types-header.vertical-header .types-chevron { position: absolute; bottom: 6px; right: 8px; --mdc-icon-size: 20px; opacity: 0.7; }
       .type-row { display: flex; align-items: center; gap: 10px; padding: 8px 12px 8px 14px; cursor: pointer; border-top: 1px solid var(--divider-color); transition: background-color .2s; outline: none; }
       .type-row:hover { background: var(--secondary-background-color); }
       .type-row:focus-visible { box-shadow: 0 0 0 2px var(--primary-color) inset; }
