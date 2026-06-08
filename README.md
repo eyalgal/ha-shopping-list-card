@@ -85,6 +85,7 @@ haptic: true
 | `title` | string | yes | The item name. | - |
 | `subtitle` | string | no | A secondary line of text. Included when matching/writing: the stored item is `"<title> - <subtitle>"`. | `''` |
 | `types` | list | no | Turns the card into an expandable group. Each entry (a string, or `{ name, image, icon }`) is added as `"<title> - <type>"`. Tapping the card header adds the bare title; the chevron expands the variant list. When set, the single `subtitle` is ignored. Works in both `horizontal` and `vertical` layouts. | - |
+| `types_sort` | string | no | Order of the variant rows: `none` (as listed), `asc` (A-Z), or `desc` (Z-A). Case-insensitive, natural (numbers sorted numerically). Only used when `types` is set. | `none` |
 | `todo_list` | string | yes | The `todo.<name>` entity to manage. | - |
 | `list_prefix` | string | no | When set, items are stored as `"<prefix> - <title>"` for category sorting. Display is unchanged. | `''` |
 | `image` | string | no | URL to a custom image. Replaces the icon when set. | `''` |
@@ -172,11 +173,19 @@ When you want one tile to cover several variants of the same item, list them und
 
 Tapping the **header body** (anywhere but the chevron) adds or removes the bare title (`Apple`), exactly like a normal single-item card. The configured `subtitle` is ignored while `types` is set (each type is the subtitle).
 
+**Holding** clears items in bulk (respecting `hold_action: none`):
+
+- Hold the **header** to remove every item that belongs to this card (the bare title and all of its variants).
+- Hold a **variant row** to remove that specific variant entirely, regardless of its quantity.
+
+Use `types_sort` to order the rows alphabetically (`asc` for A-Z, `desc` for Z-A) instead of the order they are listed.
+
 ```yaml
 type: custom:shopping-list-card
 title: Apple
 todo_list: todo.shopping_list
 enable_quantity: true
+types_sort: asc
 types:
   - Pink Lady
   - Granny Smith
