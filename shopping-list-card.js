@@ -6,13 +6,13 @@
  *
  * Author: eyalgal
  * License: MIT
- * Version: 2.1.0
+ * Version: 2.1.1
  *
  * Note: This card requires a to-do entity to function properly.
  * For more information, visit: https://github.com/eyalgal/ha-shopping-list-card
  */
 
-const CARD_VERSION = '2.1.0';
+const CARD_VERSION = '2.1.1';
 
 function escapeHtml(str) {
   if (str == null) return '';
@@ -112,6 +112,14 @@ class ShoppingListCardEditor extends HTMLElement {
     const todoEntities = Object.keys(this._hass.states).filter(id => id.startsWith('todo.'));
     const hasTodoEntities = todoEntities.length > 0;
 
+    // HA 2026.x removed `ha-textfield` (replaced by web-awesome based
+    // `ha-input`). Prefer the legacy element when it is still registered for
+    // backward compatibility, otherwise fall back to `ha-input`. Both expose a
+    // `.value` property and emit native input/change events, and both ignore
+    // each other's helper attribute (`helper` vs `hint`), so we set both.
+    const TF = (!customElements.get('ha-textfield') && customElements.get('ha-input'))
+      ? 'ha-input' : 'ha-textfield';
+
     this.shadowRoot.innerHTML = `
       <style>
         :host { display: block; }
@@ -133,6 +141,7 @@ class ShoppingListCardEditor extends HTMLElement {
         .row { display: flex; gap: 12px; }
         .row > * { flex: 1; min-width: 0; }
         ha-textfield,
+        ha-input,
         ha-entity-picker,
         ha-icon-picker,
         ha-select,
@@ -223,8 +232,8 @@ class ShoppingListCardEditor extends HTMLElement {
           <div class="panel-body">
             <ha-entity-picker id="todo_list" label="To-do list entity" required></ha-entity-picker>
             <div class="row">
-              <ha-textfield id="title" label="Title" required></ha-textfield>
-              <ha-textfield id="subtitle" label="Subtitle"></ha-textfield>
+              <${TF} id="title" label="Title" required></${TF}>
+              <${TF} id="subtitle" label="Subtitle"></${TF}>
             </div>
             <div class="types-field">
               <span class="types-label">Types (optional)</span>
@@ -233,11 +242,11 @@ class ShoppingListCardEditor extends HTMLElement {
             </div>
             <ha-picture-upload id="image_upload"></ha-picture-upload>
             <div class="image-fallback">
-              <ha-textfield id="image" label="Image URL (optional)" placeholder="/local/... or https://..."></ha-textfield>
-              <ha-textfield id="image_base" label="Image base path (optional)" placeholder="/local/images/shopping-list/"></ha-textfield>
+              <${TF} id="image" label="Image URL (optional)" placeholder="/local/... or https://..."></${TF}>
+              <${TF} id="image_base" label="Image base path (optional)" placeholder="/local/images/shopping-list/"></${TF}>
               <div class="hint">Upload an image above or paste a URL. Or set a base path and the card will try <code>title.png</code> in several variants (dash, underscore, space, joined) from the title.</div>
             </div>
-            <ha-textfield id="list_prefix" label="List prefix (optional)" placeholder="e.g. Dairy" helper="Stored in the list as 'Prefix - Title' for category sorting; display is unchanged."></ha-textfield>
+            <${TF} id="list_prefix" label="List prefix (optional)" placeholder="e.g. Dairy" helper="Stored in the list as 'Prefix - Title' for category sorting; display is unchanged." hint="Stored in the list as 'Prefix - Title' for category sorting; display is unchanged."></${TF}>
           </div>
         </ha-expansion-panel>
 
@@ -270,7 +279,7 @@ class ShoppingListCardEditor extends HTMLElement {
               <span class="color-group-label">Off state</span>
               <ha-icon-picker id="off_icon" label="Off icon"></ha-icon-picker>
               <div class="color-row">
-                <ha-textfield id="off_color" label="Off color"></ha-textfield>
+                <${TF} id="off_color" label="Off color"></${TF}>
                 <input type="color" class="swatch" id="off_color_picker" title="Pick off color" />
               </div>
             </div>
@@ -278,7 +287,7 @@ class ShoppingListCardEditor extends HTMLElement {
               <span class="color-group-label">On state</span>
               <ha-icon-picker id="on_icon" label="On icon"></ha-icon-picker>
               <div class="color-row">
-                <ha-textfield id="on_color" label="On color"></ha-textfield>
+                <${TF} id="on_color" label="On color"></${TF}>
                 <input type="color" class="swatch" id="on_color_picker" title="Pick on color" />
               </div>
             </div>
@@ -298,8 +307,8 @@ class ShoppingListCardEditor extends HTMLElement {
               </div>
             </label>
             <div class="row">
-              <ha-textfield id="quantity_step" label="Quantity step" type="number" min="1" max="99" helper="How much +/- adjusts"></ha-textfield>
-              <ha-textfield id="quantity_max" label="Quantity max" type="number" min="1" max="999" helper="Optional cap"></ha-textfield>
+              <${TF} id="quantity_step" label="Quantity step" type="number" min="1" max="99" helper="How much +/- adjusts" hint="How much +/- adjusts"></${TF}>
+              <${TF} id="quantity_max" label="Quantity max" type="number" min="1" max="999" helper="Optional cap" hint="Optional cap"></${TF}>
             </div>
             <ha-select id="hold_action" label="Hold action" naturalMenuWidth fixedMenuPosition>
               <mwc-list-item value="default">Remove item (default)</mwc-list-item>
@@ -341,7 +350,7 @@ class ShoppingListCardEditor extends HTMLElement {
 
     // Field change listeners (non-select)
     this.shadowRoot.querySelectorAll(
-      'ha-textfield, ha-switch, ha-entity-picker, ha-icon-picker'
+      'ha-textfield, ha-input, ha-switch, ha-entity-picker, ha-icon-picker'
     ).forEach(el => {
       const handler = () => this._handleConfigChanged();
       el.addEventListener('input', handler);
