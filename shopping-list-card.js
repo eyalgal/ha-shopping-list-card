@@ -6,13 +6,13 @@
  *
  * Author: eyalgal
  * License: MIT
- * Version: 2.1.1
+ * Version: 2.1.2
  *
  * Note: This card requires a to-do entity to function properly.
  * For more information, visit: https://github.com/eyalgal/ha-shopping-list-card
  */
 
-const CARD_VERSION = '2.1.1';
+const CARD_VERSION = '2.1.2';
 
 function escapeHtml(str) {
   if (str == null) return '';
@@ -1127,7 +1127,17 @@ class ShoppingListCard extends HTMLElement {
 
     const headerLabel = escapeHtml([this._config.title, secondary].filter(Boolean).join(', '));
 
-    const headerInner = `${parentIcon}
+    // Vertical mirrors the normal vertical tile: icon top-center, text bottom,
+    // chevron pinned bottom-right. Horizontal keeps the inline row.
+    const headerInner = isVertical
+      ? `<div class="vertical-top-block">${parentIcon}</div>
+         <div class="info-container">
+           <div class="primary">${safeTitle}</div>
+           ${secondary ? `<div class="secondary">${escapeHtml(secondary)}</div>` : ''}
+         </div>
+         <ha-icon class="types-chevron" icon="mdi:chevron-down" role="button" tabindex="0"
+                  aria-expanded="false" aria-controls="slc-types-list" aria-label="Toggle types"></ha-icon>`
+      : `${parentIcon}
          <div class="info-container">
            <div class="primary">${safeTitle}</div>
            ${secondary ? `<div class="secondary">${escapeHtml(secondary)}</div>` : ''}
@@ -1482,6 +1492,9 @@ class ShoppingListCard extends HTMLElement {
       /* Types (variants) mode */
       .card-container.types-mode { display: block; padding: 0; cursor: default; }
       .card-container.types-mode:hover { background: transparent; }
+      /* Types cards grow with their content; never inherit the fixed 120px
+         height from the normal vertical-layout tile. */
+      .card-container.types-mode.vertical-layout { height: auto; }
       .types-header { display: flex; align-items: center; gap: 10px; padding: 10px 12px; cursor: pointer; transition: background-color .2s; }
       .types-header:hover { background: var(--secondary-background-color); }
       .types-header:focus-visible { outline: none; box-shadow: 0 0 0 2px var(--primary-color) inset; }
@@ -1493,14 +1506,18 @@ class ShoppingListCard extends HTMLElement {
       .types-list { max-height: 0; overflow: hidden; transition: max-height .3s ease; }
       .card-container.types-mode.expanded .types-list { max-height: 2000px; }
 
-      /* Vertical types header: keep the normal vertical-tile shape (icon on top,
-         name centered); the chevron sits in the bottom-right and the variant
-         list expands below, just like the horizontal layout. */
-      .types-header.vertical-header { flex-direction: column; align-items: center; gap: 6px; padding: 14px 12px 16px; text-align: center; position: relative; min-height: 92px; box-sizing: border-box; justify-content: center; }
-      .types-header.vertical-header .info-container { width: 100%; align-items: center; text-align: center; }
+      /* Vertical types header: reuse the normal vertical-tile shape. The header
+         is a fixed-height (120px) relative block with the icon absolutely
+         positioned top-center, the name / subtitle bottom-center, and the
+         chevron in the bottom-right corner. The variant list expands below,
+         exactly like the horizontal layout. */
+      .types-header.vertical-header { display: block; height: 120px; position: relative; padding: 0 8px; cursor: default; }
+      .types-header.vertical-header:hover { background: transparent; }
+      .types-header.vertical-header .vertical-top-block { position: absolute; top: 18px; left: 16px; right: 16px; display: flex; justify-content: center; }
+      .types-header.vertical-header .info-container { position: absolute; bottom: 12px; left: 16px; right: 16px; height: 40px; display: flex; flex-direction: column; justify-content: center; align-items: center; text-align: center; }
       .types-header.vertical-header .primary,
-      .types-header.vertical-header .secondary { text-align: center; width: 100%; }
-      .types-header.vertical-header .types-chevron { position: absolute; bottom: 6px; right: 8px; --mdc-icon-size: 20px; opacity: .8; }
+      .types-header.vertical-header .secondary { text-align: center; width: 100%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+      .types-header.vertical-header .types-chevron { position: absolute; bottom: 8px; right: 10px; --mdc-icon-size: 22px; opacity: .85; }
       .type-row { display: flex; align-items: center; gap: 10px; padding: 8px 12px 8px 14px; cursor: pointer; border-top: 1px solid var(--divider-color); transition: background-color .2s; outline: none; }
       .type-row:hover { background: var(--secondary-background-color); }
       .type-row:focus-visible { box-shadow: 0 0 0 2px var(--primary-color) inset; }
