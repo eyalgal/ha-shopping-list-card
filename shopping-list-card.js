@@ -6,13 +6,13 @@
  *
  * Author: eyalgal
  * License: MIT
- * Version: 2.1.1
+ * Version: 2.1.0
  *
  * Note: This card requires a to-do entity to function properly.
  * For more information, visit: https://github.com/eyalgal/ha-shopping-list-card
  */
 
-const CARD_VERSION = '2.1.1';
+const CARD_VERSION = '2.1.0';
 
 function escapeHtml(str) {
   if (str == null) return '';
@@ -1036,17 +1036,38 @@ class ShoppingListCard extends HTMLElement {
     const effectiveImage = this._resolveImage();
     const safeImage = escapeHtml(effectiveImage);
     const safeTitle = escapeHtml(this._config.title || '');
+    const isVertical = this._config.layout === 'vertical';
 
-    const parentIcon = effectiveImage
-      ? `<div class="image-wrapper">
-           <img src="${safeImage}" alt="${safeTitle}" />
-           <div class="icon-wrapper" style="background:${headBg}; color:${headFg};">
+    // Optional badge showing how many variants are currently on the list.
+    const countBadge = activeCount > 0
+      ? `<span class="quantity-badge">${activeCount}</span>` : '';
+
+    let parentIcon;
+    if (isVertical) {
+      parentIcon = effectiveImage
+        ? `<div class="image-wrapper vertical-image">
+             <img src="${safeImage}" alt="${safeTitle}" />
+             ${countBadge}
+             <div class="icon-wrapper vertical-icon" style="background:${headBg}; color:${headFg};">
+               <ha-icon icon="${headIcon}"></ha-icon>
+             </div>
+           </div>`
+        : `<div class="icon-wrapper vertical-icon" style="background:${headBg}; color:${headFg};">
              <ha-icon icon="${headIcon}"></ha-icon>
-           </div>
-         </div>`
-      : `<div class="icon-wrapper" style="background:${headBg}; color:${headFg};">
-           <ha-icon icon="${headIcon}"></ha-icon>
-         </div>`;
+             ${countBadge}
+           </div>`;
+    } else {
+      parentIcon = effectiveImage
+        ? `<div class="image-wrapper">
+             <img src="${safeImage}" alt="${safeTitle}" />
+             <div class="icon-wrapper" style="background:${headBg}; color:${headFg};">
+               <ha-icon icon="${headIcon}"></ha-icon>
+             </div>
+           </div>`
+        : `<div class="icon-wrapper" style="background:${headBg}; color:${headFg};">
+             <ha-icon icon="${headIcon}"></ha-icon>
+           </div>`;
+    }
 
     // Parent secondary line: active selections, else the configured subtitle.
     const activeNames = states.filter(s => s.isOn)
@@ -1091,16 +1112,18 @@ class ShoppingListCard extends HTMLElement {
 
     const headerLabel = escapeHtml([this._config.title, secondary].filter(Boolean).join(', '));
 
+    const headerInner = `${parentIcon}
+         <div class="info-container">
+           <div class="primary">${safeTitle}</div>
+           ${secondary ? `<div class="secondary">${escapeHtml(secondary)}</div>` : ''}
+         </div>
+         <ha-icon class="types-chevron" icon="mdi:chevron-down"></ha-icon>`;
+
     this.content.innerHTML = `
-      <div class="card-container types-mode ${headerOn ? 'is-on' : 'is-off'}" ${cardBgStyle}>
-        <div class="types-header" role="button" tabindex="0"
+      <div class="card-container types-mode ${isVertical ? 'vertical-layout' : ''} ${headerOn ? 'is-on' : 'is-off'}" ${cardBgStyle}>
+        <div class="types-header ${isVertical ? 'vertical-header' : ''}" role="button" tabindex="0"
              aria-expanded="false" aria-controls="slc-types-list" aria-label="${headerLabel}">
-          ${parentIcon}
-          <div class="info-container">
-            <div class="primary">${safeTitle}</div>
-            ${secondary ? `<div class="secondary">${escapeHtml(secondary)}</div>` : ''}
-          </div>
-          <ha-icon class="types-chevron" icon="mdi:chevron-down"></ha-icon>
+          ${headerInner}
         </div>
         <div class="types-list" id="slc-types-list" role="group">${rowsHtml}</div>
       </div>
@@ -1425,6 +1448,13 @@ class ShoppingListCard extends HTMLElement {
       .card-container.types-mode.expanded .types-chevron { transform: rotate(180deg); }
       .types-list { max-height: 0; overflow: hidden; transition: max-height .25s ease; }
       .card-container.types-mode.expanded .types-list { max-height: 1000px; }
+
+      /* Vertical types header: icon on top, name centered, chevron pinned top-right */
+      .types-header.vertical-header { flex-direction: column; align-items: center; gap: 8px; padding: 16px 12px 12px; text-align: center; position: relative; }
+      .types-header.vertical-header .info-container { width: 100%; align-items: center; }
+      .types-header.vertical-header .primary,
+      .types-header.vertical-header .secondary { text-align: center; }
+      .types-header.vertical-header .types-chevron { position: absolute; top: 6px; right: 6px; }
       .type-row { display: flex; align-items: center; gap: 10px; padding: 8px 12px 8px 14px; cursor: pointer; border-top: 1px solid var(--divider-color); transition: background-color .2s; outline: none; }
       .type-row:hover { background: var(--secondary-background-color); }
       .type-row:focus-visible { box-shadow: 0 0 0 2px var(--primary-color) inset; }
@@ -1450,7 +1480,9 @@ class ShoppingListCard extends HTMLElement {
   getLayoutOptions() {
     if (this._config && this._getTypes().length) {
       // Expandable: let the card grow with its content (omit grid_rows).
-      return { grid_columns: 4, grid_min_columns: 2 };
+      // Vertical types cards are narrower (grid tiles), horizontal span wider.
+      const cols = this._config.layout === 'vertical' ? 2 : 4;
+      return { grid_columns: cols, grid_min_columns: 2 };
     }
     if (this._config && this._config.layout === 'vertical') {
       const rows = this._config.show_name === false ? 1 : 2;
