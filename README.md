@@ -84,8 +84,7 @@ haptic: true
 | `type` | string | yes | Must be `custom:shopping-list-card`. | - |
 | `title` | string | yes | The item name. | - |
 | `subtitle` | string | no | A secondary line of text. Included when matching/writing: the stored item is `"<title> - <subtitle>"`. | `''` |
-| `types` | list | no | Turns the card into an expandable group. Each entry (a string, or `{ name, image, icon }`) is added as `"<title> - <type>"`. When set, the single `subtitle` is ignored. Works in both `horizontal` and `vertical` layouts. | - |
-| `base_item` | boolean \| string | no | Only with `types`. Adds a first expandable row that toggles the **bare title** (no `- subtitle`), so an item can have a "plain" variant alongside its named types. Pass a string to label the row (default `Regular`). | - |
+| `types` | list | no | Turns the card into an expandable group. Each entry (a string, or `{ name, image, icon }`) is added as `"<title> - <type>"`. Tapping the card header adds the bare title; the chevron expands the variant list. When set, the single `subtitle` is ignored. Works in both `horizontal` and `vertical` layouts. | - |
 | `todo_list` | string | yes | The `todo.<name>` entity to manage. | - |
 | `list_prefix` | string | no | When set, items are stored as `"<prefix> - <title>"` for category sorting. Display is unchanged. | `''` |
 | `image` | string | no | URL to a custom image. Replaces the icon when set. | `''` |
@@ -169,9 +168,9 @@ todo_list: todo.shopping_list
 
 ### Item types (variants)
 
-When you want one tile to cover several variants of the same item, list them under `types`. The card then renders as a single collapsed tile; tapping the header expands an inline list of the types. Tapping a type adds it as `"<title> - <type>"` (exactly like a `subtitle`), so it shows up on your to-do list as e.g. `Apple - Pink Lady`. Tapping again removes it, and `enable_quantity` adds per-type `+` / `-` controls.
+When you want one tile to cover several variants of the same item, list them under `types`. The card renders as a single tile with a chevron. Tapping the **chevron** expands an inline list of the variants; tapping a variant adds it as `"<title> - <type>"`, so it shows up on your to-do list as e.g. `Apple - Pink Lady`. Tapping again removes it, and `enable_quantity` adds per-variant `+` / `-` controls.
 
-The header itself never adds the bare title - it is only a group toggle. The configured `subtitle` is ignored while `types` is set (each type is the subtitle).
+Tapping the **header body** (anywhere but the chevron) adds or removes the bare title (`Apple`), exactly like a normal single-item card. The configured `subtitle` is ignored while `types` is set (each type is the subtitle).
 
 ```yaml
 type: custom:shopping-list-card
@@ -198,20 +197,7 @@ types:
   - Gala
 ```
 
-**A "plain" variant alongside types.** Because the header is only a group toggle, it never adds the bare title on its own. Set `base_item: true` to get a first row that adds the plain `Apple` (stored without a subtitle), next to `Apple - Pink Lady` etc. Pass a string to rename that row:
-
-```yaml
-type: custom:shopping-list-card
-title: Apple
-todo_list: todo.shopping_list
-base_item: true        # or e.g. base_item: "Any"
-types:
-  - Pink Lady
-  - Granny Smith
-  - Gala
-```
-
-Both layouts are supported - add `layout: vertical` for a grid-friendly tile (icon on top, name centered, chevron in the corner).
+Both layouts are supported - add `layout: vertical` for a grid-friendly tile (icon on top, name centered, chevron in the bottom-right). The card keeps its compact shape when collapsed and expands the variant list below.
 
 > Because the card grows when expanded, it works best in masonry or grid dashboards where the row height can flex. In the **sections** layout a fixed row height may clip the expanded list.
 

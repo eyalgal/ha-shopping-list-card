@@ -1009,41 +1009,40 @@ class ShoppingListCard extends HTMLElement {
     this._wireImageError(card);
   }
 
-  /** Render the expandable "types" (variants) layout. The header acts as a
-   *  group toggle (it never adds the bare title); each type row adds / removes
-   *  / adjusts the quantity of `Title - Type` independently. */
+  /** Render the expandable "types" (variants) layout. The header is the bare
+   *  title: tapping its body adds / removes the plain item, while the chevron
+   *  expands the variant list. Each type row adds / removes / adjusts the
+   *  quantity of `Title - Type` independently. */
   _renderTypesMode(types) {
     const onIcon    = this._config.on_icon    || ShoppingListCard.DEFAULT_ON_ICON;
     const offIcon   = this._config.off_icon   || ShoppingListCard.DEFAULT_OFF_ICON;
     const onColorN  = this._config.on_color   || ShoppingListCard.DEFAULT_ON_COLOR;
     const offColorN = this._config.off_color  || ShoppingListCard.DEFAULT_OFF_COLOR;
 
-    // Build the row entries. When `base_item` is set, the first row toggles the
-    // bare title (no subtitle) so an item can have a "plain" variant alongside
-    // its named types (e.g. Apple, plus Apple - Pink Lady). `subtitle: null`
-    // marks the base row; its stored summary is just the title.
-    const entries = [];
-    if (this._config.base_item) {
-      const baseLabel = typeof this._config.base_item === 'string'
-        ? this._config.base_item : 'Regular';
-      entries.push({ label: baseLabel, subtitle: null });
-    }
-    for (const t of types) {
-      entries.push({ label: t.name, subtitle: t.name, image: t.image, icon: t.icon });
-    }
-    const states = entries.map(e => ({ ...e, ...this._typeState(e.subtitle) }));
-    // Cache the subtitle (or null for base) per row index for tap handling.
-    this._typeEntries = states.map(e => e.subtitle);
+    // Each type renders as its own row ("Title - Type"). The header itself is
+    // the bare title ("Apple"): tapping the header body adds / removes the
+    // plain item, while the chevron expands the variant list. Tapping a row
+    // toggles that specific variant independently.
+    const states = types.map(t => ({
+      label: t.name, subtitle: t.name, image: t.image, icon: t.icon,
+      ...this._typeState(t.name),
+    }));
+    // Cache the subtitle per row index for tap handling.
+    this._typeEntries = states.map(s => s.subtitle);
     const activeCount = states.filter(s => s.isOn).length;
 
-    // Memoize on the per-row states. Expansion is a pure CSS toggle applied
+    // Bare-title state drives the header icon and its add / remove action.
+    const bare = this._typeState(null);
+
+    // Memoize on header + per-row states. Expansion is a pure CSS toggle applied
     // outside render, so it is intentionally excluded from the key.
-    const renderKey = 'types|' + activeCount + '|' +
+    const renderKey = 'types|' + (bare.isOn ? 1 : 0) + ':' + bare.qty + '|' + activeCount + '|' +
       states.map(s => `${s.label}:${s.isOn ? 1 : 0}:${s.qty}`).join('|');
     if (this._lastRenderKey === renderKey) { this._applyExpanded(); return; }
     this._lastRenderKey = renderKey;
 
-    const headerOn = activeCount > 0;
+    const headerOn = bare.isOn;
+    const anyOn = bare.isOn || activeCount > 0;
     const headColor = headerOn ? onColorN : offColorN;
     const headBg = this._rgbaFor(headColor, 0.2);
     const headFg = this._solidFor(headColor);
@@ -1090,7 +1089,7 @@ class ShoppingListCard extends HTMLElement {
     const secondary = activeNames || this._config.subtitle || '';
 
     let cardBgStyle = '';
-    if (headerOn && this._config.colorize_background !== false) {
+    if (anyOn && this._config.colorize_background !== false) {
       cardBgStyle = `style="background-color: ${this._rgbaFor(onColorN, 0.1)};"`;
     }
 
@@ -1098,36 +1097,31 @@ class ShoppingListCard extends HTMLElement {
     const decBtn = `<div class="quantity-btn" role="button" tabindex="0" aria-label="Decrease quantity" data-action="decrement"><ha-icon icon="mdi:minus"></ha-icon></div>`;
     const incBtn = `<div class="quantity-btn" role="button" tabindex="0" aria-label="Increase quantity" data-action="increment"><ha-icon icon="mdi:plus"></ha-icon></div>`;
 
+    const onSolid = this._solidFor(onColorN);
     const rowsHtml = states.map((s, i) => {
-      const rColor = s.isOn ? onColorN : offColorN;
-      const rBg = this._rgbaFor(rColor, 0.2);
-      const rFg = this._solidFor(rColor);
-      const rIcon = s.icon || (s.isOn ? onIcon : offIcon);
       const thumb = s.image
         ? `<div class="type-thumb"><img src="${escapeHtml(s.image)}" alt=""></div>` : '';
-      let qtyHtml = '';
+      let rightHtml;
       if (s.isOn && enableQty) {
-        qtyHtml = `<div class="type-qty">
+        rightHtml = `<div class="type-qty">
             ${s.qty > 1 ? decBtn : ''}
             <span class="quantity" aria-label="Quantity: ${s.qty}">${s.qty}</span>
             ${incBtn}
           </div>`;
+      } else if (s.isOn) {
+        // Active without quantity: a flat check indicator (not a toggle button).
+        rightHtml = `<div class="type-indicator" style="color:${onSolid};"><ha-icon icon="mdi:check"></ha-icon></div>`;
+      } else {
+        // Inactive: a muted add affordance. Tapping the row adds the variant.
+        rightHtml = `<div class="type-indicator type-add"><ha-icon icon="mdi:plus"></ha-icon></div>`;
       }
-      const isBase = s.subtitle == null;
-      // When an active type shows quantity controls, the toggle button is
-      // redundant - the +/- buttons already cover add and remove.
-      const toggleHtml = qtyHtml
-        ? ''
-        : `<div class="type-toggle" style="background:${rBg}; color:${rFg};">
-                  <ha-icon icon="${rIcon}"></ha-icon>
-                </div>`;
-      return `<div class="type-row ${s.isOn ? 'is-on' : 'is-off'}${isBase ? ' type-row-base' : ''}" data-type-index="${i}"
+      const rowStyle = s.isOn ? ` style="background:${this._rgbaFor(onColorN, 0.12)};"` : '';
+      return `<div class="type-row ${s.isOn ? 'is-on' : 'is-off'}" data-type-index="${i}"${rowStyle}
                    role="button" tabindex="0" aria-pressed="${s.isOn ? 'true' : 'false'}"
                    aria-label="${escapeHtml(s.label)}">
                 ${thumb}
                 <div class="type-name">${escapeHtml(s.label)}</div>
-                ${qtyHtml}
-                ${toggleHtml}
+                ${rightHtml}
               </div>`;
     }).join('');
 
@@ -1138,12 +1132,13 @@ class ShoppingListCard extends HTMLElement {
            <div class="primary">${safeTitle}</div>
            ${secondary ? `<div class="secondary">${escapeHtml(secondary)}</div>` : ''}
          </div>
-         <ha-icon class="types-chevron" icon="mdi:chevron-down"></ha-icon>`;
+         <ha-icon class="types-chevron" icon="mdi:chevron-down" role="button" tabindex="0"
+                  aria-expanded="false" aria-controls="slc-types-list" aria-label="Toggle types"></ha-icon>`;
 
     this.content.innerHTML = `
-      <div class="card-container types-mode ${isVertical ? 'vertical-layout' : ''} ${headerOn ? 'is-on' : 'is-off'}" ${cardBgStyle}>
+      <div class="card-container types-mode ${isVertical ? 'vertical-layout' : ''} ${anyOn ? 'is-on' : 'is-off'}" ${cardBgStyle}>
         <div class="types-header ${isVertical ? 'vertical-header' : ''}" role="button" tabindex="0"
-             aria-expanded="false" aria-controls="slc-types-list" aria-label="${headerLabel}">
+             aria-pressed="${headerOn ? 'true' : 'false'}" aria-label="${headerLabel}">
           ${headerInner}
         </div>
         <div class="types-list" id="slc-types-list" role="group">${rowsHtml}</div>
@@ -1161,21 +1156,40 @@ class ShoppingListCard extends HTMLElement {
     if (!card) return;
     const expanded = !!this._expanded;
     card.classList.toggle('expanded', expanded);
-    const header = card.querySelector('.types-header');
-    if (header) header.setAttribute('aria-expanded', expanded ? 'true' : 'false');
+    const chevron = card.querySelector('.types-chevron');
+    if (chevron) chevron.setAttribute('aria-expanded', expanded ? 'true' : 'false');
   }
 
   _wireTypesInteractions(card) {
     const header = card.querySelector('.types-header');
-    const toggle = () => {
+    const chevron = card.querySelector('.types-chevron');
+    const expand = () => {
       this._expanded = !this._expanded;
       this._vibrate();
       this._applyExpanded();
     };
-    header.addEventListener('click', toggle);
-    header.addEventListener('keydown', (ev) => {
-      if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); toggle(); }
-    });
+
+    // The chevron is the dedicated expand / collapse control.
+    if (chevron) {
+      chevron.addEventListener('click', (ev) => { ev.stopPropagation(); expand(); });
+      chevron.addEventListener('keydown', (ev) => {
+        if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); ev.stopPropagation(); expand(); }
+      });
+    }
+
+    // Tapping the header body (anywhere but the chevron) adds / removes the
+    // bare title, like a normal single-item card.
+    if (header) {
+      header.addEventListener('click', (ev) => {
+        if (ev.target.closest('.types-chevron')) return;
+        this._handleHeaderTap(ev);
+      });
+      header.addEventListener('keydown', (ev) => {
+        if ((ev.key === 'Enter' || ev.key === ' ') && !ev.target.closest('.types-chevron')) {
+          ev.preventDefault(); this._handleHeaderTap(ev);
+        }
+      });
+    }
 
     card.querySelectorAll('.type-row').forEach(row => {
       const idx = +row.dataset.typeIndex;
@@ -1187,19 +1201,27 @@ class ShoppingListCard extends HTMLElement {
     });
   }
 
-  async _handleTypeTap(ev, idx) {
+  _handleHeaderTap(ev) {
+    const header = ev.target.closest('.types-header');
+    return this._toggleSubtitle(ev, null, header);
+  }
+
+  _handleTypeTap(ev, idx) {
     ev.stopPropagation();
-    if (this._isUpdating) return;
     const entries = this._typeEntries || [];
     if (idx < 0 || idx >= entries.length) return;
-    const subtitle = entries[idx]; // string, or null for the base item
+    const row = ev.target.closest('.type-row');
+    return this._toggleSubtitle(ev, entries[idx], row);
+  }
+
+  async _toggleSubtitle(ev, subtitle, el) {
+    if (this._isUpdating) return;
     const { fullName, isOn, qty, matched, matchedUid } = this._typeState(subtitle);
     const action = ev.target.closest('.quantity-btn')?.dataset.action;
 
     this._vibrate();
     this._isUpdating = true;
-    const row = ev.target.closest('.type-row');
-    row?.classList.add('is-updating');
+    el?.classList.add('is-updating');
 
     let call;
     const step = Math.max(1, parseInt(this._config.quantity_step, 10) || 1);
@@ -1212,19 +1234,17 @@ class ShoppingListCard extends HTMLElement {
       const next = qty - step;
       if (next >= 1) call = this._updateQuantity(matchedUid, matched, next, fullName);
       else if (qty > 1) call = this._updateQuantity(matchedUid, matched, 1, fullName);
+    } else if (isOn) {
+      if (!this._config.enable_quantity || qty === 1) call = this._removeByUidOrSummary(matchedUid, matched);
     } else {
-      if (isOn) {
-        if (!this._config.enable_quantity || qty === 1) call = this._removeByUidOrSummary(matchedUid, matched);
-      } else {
-        call = this._addItem(fullName);
-      }
+      call = this._addItem(fullName);
     }
 
     if (call) {
       try { await call; } catch (e) { console.error('Service call failed', e); }
     }
     this._isUpdating = false;
-    row?.classList.remove('is-updating');
+    el?.classList.remove('is-updating');
   }
 
   _wireImageError(card) {
@@ -1465,17 +1485,22 @@ class ShoppingListCard extends HTMLElement {
       .types-header { display: flex; align-items: center; gap: 10px; padding: 10px 12px; cursor: pointer; transition: background-color .2s; }
       .types-header:hover { background: var(--secondary-background-color); }
       .types-header:focus-visible { outline: none; box-shadow: 0 0 0 2px var(--primary-color) inset; }
-      .types-chevron { flex-shrink: 0; color: var(--secondary-text-color); transition: transform .25s ease; }
+      .types-header.is-updating { opacity: .6; pointer-events: none; }
+      .types-chevron { flex-shrink: 0; color: var(--secondary-text-color); transition: transform .25s ease, background-color .2s; cursor: pointer; border-radius: 50%; padding: 2px; }
+      .types-chevron:hover { background: var(--divider-color); }
+      .types-chevron:focus-visible { outline: none; box-shadow: 0 0 0 2px var(--primary-color); }
       .card-container.types-mode.expanded .types-chevron { transform: rotate(180deg); }
-      .types-list { max-height: 0; overflow: hidden; transition: max-height .25s ease; }
-      .card-container.types-mode.expanded .types-list { max-height: 1000px; }
+      .types-list { max-height: 0; overflow: hidden; transition: max-height .3s ease; }
+      .card-container.types-mode.expanded .types-list { max-height: 2000px; }
 
-      /* Vertical types header: icon on top, name centered, chevron pinned bottom-right */
-      .types-header.vertical-header { flex-direction: column; align-items: center; gap: 6px; padding: 16px 12px 14px; text-align: center; position: relative; }
+      /* Vertical types header: keep the normal vertical-tile shape (icon on top,
+         name centered); the chevron sits in the bottom-right and the variant
+         list expands below, just like the horizontal layout. */
+      .types-header.vertical-header { flex-direction: column; align-items: center; gap: 6px; padding: 14px 12px 16px; text-align: center; position: relative; min-height: 92px; box-sizing: border-box; justify-content: center; }
       .types-header.vertical-header .info-container { width: 100%; align-items: center; text-align: center; }
       .types-header.vertical-header .primary,
       .types-header.vertical-header .secondary { text-align: center; width: 100%; }
-      .types-header.vertical-header .types-chevron { position: absolute; bottom: 6px; right: 8px; --mdc-icon-size: 20px; opacity: 0.7; }
+      .types-header.vertical-header .types-chevron { position: absolute; bottom: 6px; right: 8px; --mdc-icon-size: 20px; opacity: .8; }
       .type-row { display: flex; align-items: center; gap: 10px; padding: 8px 12px 8px 14px; cursor: pointer; border-top: 1px solid var(--divider-color); transition: background-color .2s; outline: none; }
       .type-row:hover { background: var(--secondary-background-color); }
       .type-row:focus-visible { box-shadow: 0 0 0 2px var(--primary-color) inset; }
@@ -1484,8 +1509,9 @@ class ShoppingListCard extends HTMLElement {
       .type-thumb img { width: 100%; height: 100%; object-fit: cover; border-radius: 50%; }
       .type-name { flex: 1; min-width: 0; font-size: 14px; color: var(--primary-text-color); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
       .type-qty { display: flex; align-items: center; gap: 4px; flex-shrink: 0; }
-      .type-toggle { width: 28px; height: 28px; border-radius: 50%; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
-      .type-toggle ha-icon { --mdc-icon-size: 18px; }
+      .type-indicator { width: 28px; height: 28px; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
+      .type-indicator ha-icon { --mdc-icon-size: 20px; }
+      .type-indicator.type-add ha-icon { color: var(--secondary-text-color); opacity: .45; }
     `;
     this.appendChild(s);
   }
