@@ -24,6 +24,7 @@ A simple and intuitive Lovelace card for Home Assistant to quickly add and manag
 - **Tap to add / tap to remove** with case-insensitive matching against an existing to-do list.
 - **Real-time updates** via a shared WebSocket subscription per entity (one subscription covers every card pointing at the same list, so a grid of 50 cards does not fan out into 50 sockets).
 - **Quantity controls** - enable `+` / `-` buttons with optional `quantity_step` and `quantity_max`.
+- **Item types (variants)** - give one item several `types` (e.g. _Apple_ -> Pink Lady, Granny Smith, Gala). The card collapses to a single tile; tap to expand and add any type (with its own quantity) as `Title - Type`.
 - **Hold action** - configurable long-press: remove item (default), open more-info, or do nothing. Optional haptic feedback.
 - **Custom images, auto-derived** - set an `image_base` path and the card tries `title.png` in several slug variants (`dash-case`, `snake_case`, `with spaces`, `joinedword`) so you don't have to name your files exactly right.
 - **List prefix** - optionally store items as `"Dairy - Milk"` for category-based sorting while the card still displays just the title.
@@ -83,6 +84,7 @@ haptic: true
 | `type` | string | yes | Must be `custom:shopping-list-card`. | - |
 | `title` | string | yes | The item name. | - |
 | `subtitle` | string | no | A secondary line of text. Included when matching/writing: the stored item is `"<title> - <subtitle>"`. | `''` |
+| `types` | list | no | Turns the card into an expandable group. Each entry (a string, or `{ name, image, icon }`) is added as `"<title> - <type>"`. When set, the single `subtitle` is ignored. | - |
 | `todo_list` | string | yes | The `todo.<name>` entity to manage. | - |
 | `list_prefix` | string | no | When set, items are stored as `"<prefix> - <title>"` for category sorting. Display is unchanged. | `''` |
 | `image` | string | no | URL to a custom image. Replaces the icon when set. | `''` |
@@ -161,6 +163,41 @@ title: Milk
 list_prefix: Dairy
 todo_list: todo.shopping_list
 ```
+
+---
+
+### Item types (variants)
+
+When you want one tile to cover several variants of the same item, list them under `types`. The card then renders as a single collapsed tile; tapping the header expands an inline list of the types. Tapping a type adds it as `"<title> - <type>"` (exactly like a `subtitle`), so it shows up on your to-do list as e.g. `Apple - Pink Lady`. Tapping again removes it, and `enable_quantity` adds per-type `+` / `-` controls.
+
+The header itself never adds the bare title - it is only a group toggle. The configured `subtitle` is ignored while `types` is set (each type is the subtitle).
+
+```yaml
+type: custom:shopping-list-card
+title: Apple
+todo_list: todo.shopping_list
+enable_quantity: true
+types:
+  - Pink Lady
+  - Granny Smith
+  - Gala
+```
+
+Entries can also be objects to give a type its own thumbnail or icon (YAML only):
+
+```yaml
+type: custom:shopping-list-card
+title: Apple
+todo_list: todo.shopping_list
+types:
+  - name: Pink Lady
+    image: /local/shopping/pink-lady.png
+  - name: Granny Smith
+    icon: mdi:food-apple-outline
+  - Gala
+```
+
+> Because the card grows when expanded, it works best in masonry or grid dashboards where the row height can flex. In the **sections** layout a fixed row height may clip the expanded list.
 
 ---
 

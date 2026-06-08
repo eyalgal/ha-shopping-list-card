@@ -6,13 +6,13 @@
  *
  * Author: eyalgal
  * License: MIT
- * Version: 2.0.2
+ * Version: 2.1.0
  *
  * Note: This card requires a to-do entity to function properly.
  * For more information, visit: https://github.com/eyalgal/ha-shopping-list-card
  */
 
-const CARD_VERSION = '2.0.2';
+const CARD_VERSION = '2.1.0';
 
 function escapeHtml(str) {
   if (str == null) return '';
@@ -190,6 +190,24 @@ class ShoppingListCardEditor extends HTMLElement {
         .image-fallback {
           display: flex; flex-direction: column; gap: 6px;
         }
+        .types-field { display: flex; flex-direction: column; gap: 6px; }
+        .types-label {
+          font-size: 13px; font-weight: 500;
+          color: var(--secondary-text-color);
+        }
+        .types-field textarea {
+          width: 100%; box-sizing: border-box; resize: vertical; min-height: 64px;
+          font-family: inherit; font-size: 14px; line-height: 1.5;
+          color: var(--primary-text-color);
+          background: var(--mdc-text-field-fill-color, rgba(127,127,127,0.08));
+          border: none;
+          border-bottom: 1px solid var(--mdc-text-field-idle-line-color, rgba(127,127,127,0.42));
+          border-radius: 4px 4px 0 0; padding: 8px 12px;
+        }
+        .types-field textarea:focus {
+          outline: none;
+          border-bottom: 2px solid var(--primary-color);
+        }
       </style>
 
       <div class="card-config">
@@ -207,6 +225,11 @@ class ShoppingListCardEditor extends HTMLElement {
             <div class="row">
               <ha-textfield id="title" label="Title" required></ha-textfield>
               <ha-textfield id="subtitle" label="Subtitle"></ha-textfield>
+            </div>
+            <div class="types-field">
+              <span class="types-label">Types (optional)</span>
+              <textarea id="types" rows="3" placeholder="Pink Lady&#10;Granny Smith&#10;Gala"></textarea>
+              <div class="hint">One per line. When set, the card becomes expandable: tap it to reveal the types and add each as <code>Title - Type</code>. The single subtitle is ignored in this mode.</div>
             </div>
             <ha-picture-upload id="image_upload"></ha-picture-upload>
             <div class="image-fallback">
@@ -325,6 +348,14 @@ class ShoppingListCardEditor extends HTMLElement {
       el.addEventListener('change', handler);
       el.addEventListener('value-changed', handler);
     });
+
+    // Native <textarea> for the Types list (one type per line).
+    const typesEl = this.shadowRoot.querySelector('#types');
+    if (typesEl) {
+      const handler = () => this._handleConfigChanged();
+      typesEl.addEventListener('input', handler);
+      typesEl.addEventListener('change', handler);
+    }
 
     // ha-select needs special handling. In HA 2026.x, ha-select was rewritten
     // to use ha-dropdown internally and IGNORES slotted <mwc-list-item>
@@ -451,6 +482,13 @@ class ShoppingListCardEditor extends HTMLElement {
 
     s.querySelector('#title').value = c.title || '';
     s.querySelector('#subtitle').value = c.subtitle || '';
+    const typesEl = s.querySelector('#types');
+    if (typesEl) {
+      const arr = Array.isArray(c.types)
+        ? c.types.map(t => (typeof t === 'string' ? t : (t && t.name) || '')).filter(Boolean)
+        : [];
+      typesEl.value = arr.join('\n');
+    }
     s.querySelector('#image').value = c.image || '';
     s.querySelector('#image_base').value = c.image_base || '';
     s.querySelector('#list_prefix').value = c.list_prefix || '';
@@ -492,6 +530,11 @@ class ShoppingListCardEditor extends HTMLElement {
     n.title = s.querySelector('#title').value;
     const sub = s.querySelector('#subtitle').value;
     if (sub) n.subtitle = sub; else delete n.subtitle;
+    const typesEl = s.querySelector('#types');
+    if (typesEl) {
+      const list = typesEl.value.split('\n').map(x => x.trim()).filter(Boolean);
+      if (list.length) n.types = list; else delete n.types;
+    }
     const img = s.querySelector('#image').value;
     if (img) n.image = img; else delete n.image;
     const imgBase = s.querySelector('#image_base').value.trim();
@@ -571,6 +614,7 @@ class ShoppingListCard extends HTMLElement {
     this._unsubscribe = null;
     this._subscribedEntity = null;
     this._lastRenderKey = null;
+    this._expanded = false;
   }
 
   set hass(hass) {
@@ -667,9 +711,49 @@ class ShoppingListCard extends HTMLElement {
 
   /** Build the todo item summary to match / write, honoring list_prefix. */
   _buildFullName() {
+    return this._buildNameFor(this._config.subtitle);
+  }
+
+  /** Build a summary for a given subtitle/type, honoring list_prefix. */
+  _buildNameFor(subtitle) {
     const c = this._config;
-    const base = c.subtitle ? `${c.title} - ${c.subtitle}` : c.title;
+    const base = subtitle ? `${c.title} - ${subtitle}` : c.title;
     return c.list_prefix ? `${c.list_prefix} - ${base}` : base;
+  }
+
+  /** Normalized list of configured types (variants). Each entry is an object
+   *  `{ name, image?, icon? }`. Accepts plain strings or objects in config.
+   *  Returns an empty array when no types are configured. */
+  _getTypes() {
+    const raw = this._config && this._config.types;
+    if (!Array.isArray(raw)) return [];
+    const out = [];
+    for (const entry of raw) {
+      if (typeof entry === 'string') {
+        const name = entry.trim();
+        if (name) out.push({ name });
+      } else if (entry && typeof entry === 'object' && entry.name != null) {
+        const name = String(entry.name).trim();
+        if (name) out.push({ name, image: entry.image, icon: entry.icon });
+      }
+    }
+    return out;
+  }
+
+  /** Match a summary against the current items, returning on-state and qty. */
+  _matchSummary(fullName) {
+    const rx = new RegExp(`^${this._escapeRegExp(fullName)}(?: \\((\\d+)\\))?$`, 'i');
+    for (const item of this._items) {
+      const m = item.summary.match(rx);
+      if (m) return { isOn: true, qty: m[1] ? +m[1] : 1, matched: item.summary, matchedUid: item.uid };
+    }
+    return { isOn: false, qty: 0, matched: null, matchedUid: null };
+  }
+
+  /** Resolve the on-state and stored name for a single type. */
+  _typeState(typeName) {
+    const fullName = this._buildNameFor(typeName);
+    return { fullName, ...this._matchSummary(fullName) };
   }
 
   /** Resolve the effective image URL: explicit `image` wins, otherwise
@@ -786,14 +870,11 @@ class ShoppingListCard extends HTMLElement {
       return; // waiting for subscription
     }
 
-    const fullName = this._buildFullName();
+    const types = this._getTypes();
+    if (types.length) { this._renderTypesMode(types); return; }
 
-    const rx = new RegExp(`^${this._escapeRegExp(fullName)}(?: \\((\\d+)\\))?$`, 'i');
-    let isOn = false, qty = 0, matched = null, matchedUid = null;
-    for (const item of this._items) {
-      const m = item.summary.match(rx);
-      if (m) { isOn = true; matched = item.summary; matchedUid = item.uid; qty = m[1] ? +m[1] : 1; break; }
-    }
+    const fullName = this._buildFullName();
+    const { isOn, qty, matched, matchedUid } = this._matchSummary(fullName);
 
     // Memoize: skip the DOM rewrite when nothing visible (or interaction-relevant)
     // changed for this card. Config changes invalidate _lastRenderKey via setConfig().
@@ -917,6 +998,180 @@ class ShoppingListCard extends HTMLElement {
     const card = this.content.querySelector('.card-container');
     this._wireInteractions(card, isOn, matched, matchedUid, qty, fullName);
     this._wireImageError(card);
+  }
+
+  /** Render the expandable "types" (variants) layout. The header acts as a
+   *  group toggle (it never adds the bare title); each type row adds / removes
+   *  / adjusts the quantity of `Title - Type` independently. */
+  _renderTypesMode(types) {
+    const onIcon    = this._config.on_icon    || ShoppingListCard.DEFAULT_ON_ICON;
+    const offIcon   = this._config.off_icon   || ShoppingListCard.DEFAULT_OFF_ICON;
+    const onColorN  = this._config.on_color   || ShoppingListCard.DEFAULT_ON_COLOR;
+    const offColorN = this._config.off_color  || ShoppingListCard.DEFAULT_OFF_COLOR;
+
+    const states = types.map(t => ({ ...t, ...this._typeState(t.name) }));
+    const activeCount = states.filter(s => s.isOn).length;
+
+    // Memoize on the per-type states. Expansion is a pure CSS toggle applied
+    // outside render, so it is intentionally excluded from the key.
+    const renderKey = 'types|' + activeCount + '|' +
+      states.map(s => `${s.name}:${s.isOn ? 1 : 0}:${s.qty}`).join('|');
+    if (this._lastRenderKey === renderKey) { this._applyExpanded(); return; }
+    this._lastRenderKey = renderKey;
+
+    const headerOn = activeCount > 0;
+    const headColor = headerOn ? onColorN : offColorN;
+    const headBg = this._rgbaFor(headColor, 0.2);
+    const headFg = this._solidFor(headColor);
+    const headIcon = headerOn ? onIcon : offIcon;
+    const effectiveImage = this._resolveImage();
+    const safeImage = escapeHtml(effectiveImage);
+    const safeTitle = escapeHtml(this._config.title || '');
+
+    const parentIcon = effectiveImage
+      ? `<div class="image-wrapper">
+           <img src="${safeImage}" alt="${safeTitle}" />
+           <div class="icon-wrapper" style="background:${headBg}; color:${headFg};">
+             <ha-icon icon="${headIcon}"></ha-icon>
+           </div>
+         </div>`
+      : `<div class="icon-wrapper" style="background:${headBg}; color:${headFg};">
+           <ha-icon icon="${headIcon}"></ha-icon>
+         </div>`;
+
+    // Parent secondary line: active selections, else the configured subtitle.
+    const activeNames = states.filter(s => s.isOn)
+      .map(s => s.qty > 1 ? `${s.name} (${s.qty})` : s.name).join(', ');
+    const secondary = activeNames || this._config.subtitle || '';
+
+    let cardBgStyle = '';
+    if (headerOn && this._config.colorize_background !== false) {
+      cardBgStyle = `style="background-color: ${this._rgbaFor(onColorN, 0.1)};"`;
+    }
+
+    const enableQty = !!this._config.enable_quantity;
+    const decBtn = `<div class="quantity-btn" role="button" tabindex="0" aria-label="Decrease quantity" data-action="decrement"><ha-icon icon="mdi:minus"></ha-icon></div>`;
+    const incBtn = `<div class="quantity-btn" role="button" tabindex="0" aria-label="Increase quantity" data-action="increment"><ha-icon icon="mdi:plus"></ha-icon></div>`;
+
+    const rowsHtml = states.map((s, i) => {
+      const rColor = s.isOn ? onColorN : offColorN;
+      const rBg = this._rgbaFor(rColor, 0.2);
+      const rFg = this._solidFor(rColor);
+      const rIcon = s.icon || (s.isOn ? onIcon : offIcon);
+      const thumb = s.image
+        ? `<div class="type-thumb"><img src="${escapeHtml(s.image)}" alt=""></div>` : '';
+      let qtyHtml = '';
+      if (s.isOn && enableQty) {
+        qtyHtml = `<div class="type-qty">
+            ${s.qty > 1 ? decBtn : ''}
+            <span class="quantity" aria-label="Quantity: ${s.qty}">${s.qty}</span>
+            ${incBtn}
+          </div>`;
+      }
+      return `<div class="type-row ${s.isOn ? 'is-on' : 'is-off'}" data-type-index="${i}"
+                   role="button" tabindex="0" aria-pressed="${s.isOn ? 'true' : 'false'}"
+                   aria-label="${escapeHtml(s.name)}">
+                ${thumb}
+                <div class="type-name">${escapeHtml(s.name)}</div>
+                ${qtyHtml}
+                <div class="type-toggle" style="background:${rBg}; color:${rFg};">
+                  <ha-icon icon="${rIcon}"></ha-icon>
+                </div>
+              </div>`;
+    }).join('');
+
+    const headerLabel = escapeHtml([this._config.title, secondary].filter(Boolean).join(', '));
+
+    this.content.innerHTML = `
+      <div class="card-container types-mode ${headerOn ? 'is-on' : 'is-off'}" ${cardBgStyle}>
+        <div class="types-header" role="button" tabindex="0"
+             aria-expanded="false" aria-controls="slc-types-list" aria-label="${headerLabel}">
+          ${parentIcon}
+          <div class="info-container">
+            <div class="primary">${safeTitle}</div>
+            ${secondary ? `<div class="secondary">${escapeHtml(secondary)}</div>` : ''}
+          </div>
+          <ha-icon class="types-chevron" icon="mdi:chevron-down"></ha-icon>
+        </div>
+        <div class="types-list" id="slc-types-list" role="group">${rowsHtml}</div>
+      </div>
+    `;
+
+    const card = this.content.querySelector('.card-container');
+    this._wireTypesInteractions(card);
+    this._wireImageError(card);
+    this._applyExpanded();
+  }
+
+  _applyExpanded() {
+    const card = this.content?.querySelector('.card-container.types-mode');
+    if (!card) return;
+    const expanded = !!this._expanded;
+    card.classList.toggle('expanded', expanded);
+    const header = card.querySelector('.types-header');
+    if (header) header.setAttribute('aria-expanded', expanded ? 'true' : 'false');
+  }
+
+  _wireTypesInteractions(card) {
+    const header = card.querySelector('.types-header');
+    const toggle = () => {
+      this._expanded = !this._expanded;
+      this._vibrate();
+      this._applyExpanded();
+    };
+    header.addEventListener('click', toggle);
+    header.addEventListener('keydown', (ev) => {
+      if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); toggle(); }
+    });
+
+    card.querySelectorAll('.type-row').forEach(row => {
+      const idx = +row.dataset.typeIndex;
+      const tap = (ev) => this._handleTypeTap(ev, idx);
+      row.addEventListener('click', tap);
+      row.addEventListener('keydown', (ev) => {
+        if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); tap(ev); }
+      });
+    });
+  }
+
+  async _handleTypeTap(ev, idx) {
+    ev.stopPropagation();
+    if (this._isUpdating) return;
+    const types = this._getTypes();
+    const t = types[idx];
+    if (!t) return;
+    const { fullName, isOn, qty, matched, matchedUid } = this._typeState(t.name);
+    const action = ev.target.closest('.quantity-btn')?.dataset.action;
+
+    this._vibrate();
+    this._isUpdating = true;
+    const row = ev.target.closest('.type-row');
+    row?.classList.add('is-updating');
+
+    let call;
+    const step = Math.max(1, parseInt(this._config.quantity_step, 10) || 1);
+    const maxQty = parseInt(this._config.quantity_max, 10);
+    if (action === 'increment') {
+      let next = qty + step;
+      if (!isNaN(maxQty) && maxQty > 0) next = Math.min(next, maxQty);
+      if (next !== qty) call = this._updateQuantity(matchedUid, matched, next, fullName);
+    } else if (action === 'decrement') {
+      const next = qty - step;
+      if (next >= 1) call = this._updateQuantity(matchedUid, matched, next, fullName);
+      else if (qty > 1) call = this._updateQuantity(matchedUid, matched, 1, fullName);
+    } else {
+      if (isOn) {
+        if (!this._config.enable_quantity || qty === 1) call = this._removeByUidOrSummary(matchedUid, matched);
+      } else {
+        call = this._addItem(fullName);
+      }
+    }
+
+    if (call) {
+      try { await call; } catch (e) { console.error('Service call failed', e); }
+    }
+    this._isUpdating = false;
+    row?.classList.remove('is-updating');
   }
 
   _wireImageError(card) {
@@ -1150,11 +1405,33 @@ class ShoppingListCard extends HTMLElement {
       .quantity-btn ha-icon { --mdc-icon-size: 20px; }
       .quantity-badge { position: absolute; top: -4px; right: -4px; background-color: var(--primary-color); color: white; border-radius: 50%; width: 18px; height: 18px; font-size: 11px; display: flex; align-items: center; justify-content: center; font-weight: 500; border: 2px solid var(--card-background-color); }
       .quantity-btn-placeholder { width: 24px; height: 24px; flex-shrink: 0; }
+
+      /* Types (variants) mode */
+      .card-container.types-mode { display: block; padding: 0; cursor: default; }
+      .card-container.types-mode:hover { background: transparent; }
+      .types-header { display: flex; align-items: center; gap: 10px; padding: 10px 12px; cursor: pointer; transition: background-color .2s; }
+      .types-header:hover { background: var(--secondary-background-color); }
+      .types-header:focus-visible { outline: none; box-shadow: 0 0 0 2px var(--primary-color) inset; }
+      .types-chevron { flex-shrink: 0; color: var(--secondary-text-color); transition: transform .25s ease; }
+      .card-container.types-mode.expanded .types-chevron { transform: rotate(180deg); }
+      .types-list { max-height: 0; overflow: hidden; transition: max-height .25s ease; }
+      .card-container.types-mode.expanded .types-list { max-height: 1000px; }
+      .type-row { display: flex; align-items: center; gap: 10px; padding: 8px 12px 8px 14px; cursor: pointer; border-top: 1px solid var(--divider-color); transition: background-color .2s; outline: none; }
+      .type-row:hover { background: var(--secondary-background-color); }
+      .type-row:focus-visible { box-shadow: 0 0 0 2px var(--primary-color) inset; }
+      .type-row.is-updating { opacity: .6; pointer-events: none; }
+      .type-thumb { width: 28px; height: 28px; flex-shrink: 0; }
+      .type-thumb img { width: 100%; height: 100%; object-fit: cover; border-radius: 50%; }
+      .type-name { flex: 1; min-width: 0; font-size: 14px; color: var(--primary-text-color); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+      .type-qty { display: flex; align-items: center; gap: 4px; flex-shrink: 0; }
+      .type-toggle { width: 28px; height: 28px; border-radius: 50%; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
+      .type-toggle ha-icon { --mdc-icon-size: 18px; }
     `;
     this.appendChild(s);
   }
 
   getCardSize() {
+    if (this._config && this._getTypes().length) return 2;
     if (this._config && this._config.layout === 'vertical') {
       return this._config.show_name === false ? 1 : 2;
     }
@@ -1162,6 +1439,10 @@ class ShoppingListCard extends HTMLElement {
   }
 
   getLayoutOptions() {
+    if (this._config && this._getTypes().length) {
+      // Expandable: let the card grow with its content (omit grid_rows).
+      return { grid_columns: 4, grid_min_columns: 2 };
+    }
     if (this._config && this._config.layout === 'vertical') {
       const rows = this._config.show_name === false ? 1 : 2;
       return { grid_rows: rows, grid_min_rows: rows, grid_columns: 2, grid_min_columns: 2 };
