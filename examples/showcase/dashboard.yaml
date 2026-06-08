@@ -1,0 +1,199 @@
+# Shopping List Card - feature showcase
+#
+# A single-view dashboard that puts every capability of custom:shopping-list-card
+# on screen at once: custom colors, icons, auto-derived images, horizontal and
+# vertical layouts, quantity controls, icon-only tiles, list prefixes, hold
+# actions, and the expandable "types" (variants) mode with sorting.
+#
+# Intended use: paste into a new dashboard (raw config editor), then take a
+# screenshot for the README hero image.
+#
+# Requirements:
+#   - custom:shopping-list-card (this repo)
+#   - A to-do entity. Replace todo.shopping_list below if yours differs.
+#   - Optional: images under /config/www/images/shopping-list/ for the image
+#     tiles. If they are missing the card gracefully falls back to the icon.
+#
+# Tip: pre-add a few items to the list so the "on" states (green tints, checks,
+# quantities) show up in the shot:
+#   Apple - Pink Lady, Apple - Gala (2), Milk, Bananas (3),
+#   Coffee, Eggs, Dairy - Yogurt
+
+title: Shopping List Card
+views:
+  - title: Showcase
+    type: sections
+    max_columns: 4
+    dense_section_placement: true
+    sections:
+      # ---------------------------------------------------------------
+      - type: grid
+        title: Basics
+        cards:
+          - type: heading
+            heading: Colors, icons & states
+            heading_style: subtitle
+
+          - type: custom:shopping-list-card
+            title: Apple
+            todo_list: todo.shopping_list
+            on_color: red
+            on_icon: mdi:food-apple
+            off_icon: mdi:food-apple-outline
+
+          - type: custom:shopping-list-card
+            title: Bananas
+            todo_list: todo.shopping_list
+            on_color: amber
+            on_icon: mdi:fruit-watermelon
+            enable_quantity: true
+
+          - type: custom:shopping-list-card
+            title: Milk
+            subtitle: Lactose-free
+            todo_list: todo.shopping_list
+            on_color: blue
+            on_icon: mdi:cup-water
+
+          - type: custom:shopping-list-card
+            title: Eggs
+            todo_list: todo.shopping_list
+            on_color: "#8D6E63"
+            on_icon: mdi:egg
+
+      # ---------------------------------------------------------------
+      - type: grid
+        title: Quantity & prefix
+        cards:
+          - type: heading
+            heading: Quantity & category prefix
+            heading_style: subtitle
+
+          - type: custom:shopping-list-card
+            title: Coffee
+            todo_list: todo.shopping_list
+            on_color: brown
+            on_icon: mdi:coffee
+            enable_quantity: true
+            quantity_step: 1
+            quantity_max: 6
+
+          - type: custom:shopping-list-card
+            title: Yogurt
+            list_prefix: Dairy
+            todo_list: todo.shopping_list
+            on_color: teal
+            on_icon: mdi:cup
+            enable_quantity: true
+
+          - type: custom:shopping-list-card
+            title: Bread
+            todo_list: todo.shopping_list
+            on_color: orange
+            on_icon: mdi:bread-slice
+            hold_action:
+              action: more-info
+
+          - type: custom:shopping-list-card
+            title: Salt
+            todo_list: todo.shopping_list
+            show_name: false
+            on_color: blue-grey
+            on_icon: mdi:shaker
+
+      # ---------------------------------------------------------------
+      - type: grid
+        title: Images & vertical layout
+        cards:
+          - type: heading
+            heading: Images & vertical tiles
+            heading_style: subtitle
+
+          - type: custom:shopping-list-card
+            title: Avocado
+            todo_list: todo.shopping_list
+            layout: vertical
+            image_base: /local/images/shopping-list/
+            on_color: green
+            grid_options:
+              columns: 6
+
+          - type: custom:shopping-list-card
+            title: Tomatoes
+            todo_list: todo.shopping_list
+            layout: vertical
+            image_base: /local/images/shopping-list/
+            on_color: red
+            enable_quantity: true
+            grid_options:
+              columns: 6
+
+          - type: custom:shopping-list-card
+            title: Orange Juice
+            todo_list: todo.shopping_list
+            layout: vertical
+            image_base: /local/images/shopping-list/
+            on_color: orange
+            grid_options:
+              columns: 6
+
+          - type: custom:shopping-list-card
+            title: Cheese
+            todo_list: todo.shopping_list
+            layout: vertical
+            on_color: amber
+            on_icon: mdi:cheese
+            grid_options:
+              columns: 6
+
+      # ---------------------------------------------------------------
+      - type: grid
+        title: Types (variants)
+        cards:
+          - type: heading
+            heading: Expandable types
+            heading_style: subtitle
+
+          - type: custom:shopping-list-card
+            title: Apple
+            todo_list: todo.shopping_list
+            on_color: red
+            on_icon: mdi:food-apple
+            enable_quantity: true
+            types_sort: asc
+            types:
+              - Pink Lady
+              - Granny Smith
+              - Gala
+              - Green
+              - Yellow
+
+          - type: custom:shopping-list-card
+            title: Pepper
+            todo_list: todo.shopping_list
+            layout: vertical
+            on_color: green
+            on_icon: mdi:chili-mild
+            types_sort: asc
+            types:
+              - name: Red
+                icon: mdi:chili-hot
+              - name: Green
+                icon: mdi:chili-mild
+              - name: Yellow
+                icon: mdi:chili-medium
+            grid_options:
+              columns: 6
+
+          - type: custom:shopping-list-card
+            title: Chicken
+            list_prefix: Meat
+            todo_list: todo.shopping_list
+            on_color: deep-orange
+            on_icon: mdi:food-drumstick
+            enable_quantity: true
+            types:
+              - Breast
+              - Thighs
+              - Legs
+              - Wings
