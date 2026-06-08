@@ -6,13 +6,13 @@
  *
  * Author: eyalgal
  * License: MIT
- * Version: 2.1.2
+ * Version: 2.1.3
  *
  * Note: This card requires a to-do entity to function properly.
  * For more information, visit: https://github.com/eyalgal/ha-shopping-list-card
  */
 
-const CARD_VERSION = '2.1.2';
+const CARD_VERSION = '2.1.3';
 
 function escapeHtml(str) {
   if (str == null) return '';
@@ -1031,8 +1031,11 @@ class ShoppingListCard extends HTMLElement {
     this._typeEntries = states.map(s => s.subtitle);
     const activeCount = states.filter(s => s.isOn).length;
 
-    // Bare-title state drives the header icon and its add / remove action.
-    const bare = this._typeState(null);
+    // Bare-item state drives the header's add / remove action. When a `subtitle`
+    // is configured, the header item is stored as "Title - subtitle"; otherwise
+    // it is the plain title.
+    const baseSubtitle = this._config.subtitle || null;
+    const bare = this._typeState(baseSubtitle);
 
     // Memoize on header + per-row states. Expansion is a pure CSS toggle applied
     // outside render, so it is intentionally excluded from the key.
@@ -1043,10 +1046,12 @@ class ShoppingListCard extends HTMLElement {
 
     const headerOn = bare.isOn;
     const anyOn = bare.isOn || activeCount > 0;
-    const headColor = headerOn ? onColorN : offColorN;
+    // The header icon reflects the whole group: it is in the selected state when
+    // the bare item OR any variant is on the list.
+    const headColor = anyOn ? onColorN : offColorN;
     const headBg = this._rgbaFor(headColor, 0.2);
     const headFg = this._solidFor(headColor);
-    const headIcon = headerOn ? onIcon : offIcon;
+    const headIcon = anyOn ? onIcon : offIcon;
     const effectiveImage = this._resolveImage();
     const safeImage = escapeHtml(effectiveImage);
     const safeTitle = escapeHtml(this._config.title || '');
@@ -1213,7 +1218,8 @@ class ShoppingListCard extends HTMLElement {
 
   _handleHeaderTap(ev) {
     const header = ev.target.closest('.types-header');
-    return this._toggleSubtitle(ev, null, header);
+    // The header item carries the configured subtitle when present.
+    return this._toggleSubtitle(ev, this._config.subtitle || null, header);
   }
 
   _handleTypeTap(ev, idx) {
@@ -1517,6 +1523,9 @@ class ShoppingListCard extends HTMLElement {
       .types-header.vertical-header .info-container { position: absolute; bottom: 12px; left: 16px; right: 16px; height: 40px; display: flex; flex-direction: column; justify-content: center; align-items: center; text-align: center; }
       .types-header.vertical-header .primary,
       .types-header.vertical-header .secondary { text-align: center; width: 100%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+      /* Keep the subtitle clear of the bottom-right chevron: symmetric padding
+         keeps it centered while ellipsizing before it reaches the button. */
+      .types-header.vertical-header .secondary { padding: 0 28px; box-sizing: border-box; }
       .types-header.vertical-header .types-chevron { position: absolute; bottom: 8px; right: 10px; --mdc-icon-size: 22px; opacity: .85; }
       .type-row { display: flex; align-items: center; gap: 10px; padding: 8px 12px 8px 14px; cursor: pointer; border-top: 1px solid var(--divider-color); transition: background-color .2s; outline: none; }
       .type-row:hover { background: var(--secondary-background-color); }
