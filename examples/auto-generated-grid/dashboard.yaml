@@ -39,6 +39,7 @@ cards:
                    "type": "custom:shopping-list-card",
                    "title": item.title,
                    "subtitle": item.subtitle | default(''),
+                   "types": item.types | default(''),
                    "todo_list": "todo.shopping_list",
                    "enable_quantity": true,
                    "colorize_background": true,

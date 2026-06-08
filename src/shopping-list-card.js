@@ -6,13 +6,13 @@
  *
  * Author: eyalgal
  * License: MIT
- * Version: 2.1.5
+ * Version: 2.1.6
  *
  * Note: This card requires a to-do entity to function properly.
  * For more information, visit: https://github.com/eyalgal/ha-shopping-list-card
  */
 
-const CARD_VERSION = '2.1.5';
+const CARD_VERSION = '2.1.6';
 
 function escapeHtml(str) {
   if (str == null) return '';
@@ -503,9 +503,12 @@ class ShoppingListCardEditor extends HTMLElement {
     s.querySelector('#subtitle').value = c.subtitle || '';
     const typesEl = s.querySelector('#types');
     if (typesEl) {
-      const arr = Array.isArray(c.types)
-        ? c.types.map(t => (typeof t === 'string' ? t : (t && t.name) || '')).filter(Boolean)
-        : [];
+      let arr = [];
+      if (Array.isArray(c.types)) {
+        arr = c.types.map(t => (typeof t === 'string' ? t : (t && t.name) || '')).filter(Boolean);
+      } else if (typeof c.types === 'string') {
+        arr = c.types.split(/[,\n]/).map(x => x.trim()).filter(Boolean);
+      }
       typesEl.value = arr.join('\n');
     }
     const sortEl = s.querySelector('#types_sort');
@@ -752,7 +755,12 @@ class ShoppingListCard extends HTMLElement {
    *  `{ name, image?, icon? }`. Accepts plain strings or objects in config.
    *  Returns an empty array when no types are configured. */
   _getTypes() {
-    const raw = this._config && this._config.types;
+    let raw = this._config && this._config.types;
+    // Accept a comma / newline separated string (handy when the list comes
+    // from a JSON catalog, e.g. "Pink Lady, Granny Smith, Gala").
+    if (typeof raw === 'string') {
+      raw = raw.split(/[,\n]/).map(x => x.trim()).filter(Boolean);
+    }
     if (!Array.isArray(raw)) return [];
     const out = [];
     for (const entry of raw) {
@@ -1653,10 +1661,12 @@ class ShoppingListCard extends HTMLElement {
 
   getLayoutOptions() {
     if (this._config && this._getTypes().length) {
-      // Expandable: let the card grow with its content (omit grid_rows).
+      // Expandable: let the card grow with its content. `grid_rows: auto` keeps
+      // the height flexible by default so the expanded variant list is never
+      // clipped in the sections layout.
       // Vertical types cards are narrower (grid tiles), horizontal span wider.
       const cols = this._config.layout === 'vertical' ? 2 : 4;
-      return { grid_columns: cols, grid_min_columns: 2 };
+      return { grid_rows: 'auto', grid_columns: cols, grid_min_columns: 2 };
     }
     if (this._config && this._config.layout === 'vertical') {
       const rows = this._config.show_name === false ? 1 : 2;

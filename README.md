@@ -84,7 +84,7 @@ haptic: true
 | `type` | string | yes | Must be `custom:shopping-list-card`. | - |
 | `title` | string | yes | The item name. | - |
 | `subtitle` | string | no | A secondary line of text. Included when matching/writing: the stored item is `"<title> - <subtitle>"`. | `''` |
-| `types` | list | no | Turns the card into an expandable group. Each entry (a string, or `{ name, image, icon }`) is added as `"<title> - <type>"`. Tapping the card header adds the bare title; the chevron expands the variant list. When set, the single `subtitle` is ignored. Works in both `horizontal` and `vertical` layouts. | - |
+| `types` | list or string | no | Turns the card into an expandable group. A list of entries (a string, or `{ name, image, icon }`), or a single comma-separated string like `"Pink Lady, Granny Smith, Gala"` (handy from a JSON catalog). Each is added as `"<title> - <type>"`. Tapping the card header adds the bare title; the chevron expands the variant list. When set, the single `subtitle` is ignored. Works in both `horizontal` and `vertical` layouts. | - |
 | `types_sort` | string | no | Order of the variant rows: `none` (as listed), `asc` (A-Z), or `desc` (Z-A). Case-insensitive, natural (numbers sorted numerically). Only used when `types` is set. | `none` |
 | `todo_list` | string | yes | The `todo.<name>` entity to manage. | - |
 | `list_prefix` | string | no | When set, items are stored as `"<prefix> - <title>"` for category sorting. Display is unchanged. | `''` |

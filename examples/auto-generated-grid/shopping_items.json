@@ -1,11 +1,10 @@
 {
   "Fruits": [
-    { "title": "Apple" },
+    { "title": "Apple", "subtitle": "Pink Lady", "types": "Pink Lady, Granny Smith, Gala" },
     { "title": "Avocado" },
     { "title": "Banana" },
     { "title": "Blueberries" },
-    { "title": "Grapes", "subtitle": "Green" },
-    { "title": "Grapes", "subtitle": "Purple" },
+    { "title": "Grapes", "types": "Green, Purple" },
     { "title": "Lemons" },
     { "title": "Strawberries" },
     { "title": "Watermelon" }
@@ -33,7 +32,7 @@
     { "title": "Yogurt" }
   ],
   "Meat": [
-    { "title": "Chicken Breast" },
+    { "title": "Chicken", "types": "Breast, Thighs, Legs" },
     { "title": "Ground Beef" },
     { "title": "Ground Turkey" }
   ],
