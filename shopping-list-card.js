@@ -6,13 +6,13 @@
  *
  * Author: eyalgal
  * License: MIT
- * Version: 2.1.3
+ * Version: 2.1.4
  *
  * Note: This card requires a to-do entity to function properly.
  * For more information, visit: https://github.com/eyalgal/ha-shopping-list-card
  */
 
-const CARD_VERSION = '2.1.3';
+const CARD_VERSION = '2.1.4';
 
 function escapeHtml(str) {
   if (str == null) return '';
@@ -240,6 +240,11 @@ class ShoppingListCardEditor extends HTMLElement {
               <textarea id="types" rows="3" placeholder="Pink Lady&#10;Granny Smith&#10;Gala"></textarea>
               <div class="hint">One per line. When set, the card becomes expandable: tap it to reveal the types and add each as <code>Title - Type</code>. The single subtitle is ignored in this mode.</div>
             </div>
+            <ha-select id="types_sort" label="Sort types" naturalMenuWidth fixedMenuPosition>
+              <mwc-list-item value="none">As listed</mwc-list-item>
+              <mwc-list-item value="asc">Alphabetical (A-Z)</mwc-list-item>
+              <mwc-list-item value="desc">Alphabetical (Z-A)</mwc-list-item>
+            </ha-select>
             <ha-picture-upload id="image_upload"></ha-picture-upload>
             <div class="image-fallback">
               <${TF} id="image" label="Image URL (optional)" placeholder="/local/... or https://..."></${TF}>
@@ -382,6 +387,11 @@ class ShoppingListCardEditor extends HTMLElement {
         { value: 'more-info', label: 'Open more-info' },
         { value: 'none', label: 'None' },
       ],
+      types_sort: [
+        { value: 'none', label: 'As listed' },
+        { value: 'asc', label: 'Alphabetical (A-Z)' },
+        { value: 'desc', label: 'Alphabetical (Z-A)' },
+      ],
     };
     this.shadowRoot.querySelectorAll('ha-select').forEach(el => {
       const opts = SELECT_OPTIONS[el.id];
@@ -498,6 +508,12 @@ class ShoppingListCardEditor extends HTMLElement {
         : [];
       typesEl.value = arr.join('\n');
     }
+    const sortEl = s.querySelector('#types_sort');
+    if (sortEl) {
+      const sortVal = (c.types_sort === 'asc' || c.types_sort === 'desc') ? c.types_sort : 'none';
+      sortEl.value = sortVal;
+      sortEl._slcValue = sortVal;
+    }
     s.querySelector('#image').value = c.image || '';
     s.querySelector('#image_base').value = c.image_base || '';
     s.querySelector('#list_prefix').value = c.list_prefix || '';
@@ -544,6 +560,8 @@ class ShoppingListCardEditor extends HTMLElement {
       const list = typesEl.value.split('\n').map(x => x.trim()).filter(Boolean);
       if (list.length) n.types = list; else delete n.types;
     }
+    const sortVal = this._selectVal('types_sort');
+    if (sortVal === 'asc' || sortVal === 'desc') n.types_sort = sortVal; else delete n.types_sort;
     const img = s.querySelector('#image').value;
     if (img) n.image = img; else delete n.image;
     const imgBase = s.querySelector('#image_base').value.trim();
@@ -745,6 +763,11 @@ class ShoppingListCard extends HTMLElement {
         const name = String(entry.name).trim();
         if (name) out.push({ name, image: entry.image, icon: entry.icon });
       }
+    }
+    const sort = this._config && this._config.types_sort;
+    if (sort === 'asc' || sort === 'desc') {
+      const dir = sort === 'desc' ? -1 : 1;
+      out.sort((a, b) => dir * a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: 'base' }));
     }
     return out;
   }
@@ -1193,7 +1216,8 @@ class ShoppingListCard extends HTMLElement {
     }
 
     // Tapping the header body (anywhere but the chevron) adds / removes the
-    // bare title, like a normal single-item card.
+    // bare title, like a normal single-item card. Holding it clears every
+    // item that belongs to this card (the bare title and all variants).
     if (header) {
       header.addEventListener('click', (ev) => {
         if (ev.target.closest('.types-chevron')) return;
@@ -1204,6 +1228,7 @@ class ShoppingListCard extends HTMLElement {
           ev.preventDefault(); this._handleHeaderTap(ev);
         }
       });
+      this._attachHold(header, () => this._removeAllTypes());
     }
 
     card.querySelectorAll('.type-row').forEach(row => {
@@ -1213,7 +1238,83 @@ class ShoppingListCard extends HTMLElement {
       row.addEventListener('keydown', (ev) => {
         if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); tap(ev); }
       });
+      // Holding a row removes that specific variant entirely, regardless of
+      // its quantity.
+      this._attachHold(row, () => this._removeType(idx));
     });
+  }
+
+  /** Generic press-and-hold wiring: fires `onHold` after a 500ms hold and
+   *  swallows the trailing click so the tap handler doesn't also fire.
+   *  Honors `hold_action: { action: none }` to disable holds entirely. */
+  _attachHold(el, onHold) {
+    if (this._config.hold_action?.action === 'none') return;
+    let holdTimer = null, heldFired = false, startX = 0, startY = 0;
+    const start = (ev) => {
+      if (ev.target.closest('.quantity-btn')) return;
+      heldFired = false;
+      const t = ev.touches?.[0];
+      startX = t ? t.clientX : ev.clientX;
+      startY = t ? t.clientY : ev.clientY;
+      clearTimeout(holdTimer);
+      holdTimer = setTimeout(() => {
+        heldFired = true; holdTimer = null;
+        this._vibrate();
+        onHold();
+      }, 500);
+    };
+    const cancel = () => { clearTimeout(holdTimer); holdTimer = null; };
+    const move = (ev) => {
+      if (!holdTimer) return;
+      const t = ev.touches?.[0];
+      const x = t ? t.clientX : ev.clientX;
+      const y = t ? t.clientY : ev.clientY;
+      if (Math.abs(x - startX) > 10 || Math.abs(y - startY) > 10) cancel();
+    };
+    el.addEventListener('mousedown', start);
+    el.addEventListener('touchstart', start, { passive: true });
+    el.addEventListener('mousemove', move);
+    el.addEventListener('touchmove', move, { passive: true });
+    ['mouseup', 'mouseleave', 'touchend', 'touchcancel'].forEach(e => el.addEventListener(e, cancel));
+    el.addEventListener('click', (ev) => {
+      if (heldFired) { ev.stopImmediatePropagation(); ev.preventDefault(); heldFired = false; }
+    }, true);
+  }
+
+  /** Hold on the header: remove every item that belongs to this card, i.e.
+   *  the bare title plus each configured variant currently on the list. */
+  async _removeAllTypes() {
+    if (this._isUpdating) return;
+    const names = [this._config.subtitle || null, ...(this._typeEntries || [])];
+    const seen = new Set();
+    const calls = [];
+    for (const n of names) {
+      const { isOn, matched, matchedUid } = this._typeState(n);
+      if (!isOn) continue;
+      const key = matchedUid || matched;
+      if (key && !seen.has(key)) {
+        seen.add(key);
+        calls.push(this._removeByUidOrSummary(matchedUid, matched));
+      }
+    }
+    if (!calls.length) return;
+    this._isUpdating = true;
+    try { await Promise.all(calls); }
+    catch (e) { console.error('Hold remove-all failed', e); }
+    this._isUpdating = false;
+  }
+
+  /** Hold on a variant row: remove that specific variant entirely. */
+  async _removeType(idx) {
+    if (this._isUpdating) return;
+    const entries = this._typeEntries || [];
+    if (idx < 0 || idx >= entries.length) return;
+    const { isOn, matched, matchedUid } = this._typeState(entries[idx]);
+    if (!isOn) return;
+    this._isUpdating = true;
+    try { await this._removeByUidOrSummary(matchedUid, matched); }
+    catch (e) { console.error('Hold remove-type failed', e); }
+    this._isUpdating = false;
   }
 
   _handleHeaderTap(ev) {
@@ -1527,7 +1628,7 @@ class ShoppingListCard extends HTMLElement {
          keeps it centered while ellipsizing before it reaches the button. */
       .types-header.vertical-header .secondary { padding: 0 28px; box-sizing: border-box; }
       .types-header.vertical-header .types-chevron { position: absolute; bottom: 8px; right: 10px; --mdc-icon-size: 22px; opacity: .85; }
-      .type-row { display: flex; align-items: center; gap: 10px; padding: 8px 12px 8px 14px; cursor: pointer; border-top: 1px solid var(--divider-color); transition: background-color .2s; outline: none; }
+      .type-row { display: flex; align-items: center; gap: 10px; min-height: 44px; box-sizing: border-box; padding: 8px 12px 8px 14px; cursor: pointer; border-top: 1px solid var(--divider-color); transition: background-color .2s; outline: none; }
       .type-row:hover { background: var(--secondary-background-color); }
       .type-row:focus-visible { box-shadow: 0 0 0 2px var(--primary-color) inset; }
       .type-row.is-updating { opacity: .6; pointer-events: none; }
