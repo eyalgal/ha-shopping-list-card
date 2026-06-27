@@ -6,13 +6,13 @@
  *
  * Author: eyalgal
  * License: MIT
- * Version: 2.1.0
+ * Version: 2.2.0
  *
  * Note: This card requires a to-do entity to function properly.
  * For more information, visit: https://github.com/eyalgal/ha-shopping-list-card
  */
 
-const CARD_VERSION = '2.1.0';
+const CARD_VERSION = '2.2.0';
 
 function escapeHtml(str) {
   if (str == null) return '';
@@ -315,6 +315,13 @@ class ShoppingListCardEditor extends HTMLElement {
               <${TF} id="quantity_step" label="Quantity step" type="number" min="1" max="99" helper="How much +/- adjusts" hint="How much +/- adjusts"></${TF}>
               <${TF} id="quantity_max" label="Quantity max" type="number" min="1" max="999" helper="Optional cap" hint="Optional cap"></${TF}>
             </div>
+            <label class="toggle-row">
+              <ha-switch id="keep_at_zero"></ha-switch>
+              <div class="toggle-text">
+                <span class="toggle-title">Keep item at zero</span>
+                <span class="toggle-desc">Keep the item as "Name (0)" instead of deleting it, and always show the quantity in parentheses.</span>
+              </div>
+            </label>
             <ha-select id="hold_action" label="Hold action" naturalMenuWidth fixedMenuPosition>
               <mwc-list-item value="default">Remove item (default)</mwc-list-item>
               <mwc-list-item value="more-info">Open more-info</mwc-list-item>
@@ -524,6 +531,7 @@ class ShoppingListCardEditor extends HTMLElement {
     if (pu) pu.value = c.image || '';
     s.querySelector('#todo_list').value = c.todo_list || '';
     s.querySelector('#enable_quantity').checked = !!c.enable_quantity;
+    s.querySelector('#keep_at_zero').checked = c.remove_zero === false;
     s.querySelector('#colorize_background').checked = c.colorize_background !== false;
     s.querySelector('#show_name').checked = c.show_name !== false;
     const layoutVal = c.layout === 'vertical' ? 'vertical' : 'horizontal';
@@ -575,6 +583,10 @@ class ShoppingListCardEditor extends HTMLElement {
 
     const enableQty = s.querySelector('#enable_quantity').checked;
     if (enableQty) n.enable_quantity = true; else delete n.enable_quantity;
+
+    // `remove_zero` defaults to true (delete at zero); only persist the opt-out.
+    const keepAtZero = s.querySelector('#keep_at_zero').checked;
+    if (keepAtZero) n.remove_zero = false; else delete n.remove_zero;
 
     const colorBg = s.querySelector('#colorize_background').checked;
     if (colorBg) delete n.colorize_background; else n.colorize_background = false;
@@ -780,14 +792,32 @@ class ShoppingListCard extends HTMLElement {
     return out;
   }
 
-  /** Match a summary against the current items, returning on-state and qty. */
+  /** When `remove_zero: false`, keep emptied items as `Name (0)` and always
+   *  suffix the quantity. Requires quantity mode; defaults off (remove at 0). */
+  _keepZero() {
+    return !!this._config.enable_quantity && this._config.remove_zero === false;
+  }
+
+  /** Build the stored summary for a name at a quantity, honoring keep-zero. */
+  _summaryFor(fullName, qty) {
+    if (!this._config.enable_quantity) return fullName;
+    if (this._keepZero()) return `${fullName} (${qty})`;
+    return qty > 1 ? `${fullName} (${qty})` : fullName;
+  }
+
+  /** Match a summary against the current items. `present` is whether it exists
+   *  at all; `isOn` is whether it's active (a kept `Name (0)` is present but off). */
   _matchSummary(fullName) {
     const rx = new RegExp(`^${this._escapeRegExp(fullName)}(?: \\((\\d+)\\))?$`, 'i');
     for (const item of this._items) {
       const m = item.summary.match(rx);
-      if (m) return { isOn: true, qty: m[1] ? +m[1] : 1, matched: item.summary, matchedUid: item.uid };
+      if (m) {
+        const qty = m[1] != null ? +m[1] : 1;
+        const isOn = this._keepZero() ? qty > 0 : true;
+        return { isOn, present: true, qty, matched: item.summary, matchedUid: item.uid };
+      }
     }
-    return { isOn: false, qty: 0, matched: null, matchedUid: null };
+    return { isOn: false, present: false, qty: 0, matched: null, matchedUid: null };
   }
 
   /** Resolve the on-state and stored name for a single type. */
@@ -914,7 +944,7 @@ class ShoppingListCard extends HTMLElement {
     if (types.length) { this._renderTypesMode(types); return; }
 
     const fullName = this._buildFullName();
-    const { isOn, qty, matched, matchedUid } = this._matchSummary(fullName);
+    const { isOn, qty, matched, matchedUid, present } = this._matchSummary(fullName);
 
     // Memoize: skip the DOM rewrite when nothing visible (or interaction-relevant)
     // changed for this card. Config changes invalidate _lastRenderKey via setConfig().
@@ -976,7 +1006,7 @@ class ShoppingListCard extends HTMLElement {
 
         if (isOn && this._config.enable_quantity) {
             topBlock = `<div class="vertical-icon-container">
-                                ${qty > 1 ? decBtn : `<div class="quantity-btn-placeholder"></div>`}
+                                ${(this._keepZero() || qty > 1) ? decBtn : `<div class="quantity-btn-placeholder"></div>`}
                                 ${iconElement}
                                 ${incBtn}
                              </div>`;
@@ -1004,7 +1034,7 @@ class ShoppingListCard extends HTMLElement {
 
         if (isOn && this._config.enable_quantity) {
             qtyControls = `<div class="quantity-controls">
-                                ${qty > 1 ? decBtn : ''}
+                                ${(this._keepZero() || qty > 1) ? decBtn : ''}
                                 <span class="quantity" aria-label="Quantity: ${qty}">${qty}</span>
                                 ${incBtn}
                              </div>`;
@@ -1036,7 +1066,7 @@ class ShoppingListCard extends HTMLElement {
     `;
 
     const card = this.content.querySelector('.card-container');
-    this._wireInteractions(card, isOn, matched, matchedUid, qty, fullName);
+    this._wireInteractions(card, isOn, matched, matchedUid, qty, fullName, present);
     this._wireImageError(card);
   }
 
@@ -1140,7 +1170,7 @@ class ShoppingListCard extends HTMLElement {
       let rightHtml;
       if (s.isOn && enableQty) {
         rightHtml = `<div class="type-qty">
-            ${s.qty > 1 ? decBtn : ''}
+            ${(this._keepZero() || s.qty > 1) ? decBtn : ''}
             <span class="quantity" aria-label="Quantity: ${s.qty}">${s.qty}</span>
             ${incBtn}
           </div>`;
@@ -1297,8 +1327,8 @@ class ShoppingListCard extends HTMLElement {
     const seen = new Set();
     const calls = [];
     for (const n of names) {
-      const { isOn, matched, matchedUid } = this._typeState(n);
-      if (!isOn) continue;
+      const { isOn, present, matched, matchedUid } = this._typeState(n);
+      if (!isOn && !present) continue;
       const key = matchedUid || matched;
       if (key && !seen.has(key)) {
         seen.add(key);
@@ -1317,8 +1347,8 @@ class ShoppingListCard extends HTMLElement {
     if (this._isUpdating) return;
     const entries = this._typeEntries || [];
     if (idx < 0 || idx >= entries.length) return;
-    const { isOn, matched, matchedUid } = this._typeState(entries[idx]);
-    if (!isOn) return;
+    const { isOn, present, matched, matchedUid } = this._typeState(entries[idx]);
+    if (!isOn && !present) return;
     this._isUpdating = true;
     try { await this._removeByUidOrSummary(matchedUid, matched); }
     catch (e) { console.error('Hold remove-type failed', e); }
@@ -1341,7 +1371,7 @@ class ShoppingListCard extends HTMLElement {
 
   async _toggleSubtitle(ev, subtitle, el) {
     if (this._isUpdating) return;
-    const { fullName, isOn, qty, matched, matchedUid } = this._typeState(subtitle);
+    const { fullName, isOn, qty, matched, matchedUid, present } = this._typeState(subtitle);
     const action = ev.target.closest('.quantity-btn')?.dataset.action;
 
     this._vibrate();
@@ -1356,13 +1386,15 @@ class ShoppingListCard extends HTMLElement {
       if (!isNaN(maxQty) && maxQty > 0) next = Math.min(next, maxQty);
       if (next !== qty) call = this._updateQuantity(matchedUid, matched, next, fullName);
     } else if (action === 'decrement') {
-      const next = qty - step;
-      if (next >= 1) call = this._updateQuantity(matchedUid, matched, next, fullName);
-      else if (qty > 1) call = this._updateQuantity(matchedUid, matched, 1, fullName);
+      const next = Math.max(this._keepZero() ? 0 : 1, qty - step);
+      if (next !== qty) call = this._updateQuantity(matchedUid, matched, next, fullName);
+    } else if (this._keepZero()) {
+      if (!present) call = this._addItem(this._summaryFor(fullName, 1));
+      else call = this._updateQuantity(matchedUid, matched, qty > 0 ? 0 : 1, fullName);
     } else if (isOn) {
       if (!this._config.enable_quantity || qty === 1) call = this._removeByUidOrSummary(matchedUid, matched);
     } else {
-      call = this._addItem(fullName);
+      call = this._addItem(this._summaryFor(fullName, 1));
     }
 
     if (call) {
@@ -1390,8 +1422,8 @@ class ShoppingListCard extends HTMLElement {
     });
   }
 
-  _wireInteractions(card, isOn, matched, matchedUid, qty, fullName) {
-    const tap = (ev) => this._handleTap(ev, isOn, matched, matchedUid, qty, fullName);
+  _wireInteractions(card, isOn, matched, matchedUid, qty, fullName, present) {
+    const tap = (ev) => this._handleTap(ev, isOn, matched, matchedUid, qty, fullName, present);
     card.addEventListener('click', tap);
     card.addEventListener('keydown', (ev) => {
       if (ev.target.closest('.quantity-btn')) {
@@ -1426,7 +1458,7 @@ class ShoppingListCard extends HTMLElement {
         heldFired = true;
         holdTimer = null;
         this._vibrate();
-        this._handleHold(isOn, matched, matchedUid);
+        this._handleHold(isOn, matched, matchedUid, present);
       }, 500);
     };
 
@@ -1457,7 +1489,7 @@ class ShoppingListCard extends HTMLElement {
     }, true);
   }
 
-  _handleHold(isOn, matched, matchedUid) {
+  _handleHold(isOn, matched, matchedUid, present) {
     const cfg = this._config.hold_action;
     const action = cfg?.action || 'default';
 
@@ -1473,9 +1505,9 @@ class ShoppingListCard extends HTMLElement {
       return;
     }
 
-    // Default: remove the item entirely if it is on the list.
+    // Default: remove the item entirely (even a kept `Name (0)`) if present.
     if (action === 'default') {
-      if (isOn) this._removeByUidOrSummary(matchedUid, matched)
+      if (present || isOn) this._removeByUidOrSummary(matchedUid, matched)
         .catch(e => console.error('Hold remove failed', e));
     }
   }
@@ -1484,7 +1516,7 @@ class ShoppingListCard extends HTMLElement {
     if (this._config?.haptic && navigator.vibrate) navigator.vibrate(50);
   }
 
-  async _handleTap(ev, isOn, matched, matchedUid, qty, fullName) {
+  async _handleTap(ev, isOn, matched, matchedUid, qty, fullName, present) {
     if (this._isUpdating) return;
     ev.stopPropagation();
     const action = ev.target.closest('.quantity-btn')?.dataset.action;
@@ -1501,14 +1533,17 @@ class ShoppingListCard extends HTMLElement {
       if (!isNaN(maxQty) && maxQty > 0) next = Math.min(next, maxQty);
       if (next !== qty) call = this._updateQuantity(matchedUid, matched, next, fullName);
     } else if (action === 'decrement') {
-      const next = qty - step;
-      if (next >= 1) call = this._updateQuantity(matchedUid, matched, next, fullName);
-      else if (qty > 1) call = this._updateQuantity(matchedUid, matched, 1, fullName);
+      const next = Math.max(this._keepZero() ? 0 : 1, qty - step);
+      if (next !== qty) call = this._updateQuantity(matchedUid, matched, next, fullName);
+    } else if (this._keepZero()) {
+      // Never delete: add at (1) when absent, else toggle qty 0 <-> 1.
+      if (!present) call = this._addItem(this._summaryFor(fullName, 1));
+      else call = this._updateQuantity(matchedUid, matched, qty > 0 ? 0 : 1, fullName);
     } else {
       if (isOn) {
         if (!this._config.enable_quantity || qty===1) call = this._removeByUidOrSummary(matchedUid, matched);
       } else {
-        call = this._addItem(fullName);
+        call = this._addItem(this._summaryFor(fullName, 1));
       }
     }
 
@@ -1538,7 +1573,7 @@ class ShoppingListCard extends HTMLElement {
   }
 
   _updateQuantity(uid, oldSummary, newQty, fullName) {
-    const newName = newQty>1 ? `${fullName} (${newQty})` : fullName;
+    const newName = this._summaryFor(fullName, newQty);
     return this._hass.callService('todo','update_item',{
       entity_id: this._config.todo_list,
       item: uid || oldSummary,

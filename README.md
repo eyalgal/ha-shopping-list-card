@@ -95,6 +95,7 @@ haptic: true
 | `enable_quantity` | boolean | no | Show `+` / `-` buttons when the item is on the list. | `false` |
 | `quantity_step` | number | no | How much `+` / `-` adjusts per tap. | `1` |
 | `quantity_max` | number | no | Optional cap for the quantity. | - |
+| `remove_zero` | boolean | no | Delete the item when its quantity hits 0. Set `false` to keep it as `Milk (0)` and always suffix the quantity. | `true` |
 | `on_icon` | string | no | Icon when the item is on the list. | `mdi:check` |
 | `on_color` | string | no | Color for the on state (HA name like `green`, `teal`, or `#4CAF50`). | `green` |
 | `off_icon` | string | no | Icon when the item is not on the list. | `mdi:plus` |
@@ -153,6 +154,10 @@ When `enable_quantity: true`:
 - If quantity is greater than `1`, the `-` button is visible for decrementing.
 - `quantity_step` controls how much each tap adjusts by (default `1`).
 - `quantity_max` sets an optional cap.
+
+When `remove_zero: false`:
+
+- An emptied item stays on the list as `Milk (0)` instead of being deleted
 
 ### List prefix (category sorting)
 
