@@ -657,20 +657,34 @@ class ShoppingListCard extends HTMLElement {
     this._subscribedEntity = null;
     this._lastRenderKey = null;
     this._expanded = false;
+    // Backoff retry so a failed sub/fetch (HA restart, integration reload) heals
+    // itself instead of getting stuck on the error screen.
+    this._retryTimer = null;
+    this._retryDelay = 0;
   }
 
   set hass(hass) {
     const firstHass = !this._hass;
     const prevState = this._hass?.states?.[this._config?.todo_list];
+    const prevConnected = this._hass?.connected;
     this._hass = hass;
     if (!this._config) return;
     if (firstHass) this._ensureSubscription();
+
+    // On websocket reconnect (HA restart) the old subscription is dead; rebuild
+    // it and refetch. Clears a stuck error card without a force-close.
+    if (prevConnected === false && hass.connected) { this._recover(); return; }
+
     // Only re-render if the entity's availability changed (exists / unavailable).
     // Item changes are pushed via subscription; avoid re-rendering on unrelated state updates.
     const newState = hass.states?.[this._config.todo_list];
     const prevAvail = !!prevState && prevState.state !== 'unavailable';
     const newAvail = !!newState && newState.state !== 'unavailable';
-    if (prevAvail !== newAvail && this._items !== null) this._render();
+    if (prevAvail !== newAvail) {
+      // Entity came back: rebuild sub + refetch. Went away: just re-render.
+      if (newAvail && !prevAvail) this._recover();
+      else if (this._items !== null) this._render();
+    }
   }
 
   setConfig(config) {
@@ -696,6 +710,7 @@ class ShoppingListCard extends HTMLElement {
 
   disconnectedCallback() {
     this._teardownSubscription();
+    if (this._retryTimer) { clearTimeout(this._retryTimer); this._retryTimer = null; }
   }
 
   _ensureSubscription() {
@@ -707,7 +722,14 @@ class ShoppingListCard extends HTMLElement {
 
     try {
       this._unsubscribe = _slcSubscribe(this._hass, entityId, (items, err) => {
-        if (err) { this._fallbackFetch(); return; }
+        if (err) {
+          // Sub died; drop the stale handle so a retry can re-subscribe.
+          this._teardownSubscription();
+          this._fallbackFetch();
+          return;
+        }
+        // Fresh push: data flowing again, clear any pending retry.
+        this._clearRetry();
         this._items = (items || []).filter(i => i.status === 'needs_action');
         this._render();
       });
@@ -724,12 +746,42 @@ class ShoppingListCard extends HTMLElement {
         type: 'todo/item/list',
         entity_id: this._config.todo_list,
       });
+      this._clearRetry();
       this._items = (res.items || []).filter(i => i.status === 'needs_action');
       this._render();
     } catch (e) {
       console.error('Shopping List Card: fetch failed', e);
-      this._renderError('Error fetching items.');
+      // Keep last items if we have them; only error when there's nothing to show.
+      // Retry either way so the card heals once HA is back.
+      if (this._items === null) this._renderError('Error fetching items.');
+      this._scheduleRetry();
     }
+  }
+
+  /** Rebuild the subscription and refetch, clearing a stuck error state. */
+  _recover() {
+    this._clearRetry();
+    this._teardownSubscription();
+    this._ensureSubscription();
+    this._fallbackFetch();
+  }
+
+  /** Retry sub + fetch with capped exponential backoff; no-op if one's pending. */
+  _scheduleRetry() {
+    if (this._retryTimer) return;
+    this._retryDelay = this._retryDelay ? Math.min(this._retryDelay * 2, 30000) : 2000;
+    this._retryTimer = setTimeout(() => {
+      this._retryTimer = null;
+      if (!this._hass || !this._config?.todo_list) return;
+      this._teardownSubscription();
+      this._ensureSubscription();
+      this._fallbackFetch();
+    }, this._retryDelay);
+  }
+
+  _clearRetry() {
+    if (this._retryTimer) { clearTimeout(this._retryTimer); this._retryTimer = null; }
+    this._retryDelay = 0;
   }
 
   _teardownSubscription() {
