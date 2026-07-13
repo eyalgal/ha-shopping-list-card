@@ -1002,7 +1002,7 @@ class ShoppingListCard extends HTMLElement {
     // changed for this card. Config changes invalidate _lastRenderKey via setConfig().
     // This avoids rebuilding innerHTML on every WebSocket push that doesn't affect us
     // (e.g. a sibling item being added on a 50-card dashboard).
-    const renderKey = `${isOn}|${qty}|${matchedUid || ''}|${matched || ''}`;
+    const renderKey = `${isOn}|${qty}|${present ? 1 : 0}|${matchedUid || ''}|${matched || ''}`;
     if (this._lastRenderKey === renderKey) return;
     this._lastRenderKey = renderKey;
 
@@ -1152,8 +1152,8 @@ class ShoppingListCard extends HTMLElement {
 
     // Memoize on header + per-row states. Expansion is a pure CSS toggle applied
     // outside render, so it is intentionally excluded from the key.
-    const renderKey = 'types|' + (bare.isOn ? 1 : 0) + ':' + bare.qty + '|' + activeCount + '|' +
-      states.map(s => `${s.label}:${s.isOn ? 1 : 0}:${s.qty}`).join('|');
+    const renderKey = 'types|' + (bare.isOn ? 1 : 0) + ':' + bare.qty + ':' + (bare.present ? 1 : 0) + '|' + activeCount + '|' +
+      states.map(s => `${s.label}:${s.isOn ? 1 : 0}:${s.qty}:${s.present ? 1 : 0}`).join('|');
     if (this._lastRenderKey === renderKey) { this._applyExpanded(); return; }
     this._lastRenderKey = renderKey;
 
