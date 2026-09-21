@@ -23,6 +23,7 @@ A simple and intuitive Lovelace card for Home Assistant to quickly add and manag
 
 - **Tap to add / tap to remove** with case-insensitive matching against an existing to-do list.
 - **Real-time updates** via a shared WebSocket subscription per entity (one subscription covers every card pointing at the same list, so a grid of 50 cards does not fan out into 50 sockets).
+- **Reliable recovery** with shared reconnect retries, visible connection and action errors, and pending-write protection across tiles for the same item. Refreshing an error only reloads the list; it never repeats a write.
 - **Quantity controls** - enable `+` / `-` buttons with optional `quantity_step` and `quantity_max`.
 - **Item types (variants)** - give one item several `types` (e.g. _Apple_ -> Pink Lady, Granny Smith, Gala). The card collapses to a single tile; tap to expand and add any type (with its own quantity) as `Title - Type`.
 - **Hold action** - configurable long-press: remove item (default), open more-info, or do nothing. Optional haptic feedback.
@@ -34,6 +35,8 @@ A simple and intuitive Lovelace card for Home Assistant to quickly add and manag
 - **Polished visual editor** - collapsible sections for Content / Layout & Display / Icons & Colors / Behavior, native icon picker, color swatches, image upload.
 - **Accessible** - proper `role`, `aria-pressed`, `aria-label`, keyboard-activatable quantity buttons, error states surfaced via `ha-alert`.
 - **XSS-safe** - all user content is escaped before insertion.
+
+When the list is loading, disconnected, or not yet confirmed after an update, item changes are temporarily blocked. The card does not queue offline changes or automatically retry failed adds, removals, or quantity updates.
 
 ## ✅ Prerequisites
 
@@ -183,6 +186,8 @@ Tapping the **header body** (anywhere but the chevron) adds or removes the heade
 - Hold the **header** to remove every item that belongs to this card (the bare title and all of its variants).
 - Hold a **variant row** to remove that specific variant entirely, regardless of its quantity.
 
+With `hold_action: { action: more-info }`, holding either the header or a variant opens the list's more-info dialog without removing anything.
+
 Use `types_sort` to order the rows alphabetically (`asc` for A-Z, `desc` for Z-A) instead of the order they are listed.
 
 ```yaml
@@ -214,6 +219,22 @@ types:
 Both layouts are supported - add `layout: vertical` for a grid-friendly tile (icon on top, name centered, chevron in the bottom-right). The card keeps its compact shape when collapsed and expands the variant list below.
 
 > Because the card grows when expanded, it works best in masonry or grid dashboards where the row height can flex. In the **sections** layout a fixed row height may clip the expanded list.
+
+---
+
+## Development
+
+Use Node.js 22.13 or newer. Run `npm ci`, then `npm run check` to lint, build, and run the regression tests. The root `shopping-list-card.js` is the generated HACS artifact and must be rebuilt and committed with source changes.
+
+Source ownership:
+
+- `src/shopping-list-card.js`: card rendering and interactions.
+- `src/todo-store.js`: shared subscriptions, recovery, stale-response protection, and pending writes.
+- `src/item-model.js`: naming, quantity actions, and lossless variant updates.
+- `src/editor.js`: the visual configuration editor.
+- `src/card-defaults.js` and `src/card-styles.js`: shared defaults and card styling.
+
+Tests use mocked Home Assistant services and a DOM implementation; they never connect to a real shopping list. CI tests Node.js 22 and 24 and checks that the committed bundle matches the source.
 
 ---
 

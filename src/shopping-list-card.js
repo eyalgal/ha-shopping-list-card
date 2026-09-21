@@ -6,13 +6,19 @@
  *
  * Author: eyalgal
  * License: MIT
- * Version: 2.1.1
+ * Version: 2.2.0
  *
  * Note: This card requires a to-do entity to function properly.
  * For more information, visit: https://github.com/eyalgal/ha-shopping-list-card
  */
 
-const CARD_VERSION = '2.1.1';
+import { buildName, keepZero, matchItem, planItemAction } from './item-model.js';
+import { getTodoStore } from './todo-store.js';
+import { CARD_DEFAULTS } from './card-defaults.js';
+import { CARD_STYLES } from './card-styles.js';
+import './editor.js';
+
+const CARD_VERSION = '2.2.0';
 
 function escapeHtml(str) {
   if (str == null) return '';
@@ -24,683 +30,63 @@ function escapeHtml(str) {
     .replace(/'/g, '&#39;');
 }
 
-// ── Shared subscription manager ──────────────────────────────────────────────
-// Multiple cards on the same dashboard often point at the same todo entity.
-// Opening one WebSocket subscription per card causes a load-time storm (dozens
-// of `todo/item/subscribe` messages at once) which can crash the frontend.
-// This manager opens a single subscription per (connection, entity) pair and
-// multicasts updates to every subscribed card, with reference counting so the
-// subscription is closed when the last card detaches.
-const _slcSubs = new WeakMap(); // connection -> Map<entityId, SubRecord>
-
-function _slcSubscribe(hass, entityId, listener) {
-  const conn = hass.connection;
-  let perConn = _slcSubs.get(conn);
-  if (!perConn) { perConn = new Map(); _slcSubs.set(conn, perConn); }
-
-  let rec = perConn.get(entityId);
-  if (!rec) {
-    rec = {
-      listeners: new Set(),
-      lastItems: null,
-      unsub: null,
-      unsubPromise: null,
-    };
-    perConn.set(entityId, rec);
-    rec.unsubPromise = conn.subscribeMessage(
-      (msg) => {
-        rec.lastItems = msg?.items || [];
-        for (const l of rec.listeners) {
-          try { l(rec.lastItems); } catch (e) { console.error('Shopping List Card listener error', e); }
-        }
-      },
-      { type: 'todo/item/subscribe', entity_id: entityId }
-    );
-    rec.unsubPromise
-      .then(unsub => { rec.unsub = unsub; })
-      .catch(err => {
-        console.error('Shopping List Card: subscription failed', err);
-        perConn.delete(entityId);
-        for (const l of rec.listeners) { try { l(null, err); } catch (_) {} }
-      });
-  }
-
-  rec.listeners.add(listener);
-  if (rec.lastItems) {
-    // Immediately deliver the cached snapshot to the new subscriber.
-    queueMicrotask(() => { if (rec.listeners.has(listener)) listener(rec.lastItems); });
-  }
-
-  return () => {
-    rec.listeners.delete(listener);
-    if (rec.listeners.size === 0) {
-      perConn.delete(entityId);
-      if (rec.unsub) { try { rec.unsub(); } catch (_) {} }
-      else if (rec.unsubPromise) {
-        rec.unsubPromise.then(u => { try { u(); } catch (_) {} }).catch(() => {});
-      }
-    }
-  };
-}
-
-// ── Editor ───────────────────────────────────────────────────────────────────
-
-class ShoppingListCardEditor extends HTMLElement {
-  constructor() {
-    super();
-    this.attachShadow({ mode: 'open' });
-    this._rendered = false;
-    this._hasInitialized = false;
-  }
-
-  set hass(hass) {
-    this._hass = hass;
-    if (!this._rendered) { this._render(); return; }
-    this.shadowRoot.querySelectorAll(
-      'ha-entity-picker, ha-icon-picker, ha-picture-upload'
-    ).forEach(el => { el.hass = hass; });
-  }
-
-  setConfig(config) {
-    this._config = { ...config };
-    if (this._rendered) this._updateFormValues();
-  }
-
-  _render() {
-    if (!this.shadowRoot || !this._hass) return;
-
-    const todoEntities = Object.keys(this._hass.states).filter(id => id.startsWith('todo.'));
-    const hasTodoEntities = todoEntities.length > 0;
-
-    // HA 2026.x removed `ha-textfield` (replaced by web-awesome based
-    // `ha-input`). Prefer the legacy element when it is still registered for
-    // backward compatibility, otherwise fall back to `ha-input`. Both expose a
-    // `.value` property and emit native input/change events, and both ignore
-    // each other's helper attribute (`helper` vs `hint`), so we set both.
-    const TF = (!customElements.get('ha-textfield') && customElements.get('ha-input'))
-      ? 'ha-input' : 'ha-textfield';
-
-    this.shadowRoot.innerHTML = `
-      <style>
-        :host { display: block; }
-        .card-config { display: flex; flex-direction: column; gap: 12px; }
-        ha-expansion-panel {
-          --expansion-panel-summary-padding: 0 16px;
-          --expansion-panel-content-padding: 0;
-          border: 1px solid var(--divider-color);
-          border-radius: 8px;
-          background: var(--card-background-color);
-          overflow: hidden;
-        }
-        .panel-body {
-          padding: 0 16px 16px 16px;
-          display: flex;
-          flex-direction: column;
-          gap: 16px;
-        }
-        .row { display: flex; gap: 12px; }
-        .row > * { flex: 1; min-width: 0; }
-        ha-textfield,
-        ha-input,
-        ha-entity-picker,
-        ha-icon-picker,
-        ha-select,
-        ha-picture-upload { width: 100%; display: block; }
-        .toggle-row {
-          display: flex; align-items: center; gap: 16px;
-          padding: 4px 0;
-          cursor: pointer;
-          user-select: none;
-        }
-        .toggle-row ha-switch { flex-shrink: 0; }
-        .toggle-text { display: flex; flex-direction: column; flex: 1; min-width: 0; }
-        .toggle-title {
-          font-size: 14px; font-weight: 500;
-          color: var(--primary-text-color);
-        }
-        .toggle-desc {
-          font-size: 12px; line-height: 1.4;
-          color: var(--secondary-text-color); margin-top: 2px;
-        }
-        .color-group { display: flex; flex-direction: column; gap: 8px; }
-        .color-group-label {
-          font-size: 13px; font-weight: 500;
-          color: var(--secondary-text-color);
-          text-transform: uppercase; letter-spacing: 0.04em;
-          margin-bottom: -4px;
-        }
-        .color-row {
-          display: grid;
-          grid-template-columns: 1fr auto;
-          gap: 8px; align-items: center;
-        }
-        .swatch {
-          width: 40px; height: 40px; padding: 0;
-          border: 1px solid var(--divider-color);
-          border-radius: 6px; cursor: pointer; background: none;
-          flex-shrink: 0;
-        }
-        .hint {
-          font-size: 12px; line-height: 1.4;
-          color: var(--secondary-text-color);
-        }
-        .hint code {
-          background: rgba(var(--rgb-primary-text-color, 0, 0, 0), 0.08);
-          padding: 1px 4px; border-radius: 3px;
-          font-size: 11px;
-        }
-        .info-box {
-          background: var(--warning-color);
-          color: var(--primary-background-color);
-          padding: 10px 14px; border-radius: 8px;
-          font-size: 13px; line-height: 1.5;
-        }
-        .info-box a { color: inherit; text-decoration: underline; }
-        .image-fallback {
-          display: flex; flex-direction: column; gap: 6px;
-        }
-        .types-field { display: flex; flex-direction: column; gap: 6px; }
-        .types-label {
-          font-size: 13px; font-weight: 500;
-          color: var(--secondary-text-color);
-        }
-        .types-field textarea {
-          width: 100%; box-sizing: border-box; resize: vertical; min-height: 64px;
-          font-family: inherit; font-size: 14px; line-height: 1.5;
-          color: var(--primary-text-color);
-          background: var(--mdc-text-field-fill-color, rgba(127,127,127,0.08));
-          border: none;
-          border-bottom: 1px solid var(--mdc-text-field-idle-line-color, rgba(127,127,127,0.42));
-          border-radius: 4px 4px 0 0; padding: 8px 12px;
-        }
-        .types-field textarea:focus {
-          outline: none;
-          border-bottom: 2px solid var(--primary-color);
-        }
-      </style>
-
-      <div class="card-config">
-        ${!hasTodoEntities ? `
-          <div class="info-box">
-            <strong>No to-do lists found.</strong>
-            You need a to-do entity before this card will work.
-            <a href="https://www.home-assistant.io/integrations/todo/" target="_blank" rel="noopener">Learn more</a>
-          </div>
-        ` : ''}
-
-        <ha-expansion-panel outlined expanded header="Content" data-panel="content">
-          <div class="panel-body">
-            <ha-entity-picker id="todo_list" label="To-do list entity" required></ha-entity-picker>
-            <div class="row">
-              <${TF} id="title" label="Title" required></${TF}>
-              <${TF} id="subtitle" label="Subtitle"></${TF}>
-            </div>
-            <div class="types-field">
-              <span class="types-label">Types (optional)</span>
-              <textarea id="types" rows="3" placeholder="Pink Lady&#10;Granny Smith&#10;Gala"></textarea>
-              <div class="hint">One per line. When set, the card becomes expandable: tap it to reveal the types and add each as <code>Title - Type</code>. The single subtitle is ignored in this mode.</div>
-            </div>
-            <ha-select id="types_sort" label="Sort types" naturalMenuWidth fixedMenuPosition>
-              <mwc-list-item value="none">As listed</mwc-list-item>
-              <mwc-list-item value="asc">Alphabetical (A-Z)</mwc-list-item>
-              <mwc-list-item value="desc">Alphabetical (Z-A)</mwc-list-item>
-            </ha-select>
-            <ha-picture-upload id="image_upload"></ha-picture-upload>
-            <div class="image-fallback">
-              <${TF} id="image" label="Image URL (optional)" placeholder="/local/... or https://..."></${TF}>
-              <${TF} id="image_base" label="Image base path (optional)" placeholder="/local/images/shopping-list/"></${TF}>
-              <div class="hint">Upload an image above or paste a URL. Or set a base path and the card will try <code>title.png</code> in several variants (dash, underscore, space, joined) from the title.</div>
-            </div>
-            <${TF} id="list_prefix" label="List prefix (optional)" placeholder="e.g. Dairy" helper="Stored in the list as 'Prefix - Title' for category sorting; display is unchanged." hint="Stored in the list as 'Prefix - Title' for category sorting; display is unchanged."></${TF}>
-          </div>
-        </ha-expansion-panel>
-
-        <ha-expansion-panel outlined header="Layout &amp; Display" data-panel="layout">
-          <div class="panel-body">
-            <ha-select id="layout" label="Layout" naturalMenuWidth fixedMenuPosition>
-              <mwc-list-item value="horizontal">Horizontal</mwc-list-item>
-              <mwc-list-item value="vertical">Vertical</mwc-list-item>
-            </ha-select>
-            <label class="toggle-row">
-              <ha-switch id="show_name"></ha-switch>
-              <div class="toggle-text">
-                <span class="toggle-title">Show title and subtitle</span>
-                <span class="toggle-desc">Turn off for an icon-only card.</span>
-              </div>
-            </label>
-            <label class="toggle-row">
-              <ha-switch id="colorize_background"></ha-switch>
-              <div class="toggle-text">
-                <span class="toggle-title">Tint background when on</span>
-                <span class="toggle-desc">Subtle wash of the on-color across the card.</span>
-              </div>
-            </label>
-          </div>
-        </ha-expansion-panel>
-
-        <ha-expansion-panel outlined header="Icons &amp; Colors" data-panel="icons">
-          <div class="panel-body">
-            <div class="color-group">
-              <span class="color-group-label">Off state</span>
-              <ha-icon-picker id="off_icon" label="Off icon"></ha-icon-picker>
-              <div class="color-row">
-                <${TF} id="off_color" label="Off color"></${TF}>
-                <input type="color" class="swatch" id="off_color_picker" title="Pick off color" />
-              </div>
-            </div>
-            <div class="color-group">
-              <span class="color-group-label">On state</span>
-              <ha-icon-picker id="on_icon" label="On icon"></ha-icon-picker>
-              <div class="color-row">
-                <${TF} id="on_color" label="On color"></${TF}>
-                <input type="color" class="swatch" id="on_color_picker" title="Pick on color" />
-              </div>
-            </div>
-            <div class="hint">
-              Use an HA color name (<code>red</code>, <code>blue</code>, <code>green</code>...) to follow the theme, or a <code>#hex</code> value.
-            </div>
-          </div>
-        </ha-expansion-panel>
-
-        <ha-expansion-panel outlined header="Behavior" data-panel="behavior">
-          <div class="panel-body">
-            <label class="toggle-row">
-              <ha-switch id="enable_quantity"></ha-switch>
-              <div class="toggle-text">
-                <span class="toggle-title">Enable quantity</span>
-                <span class="toggle-desc">Show + / - buttons to track how many of this item you need.</span>
-              </div>
-            </label>
-            <div class="row">
-              <${TF} id="quantity_step" label="Quantity step" type="number" min="1" max="99" helper="How much +/- adjusts" hint="How much +/- adjusts"></${TF}>
-              <${TF} id="quantity_max" label="Quantity max" type="number" min="1" max="999" helper="Optional cap" hint="Optional cap"></${TF}>
-            </div>
-            <label class="toggle-row">
-              <ha-switch id="keep_at_zero"></ha-switch>
-              <div class="toggle-text">
-                <span class="toggle-title">Keep item at zero</span>
-                <span class="toggle-desc">Keep the item as "Name (0)" instead of deleting it, and always show the quantity in parentheses.</span>
-              </div>
-            </label>
-            <ha-select id="hold_action" label="Hold action" naturalMenuWidth fixedMenuPosition>
-              <mwc-list-item value="default">Remove item (default)</mwc-list-item>
-              <mwc-list-item value="more-info">Open more-info</mwc-list-item>
-              <mwc-list-item value="none">None</mwc-list-item>
-            </ha-select>
-            <label class="toggle-row">
-              <ha-switch id="haptic"></ha-switch>
-              <div class="toggle-text">
-                <span class="toggle-title">Haptic feedback</span>
-                <span class="toggle-desc">Short vibration on tap and hold (mobile only).</span>
-              </div>
-            </label>
-          </div>
-        </ha-expansion-panel>
-      </div>
-    `;
-
-    // Wire hass-consuming components
-    const ep = this.shadowRoot.querySelector('#todo_list');
-    ep.hass = this._hass;
-    ep.includeDomains = ['todo'];
-    ep.allowCustomEntity = false;
-    this.shadowRoot.querySelectorAll('ha-icon-picker').forEach(el => { el.hass = this._hass; });
-
-    // Trigger lazy-loading of ha-picture-upload if HA hasn't loaded it yet.
-    this._ensurePictureUploadLoaded();
-    const pu = this.shadowRoot.querySelector('#image_upload');
-    if (pu) {
-      pu.hass = this._hass;
-      pu.original = false;
-      pu.crop = undefined;
-      pu.addEventListener('change', () => {
-        const tf = this.shadowRoot.querySelector('#image');
-        tf.value = pu.value || '';
-        this._handleConfigChanged();
-      });
-    }
-
-    // Field change listeners (non-select)
-    this.shadowRoot.querySelectorAll(
-      'ha-textfield, ha-input, ha-switch, ha-entity-picker, ha-icon-picker'
-    ).forEach(el => {
-      const handler = () => this._handleConfigChanged();
-      el.addEventListener('input', handler);
-      el.addEventListener('change', handler);
-      el.addEventListener('value-changed', handler);
-    });
-
-    // Native <textarea> for the Types list (one type per line).
-    const typesEl = this.shadowRoot.querySelector('#types');
-    if (typesEl) {
-      const handler = () => this._handleConfigChanged();
-      typesEl.addEventListener('input', handler);
-      typesEl.addEventListener('change', handler);
-    }
-
-    // ha-select needs special handling. In HA 2026.x, ha-select was rewritten
-    // to use ha-dropdown internally and IGNORES slotted <mwc-list-item>
-    // children - it only renders from the `.options` property. Older HA uses
-    // slotted children and fires `selected` with ev.detail.index (not value).
-    // We set `.options` for the new component and keep the children for the
-    // old one, then normalize the event shape.
-    const SELECT_OPTIONS = {
-      layout: [
-        { value: 'horizontal', label: 'Horizontal' },
-        { value: 'vertical', label: 'Vertical' },
-      ],
-      hold_action: [
-        { value: 'default', label: 'Remove item (default)' },
-        { value: 'more-info', label: 'Open more-info' },
-        { value: 'none', label: 'None' },
-      ],
-      types_sort: [
-        { value: 'none', label: 'As listed' },
-        { value: 'asc', label: 'Alphabetical (A-Z)' },
-        { value: 'desc', label: 'Alphabetical (Z-A)' },
-      ],
-    };
-    this.shadowRoot.querySelectorAll('ha-select').forEach(el => {
-      const opts = SELECT_OPTIONS[el.id];
-      if (opts) {
-        try { el.options = opts; } catch (_) {}
-      }
-      const capture = (ev) => {
-        ev.stopPropagation();
-        let v = ev?.detail?.value;
-        // Older mwc-select fires `selected` with ev.detail.index. Map it.
-        if ((v == null || v === '') && ev?.detail && typeof ev.detail.index === 'number' && opts) {
-          v = opts[ev.detail.index]?.value;
-        }
-        // Final fallback: whatever the element itself reports.
-        if (v == null || v === '') v = el.value;
-        if (typeof v === 'string' && v !== '') {
-          el._slcValue = v;
-          try { if (el.value !== v) el.value = v; } catch (_) {}
-        }
-        this._handleConfigChanged();
-      };
-      el.addEventListener('selected', capture);
-      el.addEventListener('change', capture);
-      el.addEventListener('closed', (e) => e.stopPropagation());
-    });
-
-    // Color swatch <-> textfield sync
-    ['off', 'on'].forEach(type => {
-      const tf = this.shadowRoot.querySelector(`#${type}_color`);
-      const cp = this.shadowRoot.querySelector(`#${type}_color_picker`);
-      cp.addEventListener('input', () => {
-        tf.value = cp.value;
-        this._handleConfigChanged();
-      });
-      tf.addEventListener('input', () => {
-        const hex = this._getEditorHex(tf.value);
-        if (hex) cp.value = hex;
-        this._handleConfigChanged();
-      });
-    });
-
-    this._rendered = true;
-    if (this._config) this._updateFormValues();
-  }
-
-  /**
-   * Force-load ha-picture-upload by creating a hidden ha-form whose schema
-   * uses the image-upload media selector. HA lazy-loads ha-picture-upload
-   * the first time that selector is rendered, after which the browser will
-   * upgrade our existing <ha-picture-upload> placeholder.
-   */
-  _ensurePictureUploadLoaded() {
-    if (customElements.get('ha-picture-upload')) return;
-    try {
-      const loader = document.createElement('ha-form');
-      loader.style.display = 'none';
-      loader.schema = [{
-        name: 'image',
-        selector: { media: { accept: ['image/*'], image_upload: true, clearable: true, hide_content_type: true } },
-      }];
-      loader.data = {};
-      loader.hass = this._hass;
-      this.shadowRoot.appendChild(loader);
-      customElements.whenDefined('ha-picture-upload').then(() => {
-        const pu = this.shadowRoot.querySelector('#image_upload');
-        if (pu) {
-          pu.hass = this._hass;
-          if (this._config?.image) pu.value = this._config.image;
-        }
-      }).catch(() => {});
-      setTimeout(() => loader.remove(), 0);
-    } catch (_) { /* ignore */ }
-  }
-
-  /** Robust ha-select value reader. Prefers the value captured from the
-   *  `selected`/`change` event (stashed on the element as _slcValue) because
-   *  mwc-select in newer HA sometimes fires `selected` before updating its
-   *  own .value. Falls back to .value, then to the selected item's value. */
-  _selectVal(id) {
-    const el = this.shadowRoot.querySelector('#' + id);
-    if (!el) return '';
-    if (typeof el._slcValue === 'string' && el._slcValue !== '') return el._slcValue;
-    if (typeof el.value === 'string' && el.value !== '') return el.value;
-    const sel = el.selected;
-    if (sel && typeof sel.value === 'string' && sel.value !== '') return sel.value;
-    return '';
-  }
-
-  _getEditorHex(val) {
-    if (!val) return '#000000';
-    if (val.startsWith('#')) return val;
-    const hex = ShoppingListCard.COLOR_MAP[val.toLowerCase()];
-    return hex || '#000000';
-  }
-
-  _updateFormValues() {
-    const s = this.shadowRoot;
-    const c = this._config;
-
-    let todoEntity = c.todo_list;
-    let shouldAutoPopulate = false;
-    if (!todoEntity && this._hass && !this._hasInitialized) {
-      const todoEntities = Object.keys(this._hass.states).filter(id => id.startsWith('todo.'));
-      if (todoEntities.length > 0) { todoEntity = todoEntities[0]; shouldAutoPopulate = true; }
-      this._hasInitialized = true;
-    }
-
-    s.querySelector('#title').value = c.title || '';
-    s.querySelector('#subtitle').value = c.subtitle || '';
-    const typesEl = s.querySelector('#types');
-    if (typesEl) {
-      let arr = [];
-      if (Array.isArray(c.types)) {
-        arr = c.types.map(t => (typeof t === 'string' ? t : (t && t.name) || '')).filter(Boolean);
-      } else if (typeof c.types === 'string') {
-        arr = c.types.split(/[,\n]/).map(x => x.trim()).filter(Boolean);
-      }
-      typesEl.value = arr.join('\n');
-    }
-    const sortEl = s.querySelector('#types_sort');
-    if (sortEl) {
-      const sortVal = (c.types_sort === 'asc' || c.types_sort === 'desc') ? c.types_sort : 'none';
-      sortEl.value = sortVal;
-      sortEl._slcValue = sortVal;
-    }
-    s.querySelector('#image').value = c.image || '';
-    s.querySelector('#image_base').value = c.image_base || '';
-    s.querySelector('#list_prefix').value = c.list_prefix || '';
-    const pu = s.querySelector('#image_upload');
-    if (pu) pu.value = c.image || '';
-    s.querySelector('#todo_list').value = c.todo_list || '';
-    s.querySelector('#enable_quantity').checked = !!c.enable_quantity;
-    s.querySelector('#keep_at_zero').checked = c.remove_zero === false;
-    s.querySelector('#colorize_background').checked = c.colorize_background !== false;
-    s.querySelector('#show_name').checked = c.show_name !== false;
-    const layoutVal = c.layout === 'vertical' ? 'vertical' : 'horizontal';
-    const layoutEl = s.querySelector('#layout');
-    layoutEl.value = layoutVal;
-    layoutEl._slcValue = layoutVal;
-    s.querySelector('#haptic').checked = !!c.haptic;
-    const holdVal = (c.hold_action?.action) || 'default';
-    const holdEl = s.querySelector('#hold_action');
-    holdEl.value = holdVal;
-    holdEl._slcValue = holdVal;
-    s.querySelector('#quantity_step').value = c.quantity_step != null ? c.quantity_step : '';
-    s.querySelector('#quantity_max').value = c.quantity_max != null ? c.quantity_max : '';
-
-    if (shouldAutoPopulate && todoEntity) {
-      s.querySelector('#todo_list').value = todoEntity;
-      setTimeout(() => this._handleConfigChanged(), 100);
-    }
-
-    ['off','on'].forEach(type => {
-      s.querySelector(`#${type}_icon`).value = c[`${type}_icon`] || ShoppingListCard[`DEFAULT_${type.toUpperCase()}_ICON`];
-      const col = c[`${type}_color`] || ShoppingListCard[`DEFAULT_${type.toUpperCase()}_COLOR`];
-      s.querySelector(`#${type}_color`).value = col;
-      s.querySelector(`#${type}_color_picker`).value = this._getEditorHex(col);
-    });
-  }
-
-  _handleConfigChanged() {
-    const s = this.shadowRoot;
-    const n = { ...this._config };
-
-    n.title = s.querySelector('#title').value;
-    const sub = s.querySelector('#subtitle').value;
-    if (sub) n.subtitle = sub; else delete n.subtitle;
-    const typesEl = s.querySelector('#types');
-    if (typesEl) {
-      const list = typesEl.value.split('\n').map(x => x.trim()).filter(Boolean);
-      if (list.length) n.types = list; else delete n.types;
-    }
-    const sortVal = this._selectVal('types_sort');
-    if (sortVal === 'asc' || sortVal === 'desc') n.types_sort = sortVal; else delete n.types_sort;
-    const img = s.querySelector('#image').value;
-    if (img) n.image = img; else delete n.image;
-    const imgBase = s.querySelector('#image_base').value.trim();
-    if (imgBase) n.image_base = imgBase; else delete n.image_base;
-    const prefix = s.querySelector('#list_prefix').value.trim();
-    if (prefix) n.list_prefix = prefix; else delete n.list_prefix;
-    n.todo_list = s.querySelector('#todo_list').value;
-
-    const enableQty = s.querySelector('#enable_quantity').checked;
-    if (enableQty) n.enable_quantity = true; else delete n.enable_quantity;
-
-    // `remove_zero` defaults to true (delete at zero); only persist the opt-out.
-    const keepAtZero = s.querySelector('#keep_at_zero').checked;
-    if (keepAtZero) n.remove_zero = false; else delete n.remove_zero;
-
-    const colorBg = s.querySelector('#colorize_background').checked;
-    if (colorBg) delete n.colorize_background; else n.colorize_background = false;
-
-    const showName = s.querySelector('#show_name').checked;
-    if (showName) delete n.show_name; else n.show_name = false;
-
-    const haptic = s.querySelector('#haptic').checked;
-    if (haptic) n.haptic = true; else delete n.haptic;
-
-    const layoutVal = this._selectVal('layout');
-    if (layoutVal === 'vertical') n.layout = 'vertical'; else delete n.layout;
-
-    const holdVal = this._selectVal('hold_action') || 'default';
-    if (holdVal === 'default') delete n.hold_action;
-    else n.hold_action = { action: holdVal };
-
-    const stepRaw = s.querySelector('#quantity_step').value;
-    const stepNum = parseInt(stepRaw, 10);
-    if (stepRaw && !isNaN(stepNum) && stepNum > 1) n.quantity_step = stepNum;
-    else delete n.quantity_step;
-
-    const maxRaw = s.querySelector('#quantity_max').value;
-    const maxNum = parseInt(maxRaw, 10);
-    if (maxRaw && !isNaN(maxNum) && maxNum > 0) n.quantity_max = maxNum;
-    else delete n.quantity_max;
-
-    ['off','on'].forEach(type => {
-      const icon = s.querySelector(`#${type}_icon`).value;
-      if (icon === ShoppingListCard[`DEFAULT_${type.toUpperCase()}_ICON`]) delete n[`${type}_icon`];
-      else n[`${type}_icon`] = icon;
-
-      const col = s.querySelector(`#${type}_color`).value;
-      if (col === ShoppingListCard[`DEFAULT_${type.toUpperCase()}_COLOR`]) delete n[`${type}_color`];
-      else n[`${type}_color`] = col;
-    });
-
-    this._config = n;
-    this.dispatchEvent(new CustomEvent('config-changed', { detail: { config: n }, bubbles: true, composed: true }));
-  }
-}
-if (!customElements.get('shopping-list-card-editor')) {
-  customElements.define('shopping-list-card-editor', ShoppingListCardEditor);
-}
-
 // ── Card ─────────────────────────────────────────────────────────────────────
 
 class ShoppingListCard extends HTMLElement {
-  static DEFAULT_ON_ICON    = 'mdi:check';
-  static DEFAULT_OFF_ICON   = 'mdi:plus';
-  static DEFAULT_ON_COLOR   = 'green';
-  static DEFAULT_OFF_COLOR  = 'grey';
-  static COLOR_MAP = {
-    red: '#F44336', pink: '#E91E63', purple: '#9C27B0',
-    'deep-purple': '#673AB7', indigo: '#3F51B5',
-    blue: '#2196F3', 'light-blue': '#03A9F4',
-    cyan: '#00BCD4', teal: '#009688', green: '#4CAF50',
-    lime: '#CDDC39', yellow: '#FFEB3B', amber: '#FFC107',
-    orange: '#FF9800', brown: '#795548', grey: '#9E9E9E',
-    'blue-grey': '#607D8B',
-  };
+  static DEFAULT_ON_ICON    = CARD_DEFAULTS.DEFAULT_ON_ICON;
+  static DEFAULT_OFF_ICON   = CARD_DEFAULTS.DEFAULT_OFF_ICON;
+  static DEFAULT_ON_COLOR   = CARD_DEFAULTS.DEFAULT_ON_COLOR;
+  static DEFAULT_OFF_COLOR  = CARD_DEFAULTS.DEFAULT_OFF_COLOR;
+  static COLOR_MAP = CARD_DEFAULTS.COLOR_MAP;
 
   constructor() {
     super();
     this._isUpdating = false;
     this._items = null;
     this._unsubscribe = null;
-    this._subscribedEntity = null;
+    this._store = null;
+    this._syncState = null;
+    this._actionError = null;
+    this._configVersion = 0;
     this._lastRenderKey = null;
     this._expanded = false;
-    // Backoff retry so a failed sub/fetch (HA restart, integration reload) heals
-    // itself instead of getting stuck on the error screen.
-    this._retryTimer = null;
-    this._retryDelay = 0;
+    this._holdCleanups = new Set();
+    this._suppressClick = false;
+    this._clickResetTimer = null;
+    this.addEventListener('click', event => {
+      if (!this._suppressClick) return;
+      this._suppressClick = false;
+      clearTimeout(this._clickResetTimer);
+      this._clickResetTimer = null;
+      event.preventDefault();
+      event.stopImmediatePropagation();
+    }, true);
   }
 
   set hass(hass) {
-    const firstHass = !this._hass;
-    const prevState = this._hass?.states?.[this._config?.todo_list];
-    const prevConnected = this._hass?.connected;
     this._hass = hass;
-    if (!this._config) return;
-    if (firstHass) this._ensureSubscription();
-
-    // On websocket reconnect (HA restart) the old subscription is dead; rebuild
-    // it and refetch. Clears a stuck error card without a force-close.
-    if (prevConnected === false && hass.connected) { this._recover(); return; }
-
-    // Only re-render if the entity's availability changed (exists / unavailable).
-    // Item changes are pushed via subscription; avoid re-rendering on unrelated state updates.
-    const newState = hass.states?.[this._config.todo_list];
-    const prevAvail = !!prevState && prevState.state !== 'unavailable';
-    const newAvail = !!newState && newState.state !== 'unavailable';
-    if (prevAvail !== newAvail) {
-      // Entity came back: rebuild sub + refetch. Went away: just re-render.
-      if (newAvail && !prevAvail) this._recover();
-      else if (this._items !== null) this._render();
-    }
+    if (this._config && this.isConnected) this._ensureSubscription();
   }
 
   setConfig(config) {
-    if (!config.title)      throw new Error('You must define a title.');
-    if (!config.todo_list) throw new Error('You must define a todo_list entity_id.');
+    if (typeof config.title !== 'string' || !config.title.trim()) throw new Error('You must define a title.');
+    if (typeof config.todo_list !== 'string' || !config.todo_list.startsWith('todo.')) {
+      throw new Error('You must define a todo_list entity_id.');
+    }
     const prev = this._config;
-    this._config = config;
-    // Any config change can affect what we render; invalidate the memo.
+    this._clearHolds();
+    this._config = { ...config };
+    this._configVersion++;
+    this._actionError = null;
+    this._isUpdating = false;
     this._lastRenderKey = null;
     if (prev && prev.todo_list !== config.todo_list) {
       this._items = null;
       this._teardownSubscription();
     }
-    if (this._hass) {
+    if (this._hass && this.isConnected) {
       this._ensureSubscription();
-      if (this._items !== null) this._render();
+      this._render();
     }
   }
 
@@ -709,87 +95,40 @@ class ShoppingListCard extends HTMLElement {
   }
 
   disconnectedCallback() {
+    this._clearHolds();
+    clearTimeout(this._clickResetTimer);
+    this._clickResetTimer = null;
+    this._suppressClick = false;
     this._teardownSubscription();
-    if (this._retryTimer) { clearTimeout(this._retryTimer); this._retryTimer = null; }
+    this._configVersion++;
+    this._isUpdating = false;
   }
 
   _ensureSubscription() {
     if (!this._hass || !this._config?.todo_list) return;
-    if (this._subscribedEntity === this._config.todo_list && this._unsubscribe) return;
-    this._teardownSubscription();
-    const entityId = this._config.todo_list;
-    this._subscribedEntity = entityId;
-
-    try {
-      this._unsubscribe = _slcSubscribe(this._hass, entityId, (items, err) => {
-        if (err) {
-          // Sub died; drop the stale handle so a retry can re-subscribe.
-          this._teardownSubscription();
-          this._fallbackFetch();
-          return;
-        }
-        // Fresh push: data flowing again, clear any pending retry.
-        this._clearRetry();
-        this._items = (items || []).filter(i => i.status === 'needs_action');
-        this._render();
-      });
-    } catch (e) {
-      console.error('Shopping List Card: subscription failed, falling back to polling', e);
-      this._fallbackFetch();
+    if (this._store?.entityId === this._config.todo_list
+      && this._store.connection === this._hass.connection && this._unsubscribe) {
+      this._store.updateHass(this._hass);
+      return;
     }
-  }
-
-  async _fallbackFetch() {
-    if (!this._hass || !this._config?.todo_list) return;
-    try {
-      const res = await this._hass.callWS({
-        type: 'todo/item/list',
-        entity_id: this._config.todo_list,
-      });
-      this._clearRetry();
-      this._items = (res.items || []).filter(i => i.status === 'needs_action');
+    this._teardownSubscription();
+    this._items = null;
+    const store = getTodoStore(this._hass, this._config.todo_list);
+    this._store = store;
+    this._unsubscribe = store.subscribe(snapshot => {
+      if (this._store !== store) return;
+      this._syncState = snapshot;
+      this._items = snapshot.items;
       this._render();
-    } catch (e) {
-      console.error('Shopping List Card: fetch failed', e);
-      // Keep last items if we have them; only error when there's nothing to show.
-      // Retry either way so the card heals once HA is back.
-      if (this._items === null) this._renderError('Error fetching items.');
-      this._scheduleRetry();
-    }
-  }
-
-  /** Rebuild the subscription and refetch, clearing a stuck error state. */
-  _recover() {
-    this._clearRetry();
-    this._teardownSubscription();
-    this._ensureSubscription();
-    this._fallbackFetch();
-  }
-
-  /** Retry sub + fetch with capped exponential backoff; no-op if one's pending. */
-  _scheduleRetry() {
-    if (this._retryTimer) return;
-    this._retryDelay = this._retryDelay ? Math.min(this._retryDelay * 2, 30000) : 2000;
-    this._retryTimer = setTimeout(() => {
-      this._retryTimer = null;
-      if (!this._hass || !this._config?.todo_list) return;
-      this._teardownSubscription();
-      this._ensureSubscription();
-      this._fallbackFetch();
-    }, this._retryDelay);
-  }
-
-  _clearRetry() {
-    if (this._retryTimer) { clearTimeout(this._retryTimer); this._retryTimer = null; }
-    this._retryDelay = 0;
+    });
   }
 
   _teardownSubscription() {
-    if (this._unsubscribe) {
-      try { this._unsubscribe(); } catch (_) {}
-      this._unsubscribe = null;
-    }
-    this._subscribedEntity = null;
+    const unsubscribe = this._unsubscribe;
+    this._unsubscribe = null;
+    this._store = null;
+    this._syncState = null;
+    unsubscribe?.();
   }
 
   static getConfigElement() { return document.createElement('shopping-list-card-editor'); }
@@ -801,8 +140,6 @@ class ShoppingListCard extends HTMLElement {
     };
   }
 
-  _escapeRegExp(s) { return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); }
-
   /** Build the todo item summary to match / write, honoring list_prefix. */
   _buildFullName() {
     return this._buildNameFor(this._config.subtitle);
@@ -810,9 +147,7 @@ class ShoppingListCard extends HTMLElement {
 
   /** Build a summary for a given subtitle/type, honoring list_prefix. */
   _buildNameFor(subtitle) {
-    const c = this._config;
-    const base = subtitle ? `${c.title} - ${subtitle}` : c.title;
-    return c.list_prefix ? `${c.list_prefix} - ${base}` : base;
+    return buildName(this._config, subtitle);
   }
 
   /** Normalized list of configured types (variants). Each entry is an object
@@ -847,29 +182,13 @@ class ShoppingListCard extends HTMLElement {
   /** When `remove_zero: false`, keep emptied items as `Name (0)` and always
    *  suffix the quantity. Requires quantity mode; defaults off (remove at 0). */
   _keepZero() {
-    return !!this._config.enable_quantity && this._config.remove_zero === false;
-  }
-
-  /** Build the stored summary for a name at a quantity, honoring keep-zero. */
-  _summaryFor(fullName, qty) {
-    if (!this._config.enable_quantity) return fullName;
-    if (this._keepZero()) return `${fullName} (${qty})`;
-    return qty > 1 ? `${fullName} (${qty})` : fullName;
+    return keepZero(this._config);
   }
 
   /** Match a summary against the current items. `present` is whether it exists
    *  at all; `isOn` is whether it's active (a kept `Name (0)` is present but off). */
   _matchSummary(fullName) {
-    const rx = new RegExp(`^${this._escapeRegExp(fullName)}(?: \\((\\d+)\\))?$`, 'i');
-    for (const item of this._items) {
-      const m = item.summary.match(rx);
-      if (m) {
-        const qty = m[1] != null ? +m[1] : 1;
-        const isOn = this._keepZero() ? qty > 0 : true;
-        return { isOn, present: true, qty, matched: item.summary, matchedUid: item.uid };
-      }
-    }
-    return { isOn: false, present: false, qty: 0, matched: null, matchedUid: null };
+    return matchItem(this._items, fullName, this._config);
   }
 
   /** Resolve the on-state and stored name for a single type. */
@@ -963,33 +282,56 @@ class ShoppingListCard extends HTMLElement {
 
   _ensureShell() {
     if (this.content) return;
-    this.innerHTML = `<ha-card><div class="card-content"></div></ha-card>`;
+    this.innerHTML = `<ha-card><div class="list-status" role="status" aria-live="polite"></div><div class="card-content"></div></ha-card>`;
     this.content = this.querySelector('div.card-content');
+    this._statusElement = this.querySelector('.list-status');
     this._attachStyles();
   }
 
-  _renderError(message) {
-    this._ensureShell();
-    this.content.innerHTML = `<ha-alert alert-type="error">${escapeHtml(message)}</ha-alert>`;
-    // Error replaces the card DOM, so the next normal render must rebuild from scratch.
-    this._lastRenderKey = null;
+  _renderStatus() {
+    const status = this._syncState?.status || 'loading';
+    const message = this._actionError || this._syncState?.error || (status === 'loading' ? 'Loading list...' : '');
+    const severity = this._actionError || status === 'error' ? 'error' : status === 'loading' ? 'info' : 'warning';
+    const key = `${severity}|${message}`;
+    if (this._lastStatusKey === key) return;
+    this._lastStatusKey = key;
+    this._statusElement.innerHTML = message ? `<ha-alert alert-type="${severity}">${escapeHtml(message)}
+      ${status !== 'loading' ? '<button class="refresh-list" type="button" title="Refresh list" aria-label="Refresh list"><ha-icon icon="mdi:refresh"></ha-icon></button>' : ''}
+    </ha-alert>` : '';
+    this._statusElement.querySelector('.refresh-list')?.addEventListener('click', async () => {
+      const store = this._store;
+      this._actionError = null;
+      try { await store?.refresh(); }
+      catch (error) { if (this._store === store) this._actionError = error.message || 'Could not refresh the list.'; }
+      if (this._store === store) this._renderStatus();
+    });
+  }
+
+  _applyBusyState() {
+    const card = this.content?.querySelector('.card-container');
+    if (!card) return;
+    const names = [this._buildFullName(), ...this._getTypes().map(type => this._buildNameFor(type.name))];
+    const busy = this._isUpdating || names.some(name => this._store?.pending.has(name.toLowerCase()));
+    const unavailable = !this._store?.ready;
+    card.classList.toggle('is-updating', busy);
+    card.classList.toggle('is-unavailable', unavailable);
+    card.setAttribute('aria-busy', String(busy));
+    for (const control of [card, ...card.querySelectorAll('[role="button"]')]) {
+      control.setAttribute('aria-disabled', String(busy || unavailable));
+    }
   }
 
   _render() {
     this._ensureShell();
-    this._isUpdating = false;
-    const container = this.content.querySelector('.card-container');
-    if (container) container.classList.remove('is-updating');
+    this._renderStatus();
+    this._applyBusyState();
     if (!this._config || !this._hass) return;
 
-    const state = this._hass.states[this._config.todo_list];
-    if (!state) {
-      this._renderError(`Entity not found: ${this._config.todo_list}`);
-      return;
-    }
-
     if (this._items === null) {
-      return; // waiting for subscription
+      this._clearHolds();
+      this.content.innerHTML = '';
+      this._lastRenderKey = null;
+      return;
     }
 
     const types = this._getTypes();
@@ -1107,6 +449,7 @@ class ShoppingListCard extends HTMLElement {
       : '';
     const nameClass = showName ? '' : 'no-name';
 
+    this._clearHolds();
     this.content.innerHTML = `
       <div class="card-container ${isOn?'is-on':'is-off'} ${layoutClass} ${nameClass}"
            role="button" tabindex="0" aria-pressed="${isOn ? 'true' : 'false'}" aria-label="${ariaLabel}"
@@ -1118,8 +461,9 @@ class ShoppingListCard extends HTMLElement {
     `;
 
     const card = this.content.querySelector('.card-container');
-    this._wireInteractions(card, isOn, matched, matchedUid, qty, fullName, present);
+    this._wireInteractions(card);
     this._wireImageError(card);
+    this._applyBusyState();
   }
 
   /** Render the expandable "types" (variants) layout. The header is the bare
@@ -1263,6 +607,7 @@ class ShoppingListCard extends HTMLElement {
          <ha-icon class="types-chevron" icon="mdi:chevron-down" role="button" tabindex="0"
                   aria-expanded="false" aria-controls="slc-types-list" aria-label="Toggle types"></ha-icon>`;
 
+    this._clearHolds();
     this.content.innerHTML = `
       <div class="card-container types-mode ${isVertical ? 'vertical-layout' : ''} ${anyOn ? 'is-on' : 'is-off'}" ${cardBgStyle}>
         <div class="types-header ${isVertical ? 'vertical-header' : ''}" role="button" tabindex="0"
@@ -1277,6 +622,7 @@ class ShoppingListCard extends HTMLElement {
     this._wireTypesInteractions(card);
     this._wireImageError(card);
     this._applyExpanded();
+    this._applyBusyState();
   }
 
   _applyExpanded() {
@@ -1284,6 +630,11 @@ class ShoppingListCard extends HTMLElement {
     if (!card) return;
     const expanded = !!this._expanded;
     card.classList.toggle('expanded', expanded);
+    const list = card.querySelector('.types-list');
+    if (list) {
+      list.inert = !expanded;
+      list.setAttribute('aria-hidden', String(!expanded));
+    }
     const chevron = card.querySelector('.types-chevron');
     if (chevron) chevron.setAttribute('aria-expanded', expanded ? 'true' : 'false');
   }
@@ -1339,121 +690,114 @@ class ShoppingListCard extends HTMLElement {
    *  Honors `hold_action: { action: none }` to disable holds entirely. */
   _attachHold(el, onHold) {
     if (this._config.hold_action?.action === 'none') return;
-    let holdTimer = null, heldFired = false, startX = 0, startY = 0;
-    const start = (ev) => {
-      if (ev.target.closest('.quantity-btn')) return;
-      heldFired = false;
-      const t = ev.touches?.[0];
-      startX = t ? t.clientX : ev.clientX;
-      startY = t ? t.clientY : ev.clientY;
+    let holdTimer = null;
+    let startX = 0;
+    let startY = 0;
+    const version = this._configVersion;
+    const start = event => {
+      if (event.button !== 0 || event.isPrimary === false
+        || event.target.closest('.quantity-btn, .types-chevron')) return;
+      startX = event.clientX;
+      startY = event.clientY;
       clearTimeout(holdTimer);
       holdTimer = setTimeout(() => {
-        heldFired = true; holdTimer = null;
+        holdTimer = null;
+        if (!el.isConnected || this._configVersion !== version) return;
+        this._suppressClick = true;
+        clearTimeout(this._clickResetTimer);
+        this._clickResetTimer = setTimeout(() => { this._suppressClick = false; }, 1000);
         this._vibrate();
-        onHold();
+        this._handleHoldAction(onHold);
       }, 500);
     };
     const cancel = () => { clearTimeout(holdTimer); holdTimer = null; };
-    const move = (ev) => {
+    const move = event => {
       if (!holdTimer) return;
-      const t = ev.touches?.[0];
-      const x = t ? t.clientX : ev.clientX;
-      const y = t ? t.clientY : ev.clientY;
-      if (Math.abs(x - startX) > 10 || Math.abs(y - startY) > 10) cancel();
+      if (Math.abs(event.clientX - startX) > 10 || Math.abs(event.clientY - startY) > 10) cancel();
     };
-    el.addEventListener('mousedown', start);
-    el.addEventListener('touchstart', start, { passive: true });
-    el.addEventListener('mousemove', move);
-    el.addEventListener('touchmove', move, { passive: true });
-    ['mouseup', 'mouseleave', 'touchend', 'touchcancel'].forEach(e => el.addEventListener(e, cancel));
-    el.addEventListener('click', (ev) => {
-      if (heldFired) { ev.stopImmediatePropagation(); ev.preventDefault(); heldFired = false; }
-    }, true);
+    el.addEventListener('pointerdown', start);
+    el.addEventListener('pointermove', move);
+    for (const event of ['pointerup', 'pointerleave', 'pointercancel']) el.addEventListener(event, cancel);
+    this._holdCleanups.add(() => {
+      cancel();
+      el.removeEventListener('pointerdown', start);
+      el.removeEventListener('pointermove', move);
+      for (const event of ['pointerup', 'pointerleave', 'pointercancel']) el.removeEventListener(event, cancel);
+    });
+  }
+
+  _clearHolds() {
+    for (const cleanup of this._holdCleanups) cleanup();
+    this._holdCleanups.clear();
   }
 
   /** Hold on the header: remove every item that belongs to this card, i.e.
    *  the bare title plus each configured variant currently on the list. */
-  async _removeAllTypes() {
-    if (this._isUpdating) return;
-    const names = [this._config.subtitle || null, ...(this._typeEntries || [])];
-    const seen = new Set();
-    const calls = [];
-    for (const n of names) {
-      const { isOn, present, matched, matchedUid } = this._typeState(n);
-      if (!isOn && !present) continue;
-      const key = matchedUid || matched;
-      if (key && !seen.has(key)) {
-        seen.add(key);
-        calls.push(this._removeByUidOrSummary(matchedUid, matched));
-      }
-    }
-    if (!calls.length) return;
-    this._isUpdating = true;
-    try { await Promise.all(calls); }
-    catch (e) { console.error('Hold remove-all failed', e); }
-    this._isUpdating = false;
+  _removeAllTypes() {
+    return this._runItemActions([this._config.subtitle || null, ...this._getTypes().map(type => type.name)], 'remove');
   }
 
   /** Hold on a variant row: remove that specific variant entirely. */
-  async _removeType(idx) {
-    if (this._isUpdating) return;
+  _removeType(idx) {
     const entries = this._typeEntries || [];
     if (idx < 0 || idx >= entries.length) return;
-    const { isOn, present, matched, matchedUid } = this._typeState(entries[idx]);
-    if (!isOn && !present) return;
-    this._isUpdating = true;
-    try { await this._removeByUidOrSummary(matchedUid, matched); }
-    catch (e) { console.error('Hold remove-type failed', e); }
-    this._isUpdating = false;
+    return this._runItemActions([entries[idx]], 'remove');
   }
 
   _handleHeaderTap(ev) {
-    const header = ev.target.closest('.types-header');
-    // The header item carries the configured subtitle when present.
-    return this._toggleSubtitle(ev, this._config.subtitle || null, header);
+    return this._toggleSubtitle(ev, this._config.subtitle || null);
   }
 
   _handleTypeTap(ev, idx) {
     ev.stopPropagation();
     const entries = this._typeEntries || [];
     if (idx < 0 || idx >= entries.length) return;
-    const row = ev.target.closest('.type-row');
-    return this._toggleSubtitle(ev, entries[idx], row);
+    return this._toggleSubtitle(ev, entries[idx]);
   }
 
-  async _toggleSubtitle(ev, subtitle, el) {
-    if (this._isUpdating) return;
-    const { fullName, isOn, qty, matched, matchedUid, present } = this._typeState(subtitle);
-    const action = ev.target.closest('.quantity-btn')?.dataset.action;
+  _toggleSubtitle(event, subtitle) {
+    event.stopPropagation();
+    const action = event.target.closest('.quantity-btn')?.dataset.action || 'toggle';
+    return this._runItemActions([subtitle], action);
+  }
 
+  async _runItemActions(subtitles, action) {
+    if (this._isUpdating || !this.isConnected) return;
+    const store = this._store;
+    const config = this._config;
+    const version = this._configVersion;
+    const keys = [...new Set(subtitles.map(subtitle => buildName(config, subtitle).toLowerCase()))];
+    if (keys.some(key => store?.pending.has(key))) return;
+    if (!store?.ready) {
+      this._actionError = store?.error || 'Wait for the to-do list to reconnect.';
+      this._renderStatus();
+      return;
+    }
     this._vibrate();
     this._isUpdating = true;
-    el?.classList.add('is-updating');
-
-    let call;
-    const step = Math.max(1, parseInt(this._config.quantity_step, 10) || 1);
-    const maxQty = parseInt(this._config.quantity_max, 10);
-    if (action === 'increment') {
-      let next = qty + step;
-      if (!isNaN(maxQty) && maxQty > 0) next = Math.min(next, maxQty);
-      if (next !== qty) call = this._updateQuantity(matchedUid, matched, next, fullName);
-    } else if (action === 'decrement') {
-      const next = Math.max(this._keepZero() ? 0 : 1, qty - step);
-      if (next !== qty) call = this._updateQuantity(matchedUid, matched, next, fullName);
-    } else if (this._keepZero()) {
-      if (!present) call = this._addItem(this._summaryFor(fullName, 1));
-      else call = this._updateQuantity(matchedUid, matched, qty > 0 ? 0 : 1, fullName);
-    } else if (isOn) {
-      if (!this._config.enable_quantity || qty === 1) call = this._removeByUidOrSummary(matchedUid, matched);
-    } else {
-      call = this._addItem(this._summaryFor(fullName, 1));
+    this._actionError = null;
+    this._applyBusyState();
+    this._renderStatus();
+    try {
+      await store.execute(keys, items => {
+        const seen = new Set();
+        return subtitles.map(subtitle => planItemAction(config, items, subtitle, action)).filter(operation => {
+          if (!operation || seen.has(operation.key)) return false;
+          seen.add(operation.key);
+          return true;
+        });
+      });
+    } catch (error) {
+      if (this._store === store && this._configVersion === version) {
+        this._actionError = error.message || 'Could not update the to-do list.';
+      }
+    } finally {
+      if (this._store === store && this._configVersion === version) {
+        this._isUpdating = false;
+        this._applyBusyState();
+        this._renderStatus();
+      }
     }
-
-    if (call) {
-      try { await call; } catch (e) { console.error('Service call failed', e); }
-    }
-    this._isUpdating = false;
-    el?.classList.remove('is-updating');
   }
 
   _wireImageError(card) {
@@ -1474,8 +818,8 @@ class ShoppingListCard extends HTMLElement {
     });
   }
 
-  _wireInteractions(card, isOn, matched, matchedUid, qty, fullName, present) {
-    const tap = (ev) => this._handleTap(ev, isOn, matched, matchedUid, qty, fullName, present);
+  _wireInteractions(card) {
+    const tap = (event) => this._toggleSubtitle(event, this._config.subtitle || null);
     card.addEventListener('click', tap);
     card.addEventListener('keydown', (ev) => {
       if (ev.target.closest('.quantity-btn')) {
@@ -1491,57 +835,10 @@ class ShoppingListCard extends HTMLElement {
       }
     });
 
-    const holdCfg = this._config.hold_action;
-    if (holdCfg?.action === 'none') return;
-
-    let holdTimer = null;
-    let heldFired = false;
-    let startX = 0, startY = 0;
-
-    const startHold = (ev) => {
-      // Don't start hold on quantity buttons
-      if (ev.target.closest('.quantity-btn')) return;
-      heldFired = false;
-      const touch = ev.touches?.[0];
-      startX = touch ? touch.clientX : ev.clientX;
-      startY = touch ? touch.clientY : ev.clientY;
-      clearTimeout(holdTimer);
-      holdTimer = setTimeout(() => {
-        heldFired = true;
-        holdTimer = null;
-        this._vibrate();
-        this._handleHold(isOn, matched, matchedUid, present);
-      }, 500);
-    };
-
-    const cancelHold = () => { clearTimeout(holdTimer); holdTimer = null; };
-
-    const maybeCancelOnMove = (ev) => {
-      if (!holdTimer) return;
-      const touch = ev.touches?.[0];
-      const x = touch ? touch.clientX : ev.clientX;
-      const y = touch ? touch.clientY : ev.clientY;
-      if (Math.abs(x - startX) > 10 || Math.abs(y - startY) > 10) cancelHold();
-    };
-
-    card.addEventListener('mousedown', startHold);
-    card.addEventListener('touchstart', startHold, { passive: true });
-    card.addEventListener('mousemove', maybeCancelOnMove);
-    card.addEventListener('touchmove', maybeCancelOnMove, { passive: true });
-    ['mouseup', 'mouseleave', 'touchend', 'touchcancel'].forEach(e =>
-      card.addEventListener(e, cancelHold)
-    );
-    // Swallow the synthesized click after a successful hold.
-    card.addEventListener('click', (ev) => {
-      if (heldFired) {
-        ev.stopImmediatePropagation();
-        ev.preventDefault();
-        heldFired = false;
-      }
-    }, true);
+    this._attachHold(card, () => this._runItemActions([this._config.subtitle || null], 'remove'));
   }
 
-  _handleHold(isOn, matched, matchedUid, present) {
+  _handleHoldAction(onRemove) {
     const cfg = this._config.hold_action;
     const action = cfg?.action || 'default';
 
@@ -1557,184 +854,17 @@ class ShoppingListCard extends HTMLElement {
       return;
     }
 
-    // Default: remove the item entirely (even a kept `Name (0)`) if present.
-    if (action === 'default') {
-      if (present || isOn) this._removeByUidOrSummary(matchedUid, matched)
-        .catch(e => console.error('Hold remove failed', e));
-    }
+    if (action === 'default') return onRemove();
   }
 
   _vibrate() {
     if (this._config?.haptic && navigator.vibrate) navigator.vibrate(50);
   }
 
-  async _handleTap(ev, isOn, matched, matchedUid, qty, fullName, present) {
-    if (this._isUpdating) return;
-    ev.stopPropagation();
-    const action = ev.target.closest('.quantity-btn')?.dataset.action;
-
-    this._vibrate();
-    this._isUpdating = true;
-    this.content.querySelector('.card-container').classList.add('is-updating');
-
-    let call;
-    const step = Math.max(1, parseInt(this._config.quantity_step, 10) || 1);
-    const maxQty = parseInt(this._config.quantity_max, 10);
-    if (action === 'increment') {
-      let next = qty + step;
-      if (!isNaN(maxQty) && maxQty > 0) next = Math.min(next, maxQty);
-      if (next !== qty) call = this._updateQuantity(matchedUid, matched, next, fullName);
-    } else if (action === 'decrement') {
-      const next = Math.max(this._keepZero() ? 0 : 1, qty - step);
-      if (next !== qty) call = this._updateQuantity(matchedUid, matched, next, fullName);
-    } else if (this._keepZero()) {
-      // Never delete: add at (1) when absent, else toggle qty 0 <-> 1.
-      if (!present) call = this._addItem(this._summaryFor(fullName, 1));
-      else call = this._updateQuantity(matchedUid, matched, qty > 0 ? 0 : 1, fullName);
-    } else {
-      if (isOn) {
-        if (!this._config.enable_quantity || qty===1) call = this._removeByUidOrSummary(matchedUid, matched);
-      } else {
-        call = this._addItem(this._summaryFor(fullName, 1));
-      }
-    }
-
-    if (call) {
-      try {
-        await call;
-        // Subscription will push the update; no manual re-render needed.
-      } catch (e) {
-        console.error('Service call failed', e);
-      }
-    }
-    this._isUpdating = false;
-    this.content.querySelector('.card-container')?.classList.remove('is-updating');
-  }
-
-  _addItem(name) {
-    return this._hass.callService('todo','add_item',{ entity_id: this._config.todo_list, item: name });
-  }
-
-  _removeByUidOrSummary(uid, summary) {
-    const target = uid || summary;
-    if (!target) return Promise.resolve();
-    return this._hass.callService('todo','remove_item',{
-      entity_id: this._config.todo_list,
-      item: target,
-    });
-  }
-
-  _updateQuantity(uid, oldSummary, newQty, fullName) {
-    const newName = this._summaryFor(fullName, newQty);
-    return this._hass.callService('todo','update_item',{
-      entity_id: this._config.todo_list,
-      item: uid || oldSummary,
-      rename: newName,
-    });
-  }
-
   _attachStyles() {
     if (this.querySelector('style')) return;
     const s = document.createElement('style');
-    s.textContent = `
-      ha-card { box-sizing: border-box; border-radius: var(--ha-card-border-radius,12px); box-shadow: var(--ha-card-box-shadow); overflow:hidden; background: var(--ha-card-background, var(--card-background-color)); }
-      .card-content { padding:0 !important; margin: -1px 0; }
-      .card-container { display:flex; align-items:center; padding:10px 12px; gap:10px; cursor:pointer; transition:background-color .2s; box-sizing: border-box; outline: none; }
-      .card-container:hover { background: var(--secondary-background-color) }
-      .card-container:focus-visible { box-shadow: 0 0 0 2px var(--primary-color); }
-      .quantity-btn { cursor: pointer; }
-      .quantity-btn:focus-visible { outline: 2px solid var(--primary-color); outline-offset: 1px; }
-
-      /* Icon-only mode */
-      .card-container.vertical-layout.no-name { justify-content: center; height: 56px; }
-      .card-container.vertical-layout.no-name .vertical-top-block { top: 50%; transform: translateY(-50%); }
-      .card-container.vertical-layout.no-name .icon-wrapper.vertical-icon { width: 36px; height: 36px; }
-      .card-container.vertical-layout.no-name .icon-wrapper.vertical-icon ha-icon { --mdc-icon-size: 22px; }
-      .card-container.vertical-layout.no-name .image-wrapper.vertical-image { max-height: 36px; }
-      .card-container.vertical-layout.no-name .image-wrapper.vertical-image img { max-height: 36px; }
-      .card-container.vertical-layout.no-name .image-wrapper.vertical-image.image-error { width: 36px; height: 36px; }
-      /* Horizontal no-name: keep icon at left, quantity at right */
-      .card-container:not(.vertical-layout).no-name .quantity-controls { margin-left: auto; }
-
-      /* Vertical Layout */
-      .card-container.vertical-layout { display: block; height: 120px; position: relative; }
-      .vertical-top-block { position: absolute; top: 18px; left: 16px; right: 16px; display: flex; justify-content: center; }
-      .vertical-layout .info-container { position: absolute; bottom: 12px; left: 16px; right: 16px; height: 40px; display: flex; flex-direction: column; justify-content: center; }
-
-      .vertical-icon-container { display: flex; align-items: center; justify-content: center; gap: 8px; }
-
-      .icon-wrapper { display:flex; align-items:center; justify-content:center; width:36px; height:36px; border-radius:50%; flex-shrink:0; position: relative; }
-      .image-wrapper { position:relative; width:36px; height:36px; flex-shrink:0 }
-      .image-wrapper img { width:100%; height:100%; object-fit:cover; border-radius:50% }
-      .image-wrapper .icon-wrapper { position:absolute; top:0; left:0; width:100%; height:100%; display:none; }
-      .image-wrapper.image-error .icon-wrapper { display:flex; }
-
-      .icon-wrapper.vertical-icon { width: 48px; height: 48px; }
-      .icon-wrapper.vertical-icon ha-icon { --mdc-icon-size: 28px; }
-
-      .image-wrapper.vertical-image { width: auto; height: auto; max-height: 48px; position: relative; }
-      .image-wrapper.vertical-image img { object-fit: contain; border-radius: 4px; width: auto; height: auto; max-width: 100%; max-height: 48px; }
-      .image-wrapper.vertical-image.image-error { width: 48px; height: 48px; }
-      .image-wrapper.vertical-image.image-error .icon-wrapper { position: static; }
-
-      .info-container { flex-grow:1; overflow:hidden; min-width:0; }
-      .primary { font-size:14px; font-weight:500; line-height:20px; color:var(--primary-text-color); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
-      .secondary { font-size:12px; font-weight:400; line-height:16px; color:var(--secondary-text-color); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
-      .vertical-layout .primary, .vertical-layout .secondary { text-align: center; }
-
-      /* Quantity Controls */
-      .quantity-controls { display:flex; align-items:center; gap:4px; flex-shrink:0 }
-      .quantity { font-size:14px; font-weight:500; min-width:20px; text-align:center }
-      .quantity-btn { width:24px; height:24px; background:rgba(128,128,128,0.2); border-radius:5px; display:flex; align-items:center; justify-content:center; transition: background-color 0.2s; }
-      .quantity-btn:hover { background:rgba(128,128,128,0.4); }
-      .quantity-btn ha-icon { --mdc-icon-size: 20px; }
-      .quantity-badge { position: absolute; top: -4px; right: -4px; background-color: var(--primary-color); color: white; border-radius: 50%; width: 18px; height: 18px; font-size: 11px; display: flex; align-items: center; justify-content: center; font-weight: 500; border: 2px solid var(--card-background-color); }
-      .quantity-btn-placeholder { width: 24px; height: 24px; flex-shrink: 0; }
-
-      /* Types (variants) mode */
-      .card-container.types-mode { display: block; padding: 0; cursor: default; }
-      .card-container.types-mode:hover { background: transparent; }
-      /* Types cards grow with their content; never inherit the fixed 120px
-         height from the normal vertical-layout tile. */
-      .card-container.types-mode.vertical-layout { height: auto; }
-      .types-header { display: flex; align-items: center; gap: 10px; padding: 10px 12px; cursor: pointer; transition: background-color .2s; }
-      .types-header:hover { background: var(--secondary-background-color); }
-      .types-header:focus-visible { outline: none; box-shadow: 0 0 0 2px var(--primary-color) inset; }
-      .types-header.is-updating { opacity: .6; pointer-events: none; }
-      .types-chevron { flex-shrink: 0; color: var(--secondary-text-color); transition: transform .25s ease, background-color .2s; cursor: pointer; border-radius: 50%; padding: 2px; }
-      .types-chevron:hover { background: var(--divider-color); }
-      .types-chevron:focus-visible { outline: none; box-shadow: 0 0 0 2px var(--primary-color); }
-      .card-container.types-mode.expanded .types-chevron { transform: rotate(180deg); }
-      .types-list { max-height: 0; overflow: hidden; transition: max-height .3s ease; }
-      .card-container.types-mode.expanded .types-list { max-height: 2000px; }
-
-      /* Vertical types header: reuse the normal vertical-tile shape. The header
-         is a fixed-height (120px) relative block with the icon absolutely
-         positioned top-center, the name / subtitle bottom-center, and the
-         chevron in the bottom-right corner. The variant list expands below,
-         exactly like the horizontal layout. */
-      .types-header.vertical-header { display: block; height: 120px; position: relative; padding: 0 8px; cursor: default; }
-      .types-header.vertical-header:hover { background: transparent; }
-      .types-header.vertical-header .vertical-top-block { position: absolute; top: 18px; left: 16px; right: 16px; display: flex; justify-content: center; }
-      .types-header.vertical-header .info-container { position: absolute; bottom: 12px; left: 16px; right: 16px; height: 40px; display: flex; flex-direction: column; justify-content: center; align-items: center; text-align: center; }
-      .types-header.vertical-header .primary,
-      .types-header.vertical-header .secondary { text-align: center; width: 100%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-      /* Keep the subtitle clear of the bottom-right chevron: symmetric padding
-         keeps it centered while ellipsizing before it reaches the button. */
-      .types-header.vertical-header .secondary { padding: 0 28px; box-sizing: border-box; }
-      .types-header.vertical-header .types-chevron { position: absolute; bottom: 8px; right: 10px; --mdc-icon-size: 22px; opacity: .85; }
-      .type-row { display: flex; align-items: center; gap: 10px; min-height: 44px; box-sizing: border-box; padding: 7px 12px 7px 14px; cursor: pointer; border-top: 1px solid var(--divider-color); transition: background-color .2s; outline: none; }
-      .type-row:hover { background: var(--secondary-background-color); }
-      .type-row:focus-visible { box-shadow: 0 0 0 2px var(--primary-color) inset; }
-      .type-row.is-updating { opacity: .6; pointer-events: none; }
-      .type-thumb { width: 28px; height: 28px; flex-shrink: 0; }
-      .type-thumb img { width: 100%; height: 100%; object-fit: cover; border-radius: 50%; }
-      .type-name { flex: 1; min-width: 0; font-size: 14px; color: var(--primary-text-color); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-      .type-qty { display: flex; align-items: center; gap: 4px; flex-shrink: 0; }
-      .type-indicator { width: 28px; height: 28px; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
-      .type-indicator ha-icon { --mdc-icon-size: 20px; }
-      .type-indicator.type-add ha-icon { color: var(--secondary-text-color); opacity: .45; }
-    `;
+    s.textContent = CARD_STYLES;
     this.appendChild(s);
   }
 

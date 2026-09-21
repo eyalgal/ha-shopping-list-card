@@ -1,89 +1,485 @@
-/*
- * Shopping List Card
- *
- * A Home Assistant Lovelace card to manage items on a to-do list with a
- * clean, modern interface and a visual editor.
- *
- * Author: eyalgal
- * License: MIT
- * Version: 2.1.1
- *
- * Note: This card requires a to-do entity to function properly.
- * For more information, visit: https://github.com/eyalgal/ha-shopping-list-card
- */
-
-const CARD_VERSION = '2.1.1';
-
-function escapeHtml(str) {
-  if (str == null) return '';
-  return String(str)
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&#39;');
+function buildName(config, subtitle) {
+  const base = subtitle ? `${config.title} - ${subtitle}` : config.title;
+  return config.list_prefix ? `${config.list_prefix} - ${base}` : base;
 }
 
-// ── Shared subscription manager ──────────────────────────────────────────────
-// Multiple cards on the same dashboard often point at the same todo entity.
-// Opening one WebSocket subscription per card causes a load-time storm (dozens
-// of `todo/item/subscribe` messages at once) which can crash the frontend.
-// This manager opens a single subscription per (connection, entity) pair and
-// multicasts updates to every subscribed card, with reference counting so the
-// subscription is closed when the last card detaches.
-const _slcSubs = new WeakMap(); // connection -> Map<entityId, SubRecord>
+function keepZero(config) {
+  return !!config.enable_quantity && config.remove_zero === false;
+}
 
-function _slcSubscribe(hass, entityId, listener) {
-  const conn = hass.connection;
-  let perConn = _slcSubs.get(conn);
-  if (!perConn) { perConn = new Map(); _slcSubs.set(conn, perConn); }
+function itemSummary(config, fullName, quantity) {
+  if (!config.enable_quantity) return fullName;
+  return keepZero(config) || quantity > 1 ? `${fullName} (${quantity})` : fullName;
+}
 
-  let rec = perConn.get(entityId);
-  if (!rec) {
-    rec = {
-      listeners: new Set(),
-      lastItems: null,
-      unsub: null,
-      unsubPromise: null,
+function matchItem(items, fullName, config) {
+  const escaped = fullName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const pattern = new RegExp(`^${escaped}(?: \\((\\d+)\\))?$`, 'i');
+  for (const item of items || []) {
+    if (typeof item.summary !== 'string') continue;
+    const match = item.summary.match(pattern);
+    if (!match) continue;
+    const quantity = match[1] != null ? Number(match[1]) : 1;
+    return {
+      isOn: keepZero(config) ? quantity > 0 : true,
+      present: true, qty: quantity, matched: item.summary, matchedUid: item.uid,
     };
-    perConn.set(entityId, rec);
-    rec.unsubPromise = conn.subscribeMessage(
-      (msg) => {
-        rec.lastItems = msg?.items || [];
-        for (const l of rec.listeners) {
-          try { l(rec.lastItems); } catch (e) { console.error('Shopping List Card listener error', e); }
-        }
-      },
-      { type: 'todo/item/subscribe', entity_id: entityId }
-    );
-    rec.unsubPromise
-      .then(unsub => { rec.unsub = unsub; })
-      .catch(err => {
-        console.error('Shopping List Card: subscription failed', err);
-        perConn.delete(entityId);
-        for (const l of rec.listeners) { try { l(null, err); } catch (_) {} }
-      });
+  }
+  return { isOn: false, present: false, qty: 0, matched: null, matchedUid: null };
+}
+
+function planItemAction(config, items, subtitle, action = 'toggle') {
+  const fullName = buildName(config, subtitle);
+  const state = matchItem(items, fullName, config);
+  const key = fullName.toLowerCase();
+  const target = state.matchedUid || state.matched;
+  const findTarget = current => current.find(item => state.matchedUid
+    ? item.uid === state.matchedUid : item.summary === state.matched);
+  const remove = () => ({
+    key, service: 'remove_item', data: { item: target },
+    confirmed: current => !findTarget(current),
+  });
+  if (action === 'remove') return state.present ? remove() : null;
+
+  let quantity;
+  if (action === 'increment' || action === 'decrement') {
+    if (!state.present) return null;
+    const step = Math.max(1, parseInt(config.quantity_step, 10) || 1);
+    const maximum = parseInt(config.quantity_max, 10);
+    quantity = action === 'increment' ? state.qty + step
+      : Math.max(keepZero(config) ? 0 : 1, state.qty - step);
+    if (action === 'increment' && maximum > 0) quantity = Math.min(quantity, maximum);
+    if (quantity === state.qty) return null;
+  } else if (keepZero(config)) {
+    quantity = state.qty > 0 ? 0 : 1;
+  } else if (state.isOn) {
+    return !config.enable_quantity || state.qty === 1 ? remove() : null;
+  } else {
+    quantity = 1;
   }
 
-  rec.listeners.add(listener);
-  if (rec.lastItems) {
-    // Immediately deliver the cached snapshot to the new subscriber.
-    queueMicrotask(() => { if (rec.listeners.has(listener)) listener(rec.lastItems); });
+  const summary = itemSummary(config, fullName, quantity);
+  if (!state.present) {
+    return {
+      key, service: 'add_item', data: { item: summary },
+      confirmed: current => current.some(item => item.summary?.toLowerCase() === summary.toLowerCase()),
+    };
   }
-
-  return () => {
-    rec.listeners.delete(listener);
-    if (rec.listeners.size === 0) {
-      perConn.delete(entityId);
-      if (rec.unsub) { try { rec.unsub(); } catch (_) {} }
-      else if (rec.unsubPromise) {
-        rec.unsubPromise.then(u => { try { u(); } catch (_) {} }).catch(() => {});
-      }
-    }
+  return {
+    key, service: 'update_item', data: { item: target, rename: summary },
+    confirmed: current => state.matchedUid
+      ? findTarget(current)?.summary === summary
+      : current.some(item => item.summary === summary),
   };
 }
 
-// ── Editor ───────────────────────────────────────────────────────────────────
+function updateTypeNames(previous, text) {
+  const names = text.split('\n').map(name => name.trim()).filter(Boolean);
+  const entries = Array.isArray(previous) ? previous
+    : typeof previous === 'string' ? previous.split(/[,\n]/) : [];
+  const entryName = entry => String(typeof entry === 'string' ? entry : entry?.name || '').trim();
+  const used = new Set();
+  return names.map((name, index) => {
+    let match = entries.findIndex((entry, entryIndex) => !used.has(entryIndex)
+      && entryName(entry).toLowerCase() === name.toLowerCase());
+    if (match === -1 && entries.length === names.length && !used.has(index)
+      && !names.some(next => next.toLowerCase() === entryName(entries[index]).toLowerCase())) {
+      match = index;
+    }
+    used.add(match);
+    const original = entries[match];
+    return original && typeof original === 'object' ? { ...original, name } : name;
+  });
+}
+
+const stores = new WeakMap();
+
+function getTodoStore(hass, entityId) {
+  const connection = hass.connection;
+  let entities = stores.get(connection);
+  if (!entities) {
+    entities = new Map();
+    stores.set(connection, entities);
+  }
+  let store = entities.get(entityId);
+  if (!store) {
+    store = new TodoStore(hass, entityId, () => {
+      if (entities.get(entityId) === store) entities.delete(entityId);
+    });
+    entities.set(entityId, store);
+  }
+  store.updateHass(hass);
+  return store;
+}
+
+class TodoStore {
+  constructor(hass, entityId, onDispose) {
+    this.connection = hass.connection;
+    this.entityId = entityId;
+    this.hass = hass;
+    this.items = null;
+    this.status = 'loading';
+    this.error = null;
+    this.pending = new Set();
+    this.listeners = new Set();
+    this.closed = false;
+    this._onDispose = onDispose;
+    this._generation = 0;
+    this._revision = 0;
+    this._writeRevision = 0;
+    this._confirmedWriteRevision = -1;
+    this._subscription = null;
+    this._request = null;
+    this._retryTimer = null;
+    this._retryDelay = 0;
+    this._availability = this._availabilityError();
+    if (this._availability) {
+      this.status = 'unavailable';
+      this.error = this._availability;
+    }
+  }
+
+  get snapshot() {
+    return { items: this.items, status: this.status, error: this.error, pending: new Set(this.pending) };
+  }
+
+  get ready() {
+    return !this.closed && !this._availability && this.items !== null && this.status === 'ready';
+  }
+
+  _availabilityError() {
+    if (this.hass.connected === false) return 'Disconnected from Home Assistant.';
+    const entity = this.hass.states?.[this.entityId];
+    if (!entity) return `Entity not found: ${this.entityId}`;
+    if (entity.state === 'unavailable' || entity.state === 'unknown') return 'The to-do list is unavailable.';
+    return null;
+  }
+
+  updateHass(hass) {
+    this.hass = hass;
+    const availability = this._availabilityError();
+    if (availability === this._availability) return;
+    this._availability = availability;
+    this._generation++;
+    this._request = null;
+    this._confirmedWriteRevision = -1;
+    this._stopSubscription();
+    this._clearRetry();
+    this.status = availability ? 'unavailable' : 'loading';
+    this.error = availability;
+    if (!availability) this._startSubscription();
+    this._notify();
+  }
+
+  subscribe(listener) {
+    if (this.closed) throw new Error('The list subscription has closed.');
+    this.listeners.add(listener);
+    this._deliver(listener);
+    this._startSubscription();
+    return () => {
+      this.listeners.delete(listener);
+      if (this.listeners.size) return;
+      this._stopSubscription();
+      this._clearRetry();
+      if (!this.pending.size) this._dispose();
+    };
+  }
+
+  _deliver(listener) {
+    try { listener(this.snapshot); }
+    catch (error) { console.error('Shopping List Card listener error', error); }
+  }
+
+  _notify() {
+    for (const listener of this.listeners) this._deliver(listener);
+  }
+
+  _current(generation) {
+    return !this.closed && !this._availability && this._generation === generation;
+  }
+
+  _startSubscription() {
+    if (this.closed || this._availability || !this.listeners.size || this._subscription) return;
+    const attempt = { generation: this._generation, unsubscribe: null, received: false };
+    this._subscription = attempt;
+    const current = () => this._current(attempt.generation) && this._subscription === attempt;
+    const failed = () => {
+      if (!current()) return;
+      this._subscription = null;
+      this.status = 'reconnecting';
+      this.error = 'Live updates are unavailable. Reconnecting...';
+      this._scheduleRetry();
+      this._notify();
+      void this._fetch().catch(() => {});
+    };
+    try {
+      const pending = this.connection.subscribeMessage(message => {
+        if (!current() || !Array.isArray(message?.items)) return;
+        attempt.received = true;
+        this.items = this._activeItems(message.items);
+        this._revision++;
+        this.status = 'ready';
+        this.error = null;
+        this._clearRetry();
+        this._notify();
+      }, { type: 'todo/item/subscribe', entity_id: this.entityId });
+      Promise.resolve(pending).then(unsubscribe => {
+        if (current()) attempt.unsubscribe = unsubscribe;
+        else this._unsubscribe(unsubscribe);
+      }).catch(failed);
+    } catch { failed(); }
+  }
+
+  _activeItems(items) {
+    return items.filter(item => item?.status === 'needs_action' && typeof item.summary === 'string');
+  }
+
+  _unsubscribe(unsubscribe) {
+    try { Promise.resolve(unsubscribe?.()).catch(() => {}); }
+    catch {}
+  }
+
+  _stopSubscription() {
+    const attempt = this._subscription;
+    this._subscription = null;
+    if (attempt?.unsubscribe) this._unsubscribe(attempt.unsubscribe);
+  }
+
+  _scheduleRetry() {
+    if (this._retryTimer || this.closed || this._availability || !this.listeners.size) return;
+    this._retryDelay = this._retryDelay ? Math.min(this._retryDelay * 2, 30000) : 2000;
+    this._retryTimer = setTimeout(() => {
+      this._retryTimer = null;
+      this._startSubscription();
+      void this._fetch().catch(() => {});
+    }, this._retryDelay);
+  }
+
+  _clearRetry() {
+    if (this._retryTimer) clearTimeout(this._retryTimer);
+    this._retryTimer = null;
+    this._retryDelay = 0;
+  }
+
+  async _fetch(minimumWriteRevision = 0) {
+    if (!this._current(this._generation)) throw new Error(this.error || 'The to-do list is unavailable.');
+    if (this._request) {
+      if (this._request.writeRevision >= minimumWriteRevision) return this._request.promise;
+      await this._request.promise.catch(() => {});
+      if (this._confirmedWriteRevision >= minimumWriteRevision) return this.items;
+      return this._fetch(minimumWriteRevision);
+    }
+    const request = {
+      generation: this._generation, revision: this._revision,
+      writeRevision: this._writeRevision, promise: null,
+    };
+    this._request = request;
+    request.promise = (async () => {
+      try {
+        const result = await this.hass.callWS({ type: 'todo/item/list', entity_id: this.entityId });
+        if (!this._current(request.generation)) return this.items;
+        if (!Array.isArray(result?.items)) throw new Error('Home Assistant returned an invalid to-do list.');
+        this._confirmedWriteRevision = Math.max(this._confirmedWriteRevision, request.writeRevision);
+        if (request.revision === this._revision) {
+          this.items = this._activeItems(result.items);
+          this._revision++;
+          this.status = this._subscription?.received ? 'ready' : 'reconnecting';
+          this.error = this.status === 'ready' ? null : 'Live updates are reconnecting...';
+          if (this.status === 'ready') this._clearRetry();
+          this._notify();
+        }
+        return this.items;
+      } catch (error) {
+        if (this._current(request.generation)) {
+          this.status = 'error';
+          this.error = 'Could not refresh the to-do list. Retrying...';
+          this._scheduleRetry();
+          this._notify();
+        }
+        throw error;
+      } finally {
+        if (this._request === request) this._request = null;
+      }
+    })();
+    return request.promise;
+  }
+
+  refresh() {
+    if (!this._subscription) {
+      this._clearRetry();
+      this._startSubscription();
+    }
+    return this._fetch();
+  }
+
+  async execute(keys, createActions) {
+    if (!this.ready) throw new Error(this.error || 'Wait for the to-do list to reconnect.');
+    if (keys.some(key => this.pending.has(key))) return false;
+    const actions = createActions(this.items).filter(Boolean);
+    if (!actions.length) return false;
+    const generation = this._generation;
+    const hass = this.hass;
+    const uniqueKeys = new Set(keys);
+    for (const key of uniqueKeys) this.pending.add(key);
+    this._notify();
+    try {
+      const outcomes = await Promise.allSettled(actions.map(action => Promise.resolve().then(() =>
+        hass.callService('todo', action.service, { entity_id: this.entityId, ...action.data }))));
+      if (!this._current(generation)) throw new Error('The list connection changed during the update.');
+      const failures = outcomes.filter(outcome => outcome.status === 'rejected');
+      const writeRevision = ++this._writeRevision;
+      if (failures.length || !actions.every(action => action.confirmed(this.items))) {
+        await this._fetch(writeRevision);
+      }
+      if (!this._current(generation)) throw new Error('The list connection changed during the update.');
+      if (failures.length) {
+        const detail = failures[0].reason?.message || 'Home Assistant rejected the request.';
+        throw new Error(`Could not update ${failures.length} item(s). ${detail}`);
+      }
+      if (!actions.every(action => action.confirmed(this.items))) {
+        this.status = 'error';
+        this.error = 'The update is not confirmed. Refresh the list before trying again.';
+        throw new Error(this.error);
+      }
+      return true;
+    } finally {
+      for (const key of uniqueKeys) this.pending.delete(key);
+      this._notify();
+      if (!this.listeners.size) this._dispose();
+    }
+  }
+
+  _dispose() {
+    if (this.listeners.size || this.pending.size) return;
+    this.closed = true;
+    this._generation++;
+    this._stopSubscription();
+    this._clearRetry();
+    this._onDispose();
+  }
+}
+
+const CARD_DEFAULTS = {
+  DEFAULT_ON_ICON: 'mdi:check',
+  DEFAULT_OFF_ICON: 'mdi:plus',
+  DEFAULT_ON_COLOR: 'green',
+  DEFAULT_OFF_COLOR: 'grey',
+  COLOR_MAP: {
+    red: '#F44336', pink: '#E91E63', purple: '#9C27B0',
+    'deep-purple': '#673AB7', indigo: '#3F51B5',
+    blue: '#2196F3', 'light-blue': '#03A9F4',
+    cyan: '#00BCD4', teal: '#009688', green: '#4CAF50',
+    lime: '#CDDC39', yellow: '#FFEB3B', amber: '#FFC107',
+    orange: '#FF9800', brown: '#795548', grey: '#9E9E9E',
+    'blue-grey': '#607D8B',
+  },
+};
+
+const CARD_STYLES = `
+      ha-card { box-sizing: border-box; border-radius: var(--ha-card-border-radius,12px); box-shadow: var(--ha-card-box-shadow); overflow:hidden; background: var(--ha-card-background, var(--card-background-color)); }
+      .card-content { padding:0 !important; margin: -1px 0; }
+      .card-container { display:flex; align-items:center; padding:10px 12px; gap:10px; cursor:pointer; transition:background-color .2s; box-sizing: border-box; outline: none; }
+      .card-container:hover { background: var(--secondary-background-color) }
+      .card-container:focus-visible { box-shadow: 0 0 0 2px var(--primary-color); }
+      .card-container.is-updating { opacity: .6; cursor: wait; }
+      .card-container.is-unavailable { opacity: .6; cursor: not-allowed; }
+      .list-status:empty { display: none; }
+      .list-status { padding: 8px; overflow-wrap: anywhere; }
+      .refresh-list { display: inline-flex; align-items: center; justify-content: center; width: 36px; height: 36px; padding: 0; margin-inline-start: 4px; border: 0; border-radius: 4px; background: transparent; color: inherit; cursor: pointer; vertical-align: middle; }
+      .refresh-list:focus-visible { outline: 2px solid var(--primary-color); }
+      .quantity-btn { cursor: pointer; }
+      .quantity-btn:focus-visible { outline: 2px solid var(--primary-color); outline-offset: 1px; }
+
+      /* Icon-only mode */
+      .card-container.vertical-layout.no-name { justify-content: center; height: 56px; }
+      .card-container.vertical-layout.no-name .vertical-top-block { top: 50%; transform: translateY(-50%); }
+      .card-container.vertical-layout.no-name .icon-wrapper.vertical-icon { width: 36px; height: 36px; }
+      .card-container.vertical-layout.no-name .icon-wrapper.vertical-icon ha-icon { --mdc-icon-size: 22px; }
+      .card-container.vertical-layout.no-name .image-wrapper.vertical-image { max-height: 36px; }
+      .card-container.vertical-layout.no-name .image-wrapper.vertical-image img { max-height: 36px; }
+      .card-container.vertical-layout.no-name .image-wrapper.vertical-image.image-error { width: 36px; height: 36px; }
+      /* Horizontal no-name: keep icon at left, quantity at right */
+      .card-container:not(.vertical-layout).no-name .quantity-controls { margin-left: auto; }
+
+      /* Vertical Layout */
+      .card-container.vertical-layout { display: block; height: 120px; position: relative; }
+      .vertical-top-block { position: absolute; top: 18px; left: 16px; right: 16px; display: flex; justify-content: center; }
+      .vertical-layout .info-container { position: absolute; bottom: 12px; left: 16px; right: 16px; height: 40px; display: flex; flex-direction: column; justify-content: center; }
+
+      .vertical-icon-container { display: flex; align-items: center; justify-content: center; gap: 8px; }
+
+      .icon-wrapper { display:flex; align-items:center; justify-content:center; width:36px; height:36px; border-radius:50%; flex-shrink:0; position: relative; }
+      .image-wrapper { position:relative; width:36px; height:36px; flex-shrink:0 }
+      .image-wrapper img { width:100%; height:100%; object-fit:cover; border-radius:50% }
+      .image-wrapper .icon-wrapper { position:absolute; top:0; left:0; width:100%; height:100%; display:none; }
+      .image-wrapper.image-error .icon-wrapper { display:flex; }
+
+      .icon-wrapper.vertical-icon { width: 48px; height: 48px; }
+      .icon-wrapper.vertical-icon ha-icon { --mdc-icon-size: 28px; }
+
+      .image-wrapper.vertical-image { width: auto; height: auto; max-height: 48px; position: relative; }
+      .image-wrapper.vertical-image img { object-fit: contain; border-radius: 4px; width: auto; height: auto; max-width: 100%; max-height: 48px; }
+      .image-wrapper.vertical-image.image-error { width: 48px; height: 48px; }
+      .image-wrapper.vertical-image.image-error .icon-wrapper { position: static; }
+
+      .info-container { flex-grow:1; overflow:hidden; min-width:0; }
+      .primary { font-size:14px; font-weight:500; line-height:20px; color:var(--primary-text-color); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+      .secondary { font-size:12px; font-weight:400; line-height:16px; color:var(--secondary-text-color); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+      .vertical-layout .primary, .vertical-layout .secondary { text-align: center; }
+
+      /* Quantity Controls */
+      .quantity-controls { display:flex; align-items:center; gap:4px; flex-shrink:0 }
+      .quantity { font-size:14px; font-weight:500; min-width:20px; text-align:center }
+      .quantity-btn { width:24px; height:24px; background:rgba(128,128,128,0.2); border-radius:5px; display:flex; align-items:center; justify-content:center; transition: background-color 0.2s; }
+      .quantity-btn:hover { background:rgba(128,128,128,0.4); }
+      .quantity-btn ha-icon { --mdc-icon-size: 20px; }
+      .quantity-badge { position: absolute; top: -4px; right: -4px; background-color: var(--primary-color); color: white; border-radius: 50%; width: 18px; height: 18px; font-size: 11px; display: flex; align-items: center; justify-content: center; font-weight: 500; border: 2px solid var(--card-background-color); }
+      .quantity-btn-placeholder { width: 24px; height: 24px; flex-shrink: 0; }
+
+      /* Types (variants) mode */
+      .card-container.types-mode { display: block; padding: 0; cursor: default; }
+      .card-container.types-mode:hover { background: transparent; }
+      /* Types cards grow with their content; never inherit the fixed 120px
+         height from the normal vertical-layout tile. */
+      .card-container.types-mode.vertical-layout { height: auto; }
+      .types-header { display: flex; align-items: center; gap: 10px; padding: 10px 12px; cursor: pointer; transition: background-color .2s; }
+      .types-header:hover { background: var(--secondary-background-color); }
+      .types-header:focus-visible { outline: none; box-shadow: 0 0 0 2px var(--primary-color) inset; }
+      .types-header.is-updating { opacity: .6; pointer-events: none; }
+      .types-chevron { flex-shrink: 0; color: var(--secondary-text-color); transition: transform .25s ease, background-color .2s; cursor: pointer; border-radius: 50%; padding: 2px; }
+      .types-chevron:hover { background: var(--divider-color); }
+      .types-chevron:focus-visible { outline: none; box-shadow: 0 0 0 2px var(--primary-color); }
+      .card-container.types-mode.expanded .types-chevron { transform: rotate(180deg); }
+      .types-list { max-height: 0; overflow: hidden; transition: max-height .3s ease; }
+      .card-container.types-mode.expanded .types-list { max-height: 2000px; }
+
+      /* Vertical types header: reuse the normal vertical-tile shape. The header
+         is a fixed-height (120px) relative block with the icon absolutely
+         positioned top-center, the name / subtitle bottom-center, and the
+         chevron in the bottom-right corner. The variant list expands below,
+         exactly like the horizontal layout. */
+      .types-header.vertical-header { display: block; height: 120px; position: relative; padding: 0 8px; cursor: default; }
+      .types-header.vertical-header:hover { background: transparent; }
+      .types-header.vertical-header .vertical-top-block { position: absolute; top: 18px; left: 16px; right: 16px; display: flex; justify-content: center; }
+      .types-header.vertical-header .info-container { position: absolute; bottom: 12px; left: 16px; right: 16px; height: 40px; display: flex; flex-direction: column; justify-content: center; align-items: center; text-align: center; }
+      .types-header.vertical-header .primary,
+      .types-header.vertical-header .secondary { text-align: center; width: 100%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+      /* Keep the subtitle clear of the bottom-right chevron: symmetric padding
+         keeps it centered while ellipsizing before it reaches the button. */
+      .types-header.vertical-header .secondary { padding: 0 28px; box-sizing: border-box; }
+      .types-header.vertical-header .types-chevron { position: absolute; bottom: 8px; right: 10px; --mdc-icon-size: 22px; opacity: .85; }
+      .type-row { display: flex; align-items: center; gap: 10px; min-height: 44px; box-sizing: border-box; padding: 7px 12px 7px 14px; cursor: pointer; border-top: 1px solid var(--divider-color); transition: background-color .2s; outline: none; }
+      .type-row:hover { background: var(--secondary-background-color); }
+      .type-row:focus-visible { box-shadow: 0 0 0 2px var(--primary-color) inset; }
+      .type-row.is-updating { opacity: .6; pointer-events: none; }
+      .type-thumb { width: 28px; height: 28px; flex-shrink: 0; }
+      .type-thumb img { width: 100%; height: 100%; object-fit: cover; border-radius: 50%; }
+      .type-name { flex: 1; min-width: 0; font-size: 14px; color: var(--primary-text-color); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+      .type-qty { display: flex; align-items: center; gap: 4px; flex-shrink: 0; }
+      .type-indicator { width: 28px; height: 28px; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
+      .type-indicator ha-icon { --mdc-icon-size: 20px; }
+      .type-indicator.type-add ha-icon { color: var(--secondary-text-color); opacity: .45; }
+`;
 
 class ShoppingListCardEditor extends HTMLElement {
   constructor() {
@@ -238,7 +634,7 @@ class ShoppingListCardEditor extends HTMLElement {
             <div class="types-field">
               <span class="types-label">Types (optional)</span>
               <textarea id="types" rows="3" placeholder="Pink Lady&#10;Granny Smith&#10;Gala"></textarea>
-              <div class="hint">One per line. When set, the card becomes expandable: tap it to reveal the types and add each as <code>Title - Type</code>. The single subtitle is ignored in this mode.</div>
+              <div class="hint">One per line. The chevron expands the variants; the header toggles the title and its optional subtitle. Existing per-variant images and icons are preserved.</div>
             </div>
             <ha-select id="types_sort" label="Sort types" naturalMenuWidth fixedMenuPosition>
               <mwc-list-item value="none">As listed</mwc-list-item>
@@ -490,7 +886,7 @@ class ShoppingListCardEditor extends HTMLElement {
   _getEditorHex(val) {
     if (!val) return '#000000';
     if (val.startsWith('#')) return val;
-    const hex = ShoppingListCard.COLOR_MAP[val.toLowerCase()];
+    const hex = CARD_DEFAULTS.COLOR_MAP[val.toLowerCase()];
     return hex || '#000000';
   }
 
@@ -552,8 +948,8 @@ class ShoppingListCardEditor extends HTMLElement {
     }
 
     ['off','on'].forEach(type => {
-      s.querySelector(`#${type}_icon`).value = c[`${type}_icon`] || ShoppingListCard[`DEFAULT_${type.toUpperCase()}_ICON`];
-      const col = c[`${type}_color`] || ShoppingListCard[`DEFAULT_${type.toUpperCase()}_COLOR`];
+      s.querySelector(`#${type}_icon`).value = c[`${type}_icon`] || CARD_DEFAULTS[`DEFAULT_${type.toUpperCase()}_ICON`];
+      const col = c[`${type}_color`] || CARD_DEFAULTS[`DEFAULT_${type.toUpperCase()}_COLOR`];
       s.querySelector(`#${type}_color`).value = col;
       s.querySelector(`#${type}_color_picker`).value = this._getEditorHex(col);
     });
@@ -568,7 +964,7 @@ class ShoppingListCardEditor extends HTMLElement {
     if (sub) n.subtitle = sub; else delete n.subtitle;
     const typesEl = s.querySelector('#types');
     if (typesEl) {
-      const list = typesEl.value.split('\n').map(x => x.trim()).filter(Boolean);
+      const list = updateTypeNames(n.types, typesEl.value);
       if (list.length) n.types = list; else delete n.types;
     }
     const sortVal = this._selectVal('types_sort');
@@ -616,11 +1012,11 @@ class ShoppingListCardEditor extends HTMLElement {
 
     ['off','on'].forEach(type => {
       const icon = s.querySelector(`#${type}_icon`).value;
-      if (icon === ShoppingListCard[`DEFAULT_${type.toUpperCase()}_ICON`]) delete n[`${type}_icon`];
+      if (icon === CARD_DEFAULTS[`DEFAULT_${type.toUpperCase()}_ICON`]) delete n[`${type}_icon`];
       else n[`${type}_icon`] = icon;
 
       const col = s.querySelector(`#${type}_color`).value;
-      if (col === ShoppingListCard[`DEFAULT_${type.toUpperCase()}_COLOR`]) delete n[`${type}_color`];
+      if (col === CARD_DEFAULTS[`DEFAULT_${type.toUpperCase()}_COLOR`]) delete n[`${type}_color`];
       else n[`${type}_color`] = col;
     });
 
@@ -632,75 +1028,90 @@ if (!customElements.get('shopping-list-card-editor')) {
   customElements.define('shopping-list-card-editor', ShoppingListCardEditor);
 }
 
+/*
+ * Shopping List Card
+ *
+ * A Home Assistant Lovelace card to manage items on a to-do list with a
+ * clean, modern interface and a visual editor.
+ *
+ * Author: eyalgal
+ * License: MIT
+ * Version: 2.2.0
+ *
+ * Note: This card requires a to-do entity to function properly.
+ * For more information, visit: https://github.com/eyalgal/ha-shopping-list-card
+ */
+
+
+const CARD_VERSION = '2.2.0';
+
+function escapeHtml(str) {
+  if (str == null) return '';
+  return String(str)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
 // ── Card ─────────────────────────────────────────────────────────────────────
 
 class ShoppingListCard extends HTMLElement {
-  static DEFAULT_ON_ICON    = 'mdi:check';
-  static DEFAULT_OFF_ICON   = 'mdi:plus';
-  static DEFAULT_ON_COLOR   = 'green';
-  static DEFAULT_OFF_COLOR  = 'grey';
-  static COLOR_MAP = {
-    red: '#F44336', pink: '#E91E63', purple: '#9C27B0',
-    'deep-purple': '#673AB7', indigo: '#3F51B5',
-    blue: '#2196F3', 'light-blue': '#03A9F4',
-    cyan: '#00BCD4', teal: '#009688', green: '#4CAF50',
-    lime: '#CDDC39', yellow: '#FFEB3B', amber: '#FFC107',
-    orange: '#FF9800', brown: '#795548', grey: '#9E9E9E',
-    'blue-grey': '#607D8B',
-  };
+  static DEFAULT_ON_ICON    = CARD_DEFAULTS.DEFAULT_ON_ICON;
+  static DEFAULT_OFF_ICON   = CARD_DEFAULTS.DEFAULT_OFF_ICON;
+  static DEFAULT_ON_COLOR   = CARD_DEFAULTS.DEFAULT_ON_COLOR;
+  static DEFAULT_OFF_COLOR  = CARD_DEFAULTS.DEFAULT_OFF_COLOR;
+  static COLOR_MAP = CARD_DEFAULTS.COLOR_MAP;
 
   constructor() {
     super();
     this._isUpdating = false;
     this._items = null;
     this._unsubscribe = null;
-    this._subscribedEntity = null;
+    this._store = null;
+    this._syncState = null;
+    this._actionError = null;
+    this._configVersion = 0;
     this._lastRenderKey = null;
     this._expanded = false;
-    // Backoff retry so a failed sub/fetch (HA restart, integration reload) heals
-    // itself instead of getting stuck on the error screen.
-    this._retryTimer = null;
-    this._retryDelay = 0;
+    this._holdCleanups = new Set();
+    this._suppressClick = false;
+    this._clickResetTimer = null;
+    this.addEventListener('click', event => {
+      if (!this._suppressClick) return;
+      this._suppressClick = false;
+      clearTimeout(this._clickResetTimer);
+      this._clickResetTimer = null;
+      event.preventDefault();
+      event.stopImmediatePropagation();
+    }, true);
   }
 
   set hass(hass) {
-    const firstHass = !this._hass;
-    const prevState = this._hass?.states?.[this._config?.todo_list];
-    const prevConnected = this._hass?.connected;
     this._hass = hass;
-    if (!this._config) return;
-    if (firstHass) this._ensureSubscription();
-
-    // On websocket reconnect (HA restart) the old subscription is dead; rebuild
-    // it and refetch. Clears a stuck error card without a force-close.
-    if (prevConnected === false && hass.connected) { this._recover(); return; }
-
-    // Only re-render if the entity's availability changed (exists / unavailable).
-    // Item changes are pushed via subscription; avoid re-rendering on unrelated state updates.
-    const newState = hass.states?.[this._config.todo_list];
-    const prevAvail = !!prevState && prevState.state !== 'unavailable';
-    const newAvail = !!newState && newState.state !== 'unavailable';
-    if (prevAvail !== newAvail) {
-      // Entity came back: rebuild sub + refetch. Went away: just re-render.
-      if (newAvail && !prevAvail) this._recover();
-      else if (this._items !== null) this._render();
-    }
+    if (this._config && this.isConnected) this._ensureSubscription();
   }
 
   setConfig(config) {
-    if (!config.title)      throw new Error('You must define a title.');
-    if (!config.todo_list) throw new Error('You must define a todo_list entity_id.');
+    if (typeof config.title !== 'string' || !config.title.trim()) throw new Error('You must define a title.');
+    if (typeof config.todo_list !== 'string' || !config.todo_list.startsWith('todo.')) {
+      throw new Error('You must define a todo_list entity_id.');
+    }
     const prev = this._config;
-    this._config = config;
-    // Any config change can affect what we render; invalidate the memo.
+    this._clearHolds();
+    this._config = { ...config };
+    this._configVersion++;
+    this._actionError = null;
+    this._isUpdating = false;
     this._lastRenderKey = null;
     if (prev && prev.todo_list !== config.todo_list) {
       this._items = null;
       this._teardownSubscription();
     }
-    if (this._hass) {
+    if (this._hass && this.isConnected) {
       this._ensureSubscription();
-      if (this._items !== null) this._render();
+      this._render();
     }
   }
 
@@ -709,87 +1120,40 @@ class ShoppingListCard extends HTMLElement {
   }
 
   disconnectedCallback() {
+    this._clearHolds();
+    clearTimeout(this._clickResetTimer);
+    this._clickResetTimer = null;
+    this._suppressClick = false;
     this._teardownSubscription();
-    if (this._retryTimer) { clearTimeout(this._retryTimer); this._retryTimer = null; }
+    this._configVersion++;
+    this._isUpdating = false;
   }
 
   _ensureSubscription() {
     if (!this._hass || !this._config?.todo_list) return;
-    if (this._subscribedEntity === this._config.todo_list && this._unsubscribe) return;
-    this._teardownSubscription();
-    const entityId = this._config.todo_list;
-    this._subscribedEntity = entityId;
-
-    try {
-      this._unsubscribe = _slcSubscribe(this._hass, entityId, (items, err) => {
-        if (err) {
-          // Sub died; drop the stale handle so a retry can re-subscribe.
-          this._teardownSubscription();
-          this._fallbackFetch();
-          return;
-        }
-        // Fresh push: data flowing again, clear any pending retry.
-        this._clearRetry();
-        this._items = (items || []).filter(i => i.status === 'needs_action');
-        this._render();
-      });
-    } catch (e) {
-      console.error('Shopping List Card: subscription failed, falling back to polling', e);
-      this._fallbackFetch();
+    if (this._store?.entityId === this._config.todo_list
+      && this._store.connection === this._hass.connection && this._unsubscribe) {
+      this._store.updateHass(this._hass);
+      return;
     }
-  }
-
-  async _fallbackFetch() {
-    if (!this._hass || !this._config?.todo_list) return;
-    try {
-      const res = await this._hass.callWS({
-        type: 'todo/item/list',
-        entity_id: this._config.todo_list,
-      });
-      this._clearRetry();
-      this._items = (res.items || []).filter(i => i.status === 'needs_action');
+    this._teardownSubscription();
+    this._items = null;
+    const store = getTodoStore(this._hass, this._config.todo_list);
+    this._store = store;
+    this._unsubscribe = store.subscribe(snapshot => {
+      if (this._store !== store) return;
+      this._syncState = snapshot;
+      this._items = snapshot.items;
       this._render();
-    } catch (e) {
-      console.error('Shopping List Card: fetch failed', e);
-      // Keep last items if we have them; only error when there's nothing to show.
-      // Retry either way so the card heals once HA is back.
-      if (this._items === null) this._renderError('Error fetching items.');
-      this._scheduleRetry();
-    }
-  }
-
-  /** Rebuild the subscription and refetch, clearing a stuck error state. */
-  _recover() {
-    this._clearRetry();
-    this._teardownSubscription();
-    this._ensureSubscription();
-    this._fallbackFetch();
-  }
-
-  /** Retry sub + fetch with capped exponential backoff; no-op if one's pending. */
-  _scheduleRetry() {
-    if (this._retryTimer) return;
-    this._retryDelay = this._retryDelay ? Math.min(this._retryDelay * 2, 30000) : 2000;
-    this._retryTimer = setTimeout(() => {
-      this._retryTimer = null;
-      if (!this._hass || !this._config?.todo_list) return;
-      this._teardownSubscription();
-      this._ensureSubscription();
-      this._fallbackFetch();
-    }, this._retryDelay);
-  }
-
-  _clearRetry() {
-    if (this._retryTimer) { clearTimeout(this._retryTimer); this._retryTimer = null; }
-    this._retryDelay = 0;
+    });
   }
 
   _teardownSubscription() {
-    if (this._unsubscribe) {
-      try { this._unsubscribe(); } catch (_) {}
-      this._unsubscribe = null;
-    }
-    this._subscribedEntity = null;
+    const unsubscribe = this._unsubscribe;
+    this._unsubscribe = null;
+    this._store = null;
+    this._syncState = null;
+    unsubscribe?.();
   }
 
   static getConfigElement() { return document.createElement('shopping-list-card-editor'); }
@@ -801,8 +1165,6 @@ class ShoppingListCard extends HTMLElement {
     };
   }
 
-  _escapeRegExp(s) { return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); }
-
   /** Build the todo item summary to match / write, honoring list_prefix. */
   _buildFullName() {
     return this._buildNameFor(this._config.subtitle);
@@ -810,9 +1172,7 @@ class ShoppingListCard extends HTMLElement {
 
   /** Build a summary for a given subtitle/type, honoring list_prefix. */
   _buildNameFor(subtitle) {
-    const c = this._config;
-    const base = subtitle ? `${c.title} - ${subtitle}` : c.title;
-    return c.list_prefix ? `${c.list_prefix} - ${base}` : base;
+    return buildName(this._config, subtitle);
   }
 
   /** Normalized list of configured types (variants). Each entry is an object
@@ -847,29 +1207,13 @@ class ShoppingListCard extends HTMLElement {
   /** When `remove_zero: false`, keep emptied items as `Name (0)` and always
    *  suffix the quantity. Requires quantity mode; defaults off (remove at 0). */
   _keepZero() {
-    return !!this._config.enable_quantity && this._config.remove_zero === false;
-  }
-
-  /** Build the stored summary for a name at a quantity, honoring keep-zero. */
-  _summaryFor(fullName, qty) {
-    if (!this._config.enable_quantity) return fullName;
-    if (this._keepZero()) return `${fullName} (${qty})`;
-    return qty > 1 ? `${fullName} (${qty})` : fullName;
+    return keepZero(this._config);
   }
 
   /** Match a summary against the current items. `present` is whether it exists
    *  at all; `isOn` is whether it's active (a kept `Name (0)` is present but off). */
   _matchSummary(fullName) {
-    const rx = new RegExp(`^${this._escapeRegExp(fullName)}(?: \\((\\d+)\\))?$`, 'i');
-    for (const item of this._items) {
-      const m = item.summary.match(rx);
-      if (m) {
-        const qty = m[1] != null ? +m[1] : 1;
-        const isOn = this._keepZero() ? qty > 0 : true;
-        return { isOn, present: true, qty, matched: item.summary, matchedUid: item.uid };
-      }
-    }
-    return { isOn: false, present: false, qty: 0, matched: null, matchedUid: null };
+    return matchItem(this._items, fullName, this._config);
   }
 
   /** Resolve the on-state and stored name for a single type. */
@@ -963,33 +1307,56 @@ class ShoppingListCard extends HTMLElement {
 
   _ensureShell() {
     if (this.content) return;
-    this.innerHTML = `<ha-card><div class="card-content"></div></ha-card>`;
+    this.innerHTML = `<ha-card><div class="list-status" role="status" aria-live="polite"></div><div class="card-content"></div></ha-card>`;
     this.content = this.querySelector('div.card-content');
+    this._statusElement = this.querySelector('.list-status');
     this._attachStyles();
   }
 
-  _renderError(message) {
-    this._ensureShell();
-    this.content.innerHTML = `<ha-alert alert-type="error">${escapeHtml(message)}</ha-alert>`;
-    // Error replaces the card DOM, so the next normal render must rebuild from scratch.
-    this._lastRenderKey = null;
+  _renderStatus() {
+    const status = this._syncState?.status || 'loading';
+    const message = this._actionError || this._syncState?.error || (status === 'loading' ? 'Loading list...' : '');
+    const severity = this._actionError || status === 'error' ? 'error' : status === 'loading' ? 'info' : 'warning';
+    const key = `${severity}|${message}`;
+    if (this._lastStatusKey === key) return;
+    this._lastStatusKey = key;
+    this._statusElement.innerHTML = message ? `<ha-alert alert-type="${severity}">${escapeHtml(message)}
+      ${status !== 'loading' ? '<button class="refresh-list" type="button" title="Refresh list" aria-label="Refresh list"><ha-icon icon="mdi:refresh"></ha-icon></button>' : ''}
+    </ha-alert>` : '';
+    this._statusElement.querySelector('.refresh-list')?.addEventListener('click', async () => {
+      const store = this._store;
+      this._actionError = null;
+      try { await store?.refresh(); }
+      catch (error) { if (this._store === store) this._actionError = error.message || 'Could not refresh the list.'; }
+      if (this._store === store) this._renderStatus();
+    });
+  }
+
+  _applyBusyState() {
+    const card = this.content?.querySelector('.card-container');
+    if (!card) return;
+    const names = [this._buildFullName(), ...this._getTypes().map(type => this._buildNameFor(type.name))];
+    const busy = this._isUpdating || names.some(name => this._store?.pending.has(name.toLowerCase()));
+    const unavailable = !this._store?.ready;
+    card.classList.toggle('is-updating', busy);
+    card.classList.toggle('is-unavailable', unavailable);
+    card.setAttribute('aria-busy', String(busy));
+    for (const control of [card, ...card.querySelectorAll('[role="button"]')]) {
+      control.setAttribute('aria-disabled', String(busy || unavailable));
+    }
   }
 
   _render() {
     this._ensureShell();
-    this._isUpdating = false;
-    const container = this.content.querySelector('.card-container');
-    if (container) container.classList.remove('is-updating');
+    this._renderStatus();
+    this._applyBusyState();
     if (!this._config || !this._hass) return;
 
-    const state = this._hass.states[this._config.todo_list];
-    if (!state) {
-      this._renderError(`Entity not found: ${this._config.todo_list}`);
-      return;
-    }
-
     if (this._items === null) {
-      return; // waiting for subscription
+      this._clearHolds();
+      this.content.innerHTML = '';
+      this._lastRenderKey = null;
+      return;
     }
 
     const types = this._getTypes();
@@ -1107,6 +1474,7 @@ class ShoppingListCard extends HTMLElement {
       : '';
     const nameClass = showName ? '' : 'no-name';
 
+    this._clearHolds();
     this.content.innerHTML = `
       <div class="card-container ${isOn?'is-on':'is-off'} ${layoutClass} ${nameClass}"
            role="button" tabindex="0" aria-pressed="${isOn ? 'true' : 'false'}" aria-label="${ariaLabel}"
@@ -1118,8 +1486,9 @@ class ShoppingListCard extends HTMLElement {
     `;
 
     const card = this.content.querySelector('.card-container');
-    this._wireInteractions(card, isOn, matched, matchedUid, qty, fullName, present);
+    this._wireInteractions(card);
     this._wireImageError(card);
+    this._applyBusyState();
   }
 
   /** Render the expandable "types" (variants) layout. The header is the bare
@@ -1263,6 +1632,7 @@ class ShoppingListCard extends HTMLElement {
          <ha-icon class="types-chevron" icon="mdi:chevron-down" role="button" tabindex="0"
                   aria-expanded="false" aria-controls="slc-types-list" aria-label="Toggle types"></ha-icon>`;
 
+    this._clearHolds();
     this.content.innerHTML = `
       <div class="card-container types-mode ${isVertical ? 'vertical-layout' : ''} ${anyOn ? 'is-on' : 'is-off'}" ${cardBgStyle}>
         <div class="types-header ${isVertical ? 'vertical-header' : ''}" role="button" tabindex="0"
@@ -1277,6 +1647,7 @@ class ShoppingListCard extends HTMLElement {
     this._wireTypesInteractions(card);
     this._wireImageError(card);
     this._applyExpanded();
+    this._applyBusyState();
   }
 
   _applyExpanded() {
@@ -1284,6 +1655,11 @@ class ShoppingListCard extends HTMLElement {
     if (!card) return;
     const expanded = !!this._expanded;
     card.classList.toggle('expanded', expanded);
+    const list = card.querySelector('.types-list');
+    if (list) {
+      list.inert = !expanded;
+      list.setAttribute('aria-hidden', String(!expanded));
+    }
     const chevron = card.querySelector('.types-chevron');
     if (chevron) chevron.setAttribute('aria-expanded', expanded ? 'true' : 'false');
   }
@@ -1339,121 +1715,114 @@ class ShoppingListCard extends HTMLElement {
    *  Honors `hold_action: { action: none }` to disable holds entirely. */
   _attachHold(el, onHold) {
     if (this._config.hold_action?.action === 'none') return;
-    let holdTimer = null, heldFired = false, startX = 0, startY = 0;
-    const start = (ev) => {
-      if (ev.target.closest('.quantity-btn')) return;
-      heldFired = false;
-      const t = ev.touches?.[0];
-      startX = t ? t.clientX : ev.clientX;
-      startY = t ? t.clientY : ev.clientY;
+    let holdTimer = null;
+    let startX = 0;
+    let startY = 0;
+    const version = this._configVersion;
+    const start = event => {
+      if (event.button !== 0 || event.isPrimary === false
+        || event.target.closest('.quantity-btn, .types-chevron')) return;
+      startX = event.clientX;
+      startY = event.clientY;
       clearTimeout(holdTimer);
       holdTimer = setTimeout(() => {
-        heldFired = true; holdTimer = null;
+        holdTimer = null;
+        if (!el.isConnected || this._configVersion !== version) return;
+        this._suppressClick = true;
+        clearTimeout(this._clickResetTimer);
+        this._clickResetTimer = setTimeout(() => { this._suppressClick = false; }, 1000);
         this._vibrate();
-        onHold();
+        this._handleHoldAction(onHold);
       }, 500);
     };
     const cancel = () => { clearTimeout(holdTimer); holdTimer = null; };
-    const move = (ev) => {
+    const move = event => {
       if (!holdTimer) return;
-      const t = ev.touches?.[0];
-      const x = t ? t.clientX : ev.clientX;
-      const y = t ? t.clientY : ev.clientY;
-      if (Math.abs(x - startX) > 10 || Math.abs(y - startY) > 10) cancel();
+      if (Math.abs(event.clientX - startX) > 10 || Math.abs(event.clientY - startY) > 10) cancel();
     };
-    el.addEventListener('mousedown', start);
-    el.addEventListener('touchstart', start, { passive: true });
-    el.addEventListener('mousemove', move);
-    el.addEventListener('touchmove', move, { passive: true });
-    ['mouseup', 'mouseleave', 'touchend', 'touchcancel'].forEach(e => el.addEventListener(e, cancel));
-    el.addEventListener('click', (ev) => {
-      if (heldFired) { ev.stopImmediatePropagation(); ev.preventDefault(); heldFired = false; }
-    }, true);
+    el.addEventListener('pointerdown', start);
+    el.addEventListener('pointermove', move);
+    for (const event of ['pointerup', 'pointerleave', 'pointercancel']) el.addEventListener(event, cancel);
+    this._holdCleanups.add(() => {
+      cancel();
+      el.removeEventListener('pointerdown', start);
+      el.removeEventListener('pointermove', move);
+      for (const event of ['pointerup', 'pointerleave', 'pointercancel']) el.removeEventListener(event, cancel);
+    });
+  }
+
+  _clearHolds() {
+    for (const cleanup of this._holdCleanups) cleanup();
+    this._holdCleanups.clear();
   }
 
   /** Hold on the header: remove every item that belongs to this card, i.e.
    *  the bare title plus each configured variant currently on the list. */
-  async _removeAllTypes() {
-    if (this._isUpdating) return;
-    const names = [this._config.subtitle || null, ...(this._typeEntries || [])];
-    const seen = new Set();
-    const calls = [];
-    for (const n of names) {
-      const { isOn, present, matched, matchedUid } = this._typeState(n);
-      if (!isOn && !present) continue;
-      const key = matchedUid || matched;
-      if (key && !seen.has(key)) {
-        seen.add(key);
-        calls.push(this._removeByUidOrSummary(matchedUid, matched));
-      }
-    }
-    if (!calls.length) return;
-    this._isUpdating = true;
-    try { await Promise.all(calls); }
-    catch (e) { console.error('Hold remove-all failed', e); }
-    this._isUpdating = false;
+  _removeAllTypes() {
+    return this._runItemActions([this._config.subtitle || null, ...this._getTypes().map(type => type.name)], 'remove');
   }
 
   /** Hold on a variant row: remove that specific variant entirely. */
-  async _removeType(idx) {
-    if (this._isUpdating) return;
+  _removeType(idx) {
     const entries = this._typeEntries || [];
     if (idx < 0 || idx >= entries.length) return;
-    const { isOn, present, matched, matchedUid } = this._typeState(entries[idx]);
-    if (!isOn && !present) return;
-    this._isUpdating = true;
-    try { await this._removeByUidOrSummary(matchedUid, matched); }
-    catch (e) { console.error('Hold remove-type failed', e); }
-    this._isUpdating = false;
+    return this._runItemActions([entries[idx]], 'remove');
   }
 
   _handleHeaderTap(ev) {
-    const header = ev.target.closest('.types-header');
-    // The header item carries the configured subtitle when present.
-    return this._toggleSubtitle(ev, this._config.subtitle || null, header);
+    return this._toggleSubtitle(ev, this._config.subtitle || null);
   }
 
   _handleTypeTap(ev, idx) {
     ev.stopPropagation();
     const entries = this._typeEntries || [];
     if (idx < 0 || idx >= entries.length) return;
-    const row = ev.target.closest('.type-row');
-    return this._toggleSubtitle(ev, entries[idx], row);
+    return this._toggleSubtitle(ev, entries[idx]);
   }
 
-  async _toggleSubtitle(ev, subtitle, el) {
-    if (this._isUpdating) return;
-    const { fullName, isOn, qty, matched, matchedUid, present } = this._typeState(subtitle);
-    const action = ev.target.closest('.quantity-btn')?.dataset.action;
+  _toggleSubtitle(event, subtitle) {
+    event.stopPropagation();
+    const action = event.target.closest('.quantity-btn')?.dataset.action || 'toggle';
+    return this._runItemActions([subtitle], action);
+  }
 
+  async _runItemActions(subtitles, action) {
+    if (this._isUpdating || !this.isConnected) return;
+    const store = this._store;
+    const config = this._config;
+    const version = this._configVersion;
+    const keys = [...new Set(subtitles.map(subtitle => buildName(config, subtitle).toLowerCase()))];
+    if (keys.some(key => store?.pending.has(key))) return;
+    if (!store?.ready) {
+      this._actionError = store?.error || 'Wait for the to-do list to reconnect.';
+      this._renderStatus();
+      return;
+    }
     this._vibrate();
     this._isUpdating = true;
-    el?.classList.add('is-updating');
-
-    let call;
-    const step = Math.max(1, parseInt(this._config.quantity_step, 10) || 1);
-    const maxQty = parseInt(this._config.quantity_max, 10);
-    if (action === 'increment') {
-      let next = qty + step;
-      if (!isNaN(maxQty) && maxQty > 0) next = Math.min(next, maxQty);
-      if (next !== qty) call = this._updateQuantity(matchedUid, matched, next, fullName);
-    } else if (action === 'decrement') {
-      const next = Math.max(this._keepZero() ? 0 : 1, qty - step);
-      if (next !== qty) call = this._updateQuantity(matchedUid, matched, next, fullName);
-    } else if (this._keepZero()) {
-      if (!present) call = this._addItem(this._summaryFor(fullName, 1));
-      else call = this._updateQuantity(matchedUid, matched, qty > 0 ? 0 : 1, fullName);
-    } else if (isOn) {
-      if (!this._config.enable_quantity || qty === 1) call = this._removeByUidOrSummary(matchedUid, matched);
-    } else {
-      call = this._addItem(this._summaryFor(fullName, 1));
+    this._actionError = null;
+    this._applyBusyState();
+    this._renderStatus();
+    try {
+      await store.execute(keys, items => {
+        const seen = new Set();
+        return subtitles.map(subtitle => planItemAction(config, items, subtitle, action)).filter(operation => {
+          if (!operation || seen.has(operation.key)) return false;
+          seen.add(operation.key);
+          return true;
+        });
+      });
+    } catch (error) {
+      if (this._store === store && this._configVersion === version) {
+        this._actionError = error.message || 'Could not update the to-do list.';
+      }
+    } finally {
+      if (this._store === store && this._configVersion === version) {
+        this._isUpdating = false;
+        this._applyBusyState();
+        this._renderStatus();
+      }
     }
-
-    if (call) {
-      try { await call; } catch (e) { console.error('Service call failed', e); }
-    }
-    this._isUpdating = false;
-    el?.classList.remove('is-updating');
   }
 
   _wireImageError(card) {
@@ -1474,8 +1843,8 @@ class ShoppingListCard extends HTMLElement {
     });
   }
 
-  _wireInteractions(card, isOn, matched, matchedUid, qty, fullName, present) {
-    const tap = (ev) => this._handleTap(ev, isOn, matched, matchedUid, qty, fullName, present);
+  _wireInteractions(card) {
+    const tap = (event) => this._toggleSubtitle(event, this._config.subtitle || null);
     card.addEventListener('click', tap);
     card.addEventListener('keydown', (ev) => {
       if (ev.target.closest('.quantity-btn')) {
@@ -1491,57 +1860,10 @@ class ShoppingListCard extends HTMLElement {
       }
     });
 
-    const holdCfg = this._config.hold_action;
-    if (holdCfg?.action === 'none') return;
-
-    let holdTimer = null;
-    let heldFired = false;
-    let startX = 0, startY = 0;
-
-    const startHold = (ev) => {
-      // Don't start hold on quantity buttons
-      if (ev.target.closest('.quantity-btn')) return;
-      heldFired = false;
-      const touch = ev.touches?.[0];
-      startX = touch ? touch.clientX : ev.clientX;
-      startY = touch ? touch.clientY : ev.clientY;
-      clearTimeout(holdTimer);
-      holdTimer = setTimeout(() => {
-        heldFired = true;
-        holdTimer = null;
-        this._vibrate();
-        this._handleHold(isOn, matched, matchedUid, present);
-      }, 500);
-    };
-
-    const cancelHold = () => { clearTimeout(holdTimer); holdTimer = null; };
-
-    const maybeCancelOnMove = (ev) => {
-      if (!holdTimer) return;
-      const touch = ev.touches?.[0];
-      const x = touch ? touch.clientX : ev.clientX;
-      const y = touch ? touch.clientY : ev.clientY;
-      if (Math.abs(x - startX) > 10 || Math.abs(y - startY) > 10) cancelHold();
-    };
-
-    card.addEventListener('mousedown', startHold);
-    card.addEventListener('touchstart', startHold, { passive: true });
-    card.addEventListener('mousemove', maybeCancelOnMove);
-    card.addEventListener('touchmove', maybeCancelOnMove, { passive: true });
-    ['mouseup', 'mouseleave', 'touchend', 'touchcancel'].forEach(e =>
-      card.addEventListener(e, cancelHold)
-    );
-    // Swallow the synthesized click after a successful hold.
-    card.addEventListener('click', (ev) => {
-      if (heldFired) {
-        ev.stopImmediatePropagation();
-        ev.preventDefault();
-        heldFired = false;
-      }
-    }, true);
+    this._attachHold(card, () => this._runItemActions([this._config.subtitle || null], 'remove'));
   }
 
-  _handleHold(isOn, matched, matchedUid, present) {
+  _handleHoldAction(onRemove) {
     const cfg = this._config.hold_action;
     const action = cfg?.action || 'default';
 
@@ -1557,184 +1879,17 @@ class ShoppingListCard extends HTMLElement {
       return;
     }
 
-    // Default: remove the item entirely (even a kept `Name (0)`) if present.
-    if (action === 'default') {
-      if (present || isOn) this._removeByUidOrSummary(matchedUid, matched)
-        .catch(e => console.error('Hold remove failed', e));
-    }
+    if (action === 'default') return onRemove();
   }
 
   _vibrate() {
     if (this._config?.haptic && navigator.vibrate) navigator.vibrate(50);
   }
 
-  async _handleTap(ev, isOn, matched, matchedUid, qty, fullName, present) {
-    if (this._isUpdating) return;
-    ev.stopPropagation();
-    const action = ev.target.closest('.quantity-btn')?.dataset.action;
-
-    this._vibrate();
-    this._isUpdating = true;
-    this.content.querySelector('.card-container').classList.add('is-updating');
-
-    let call;
-    const step = Math.max(1, parseInt(this._config.quantity_step, 10) || 1);
-    const maxQty = parseInt(this._config.quantity_max, 10);
-    if (action === 'increment') {
-      let next = qty + step;
-      if (!isNaN(maxQty) && maxQty > 0) next = Math.min(next, maxQty);
-      if (next !== qty) call = this._updateQuantity(matchedUid, matched, next, fullName);
-    } else if (action === 'decrement') {
-      const next = Math.max(this._keepZero() ? 0 : 1, qty - step);
-      if (next !== qty) call = this._updateQuantity(matchedUid, matched, next, fullName);
-    } else if (this._keepZero()) {
-      // Never delete: add at (1) when absent, else toggle qty 0 <-> 1.
-      if (!present) call = this._addItem(this._summaryFor(fullName, 1));
-      else call = this._updateQuantity(matchedUid, matched, qty > 0 ? 0 : 1, fullName);
-    } else {
-      if (isOn) {
-        if (!this._config.enable_quantity || qty===1) call = this._removeByUidOrSummary(matchedUid, matched);
-      } else {
-        call = this._addItem(this._summaryFor(fullName, 1));
-      }
-    }
-
-    if (call) {
-      try {
-        await call;
-        // Subscription will push the update; no manual re-render needed.
-      } catch (e) {
-        console.error('Service call failed', e);
-      }
-    }
-    this._isUpdating = false;
-    this.content.querySelector('.card-container')?.classList.remove('is-updating');
-  }
-
-  _addItem(name) {
-    return this._hass.callService('todo','add_item',{ entity_id: this._config.todo_list, item: name });
-  }
-
-  _removeByUidOrSummary(uid, summary) {
-    const target = uid || summary;
-    if (!target) return Promise.resolve();
-    return this._hass.callService('todo','remove_item',{
-      entity_id: this._config.todo_list,
-      item: target,
-    });
-  }
-
-  _updateQuantity(uid, oldSummary, newQty, fullName) {
-    const newName = this._summaryFor(fullName, newQty);
-    return this._hass.callService('todo','update_item',{
-      entity_id: this._config.todo_list,
-      item: uid || oldSummary,
-      rename: newName,
-    });
-  }
-
   _attachStyles() {
     if (this.querySelector('style')) return;
     const s = document.createElement('style');
-    s.textContent = `
-      ha-card { box-sizing: border-box; border-radius: var(--ha-card-border-radius,12px); box-shadow: var(--ha-card-box-shadow); overflow:hidden; background: var(--ha-card-background, var(--card-background-color)); }
-      .card-content { padding:0 !important; margin: -1px 0; }
-      .card-container { display:flex; align-items:center; padding:10px 12px; gap:10px; cursor:pointer; transition:background-color .2s; box-sizing: border-box; outline: none; }
-      .card-container:hover { background: var(--secondary-background-color) }
-      .card-container:focus-visible { box-shadow: 0 0 0 2px var(--primary-color); }
-      .quantity-btn { cursor: pointer; }
-      .quantity-btn:focus-visible { outline: 2px solid var(--primary-color); outline-offset: 1px; }
-
-      /* Icon-only mode */
-      .card-container.vertical-layout.no-name { justify-content: center; height: 56px; }
-      .card-container.vertical-layout.no-name .vertical-top-block { top: 50%; transform: translateY(-50%); }
-      .card-container.vertical-layout.no-name .icon-wrapper.vertical-icon { width: 36px; height: 36px; }
-      .card-container.vertical-layout.no-name .icon-wrapper.vertical-icon ha-icon { --mdc-icon-size: 22px; }
-      .card-container.vertical-layout.no-name .image-wrapper.vertical-image { max-height: 36px; }
-      .card-container.vertical-layout.no-name .image-wrapper.vertical-image img { max-height: 36px; }
-      .card-container.vertical-layout.no-name .image-wrapper.vertical-image.image-error { width: 36px; height: 36px; }
-      /* Horizontal no-name: keep icon at left, quantity at right */
-      .card-container:not(.vertical-layout).no-name .quantity-controls { margin-left: auto; }
-
-      /* Vertical Layout */
-      .card-container.vertical-layout { display: block; height: 120px; position: relative; }
-      .vertical-top-block { position: absolute; top: 18px; left: 16px; right: 16px; display: flex; justify-content: center; }
-      .vertical-layout .info-container { position: absolute; bottom: 12px; left: 16px; right: 16px; height: 40px; display: flex; flex-direction: column; justify-content: center; }
-
-      .vertical-icon-container { display: flex; align-items: center; justify-content: center; gap: 8px; }
-
-      .icon-wrapper { display:flex; align-items:center; justify-content:center; width:36px; height:36px; border-radius:50%; flex-shrink:0; position: relative; }
-      .image-wrapper { position:relative; width:36px; height:36px; flex-shrink:0 }
-      .image-wrapper img { width:100%; height:100%; object-fit:cover; border-radius:50% }
-      .image-wrapper .icon-wrapper { position:absolute; top:0; left:0; width:100%; height:100%; display:none; }
-      .image-wrapper.image-error .icon-wrapper { display:flex; }
-
-      .icon-wrapper.vertical-icon { width: 48px; height: 48px; }
-      .icon-wrapper.vertical-icon ha-icon { --mdc-icon-size: 28px; }
-
-      .image-wrapper.vertical-image { width: auto; height: auto; max-height: 48px; position: relative; }
-      .image-wrapper.vertical-image img { object-fit: contain; border-radius: 4px; width: auto; height: auto; max-width: 100%; max-height: 48px; }
-      .image-wrapper.vertical-image.image-error { width: 48px; height: 48px; }
-      .image-wrapper.vertical-image.image-error .icon-wrapper { position: static; }
-
-      .info-container { flex-grow:1; overflow:hidden; min-width:0; }
-      .primary { font-size:14px; font-weight:500; line-height:20px; color:var(--primary-text-color); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
-      .secondary { font-size:12px; font-weight:400; line-height:16px; color:var(--secondary-text-color); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
-      .vertical-layout .primary, .vertical-layout .secondary { text-align: center; }
-
-      /* Quantity Controls */
-      .quantity-controls { display:flex; align-items:center; gap:4px; flex-shrink:0 }
-      .quantity { font-size:14px; font-weight:500; min-width:20px; text-align:center }
-      .quantity-btn { width:24px; height:24px; background:rgba(128,128,128,0.2); border-radius:5px; display:flex; align-items:center; justify-content:center; transition: background-color 0.2s; }
-      .quantity-btn:hover { background:rgba(128,128,128,0.4); }
-      .quantity-btn ha-icon { --mdc-icon-size: 20px; }
-      .quantity-badge { position: absolute; top: -4px; right: -4px; background-color: var(--primary-color); color: white; border-radius: 50%; width: 18px; height: 18px; font-size: 11px; display: flex; align-items: center; justify-content: center; font-weight: 500; border: 2px solid var(--card-background-color); }
-      .quantity-btn-placeholder { width: 24px; height: 24px; flex-shrink: 0; }
-
-      /* Types (variants) mode */
-      .card-container.types-mode { display: block; padding: 0; cursor: default; }
-      .card-container.types-mode:hover { background: transparent; }
-      /* Types cards grow with their content; never inherit the fixed 120px
-         height from the normal vertical-layout tile. */
-      .card-container.types-mode.vertical-layout { height: auto; }
-      .types-header { display: flex; align-items: center; gap: 10px; padding: 10px 12px; cursor: pointer; transition: background-color .2s; }
-      .types-header:hover { background: var(--secondary-background-color); }
-      .types-header:focus-visible { outline: none; box-shadow: 0 0 0 2px var(--primary-color) inset; }
-      .types-header.is-updating { opacity: .6; pointer-events: none; }
-      .types-chevron { flex-shrink: 0; color: var(--secondary-text-color); transition: transform .25s ease, background-color .2s; cursor: pointer; border-radius: 50%; padding: 2px; }
-      .types-chevron:hover { background: var(--divider-color); }
-      .types-chevron:focus-visible { outline: none; box-shadow: 0 0 0 2px var(--primary-color); }
-      .card-container.types-mode.expanded .types-chevron { transform: rotate(180deg); }
-      .types-list { max-height: 0; overflow: hidden; transition: max-height .3s ease; }
-      .card-container.types-mode.expanded .types-list { max-height: 2000px; }
-
-      /* Vertical types header: reuse the normal vertical-tile shape. The header
-         is a fixed-height (120px) relative block with the icon absolutely
-         positioned top-center, the name / subtitle bottom-center, and the
-         chevron in the bottom-right corner. The variant list expands below,
-         exactly like the horizontal layout. */
-      .types-header.vertical-header { display: block; height: 120px; position: relative; padding: 0 8px; cursor: default; }
-      .types-header.vertical-header:hover { background: transparent; }
-      .types-header.vertical-header .vertical-top-block { position: absolute; top: 18px; left: 16px; right: 16px; display: flex; justify-content: center; }
-      .types-header.vertical-header .info-container { position: absolute; bottom: 12px; left: 16px; right: 16px; height: 40px; display: flex; flex-direction: column; justify-content: center; align-items: center; text-align: center; }
-      .types-header.vertical-header .primary,
-      .types-header.vertical-header .secondary { text-align: center; width: 100%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-      /* Keep the subtitle clear of the bottom-right chevron: symmetric padding
-         keeps it centered while ellipsizing before it reaches the button. */
-      .types-header.vertical-header .secondary { padding: 0 28px; box-sizing: border-box; }
-      .types-header.vertical-header .types-chevron { position: absolute; bottom: 8px; right: 10px; --mdc-icon-size: 22px; opacity: .85; }
-      .type-row { display: flex; align-items: center; gap: 10px; min-height: 44px; box-sizing: border-box; padding: 7px 12px 7px 14px; cursor: pointer; border-top: 1px solid var(--divider-color); transition: background-color .2s; outline: none; }
-      .type-row:hover { background: var(--secondary-background-color); }
-      .type-row:focus-visible { box-shadow: 0 0 0 2px var(--primary-color) inset; }
-      .type-row.is-updating { opacity: .6; pointer-events: none; }
-      .type-thumb { width: 28px; height: 28px; flex-shrink: 0; }
-      .type-thumb img { width: 100%; height: 100%; object-fit: cover; border-radius: 50%; }
-      .type-name { flex: 1; min-width: 0; font-size: 14px; color: var(--primary-text-color); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-      .type-qty { display: flex; align-items: center; gap: 4px; flex-shrink: 0; }
-      .type-indicator { width: 28px; height: 28px; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
-      .type-indicator ha-icon { --mdc-icon-size: 20px; }
-      .type-indicator.type-add ha-icon { color: var(--secondary-text-color); opacity: .45; }
-    `;
+    s.textContent = CARD_STYLES;
     this.appendChild(s);
   }
 

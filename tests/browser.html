@@ -1,0 +1,136 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Shopping List Card Test</title>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@mdi/font@7.4.47/css/materialdesignicons.min.css">
+  <style>
+    :root {
+      font-family: sans-serif;
+      color: #212121;
+      background: #f1f3f5;
+      --primary-text-color: #212121;
+      --secondary-text-color: #656970;
+      --primary-color: #0288d1;
+      --card-background-color: #ffffff;
+      --ha-card-background: #ffffff;
+      --ha-card-border-radius: 8px;
+      --ha-card-box-shadow: 0 1px 3px #0002;
+      --secondary-background-color: #eef1f4;
+      --divider-color: #d7dce1;
+    }
+    body { margin: 0; padding: 20px; }
+    main { max-width: 1000px; margin: auto; }
+    h1 { font-size: 20px; margin: 0 0 20px; }
+    #cards { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); align-items: start; gap: 12px; }
+    shopping-list-card.wide { grid-column: span 2; }
+    ha-card { display: block; }
+    ha-icon { display: inline-flex; align-items: center; justify-content: center; font-size: var(--mdc-icon-size, 24px); width: 24px; height: 24px; }
+    ha-alert { display: block; font-size: 13px; line-height: 1.5; color: #9e2424; }
+    ha-alert[alert-type="info"] { color: #365a6d; }
+    @media (max-width: 600px) {
+      body { padding: 12px; }
+      #cards { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    }
+  </style>
+</head>
+<body>
+  <main><h1>Shopping</h1><div id="cards"></div></main>
+  <script type="module">
+    class TestIcon extends HTMLElement {
+      static get observedAttributes() { return ['icon']; }
+      attributeChangedCallback() {
+        const name = this.getAttribute('icon')?.replace('mdi:', 'mdi-');
+        for (const token of [...this.classList]) if (token.startsWith('mdi-')) this.classList.remove(token);
+        this.classList.add('mdi');
+        if (name) this.classList.add(name);
+      }
+    }
+    customElements.define('ha-icon', TestIcon);
+    await import('../shopping-list-card.js');
+    const entries = [
+      { uid: 'milk', summary: 'Milk (2)', status: 'needs_action' },
+      { uid: 'apples', summary: 'Apple - Pink Lady', status: 'needs_action' },
+    ];
+    const listeners = new Set();
+    const calls = [];
+    let failNext = false;
+    let releaseWrite = null;
+    let pauseWrites = false;
+    let moreInfo = 0;
+    let nextUid = 1;
+    const canvas = document.createElement('canvas');
+    canvas.width = 80;
+    canvas.height = 80;
+    const drawing = canvas.getContext('2d');
+    drawing.fillStyle = '#d9ebf3';
+    drawing.fillRect(0, 0, 80, 80);
+    drawing.fillStyle = '#4a7385';
+    drawing.fillRect(25, 12, 30, 58);
+    drawing.fillStyle = '#ffffff';
+    drawing.font = 'bold 10px sans-serif';
+    drawing.textAlign = 'center';
+    drawing.fillText('MILK', 40, 44);
+    const image = canvas.toDataURL('image/png');
+    const push = () => { for (const callback of listeners) callback({ items: entries.map(entry => ({ ...entry })) }); };
+    const hass = {
+      connected: true,
+      states: { 'todo.test': { state: '2' } },
+      connection: {
+        subscribeMessage(callback) {
+          listeners.add(callback);
+          queueMicrotask(() => callback({ items: entries.map(entry => ({ ...entry })) }));
+          return Promise.resolve(() => listeners.delete(callback));
+        },
+      },
+      callWS: async () => ({ items: entries.map(entry => ({ ...entry })) }),
+      async callService(domain, service, data) {
+        calls.push({ domain, service, data });
+        if (pauseWrites) await new Promise(resolve => { releaseWrite = resolve; });
+        if (failNext) { failNext = false; throw new Error('Test permission error'); }
+        if (service === 'add_item') entries.push({ uid: `new-${nextUid++}`, summary: data.item, status: 'needs_action' });
+        else {
+          const index = entries.findIndex(entry => entry.uid === data.item || entry.summary === data.item);
+          if (index === -1) throw new Error('Item no longer exists');
+          if (service === 'remove_item') entries.splice(index, 1);
+          else entries[index].summary = data.rename;
+        }
+        push();
+      },
+    };
+    const configurations = [
+      { id: 'milk', title: 'Milk', enable_quantity: true, image },
+      { id: 'bread', title: 'Bread', off_icon: 'mdi:bread-slice', hold_action: { action: 'none' } },
+      { id: 'apple', title: 'Apple', types: ['Pink Lady', 'Granny Smith', 'Gala'], enable_quantity: true, hold_action: { action: 'more-info' } },
+      { id: 'milk-vertical', title: 'Milk', layout: 'vertical', enable_quantity: true, image },
+      { id: 'oats', title: 'Rolled oats', layout: 'vertical', off_icon: 'mdi:barley' },
+      { id: 'apple-vertical', title: 'Apple', layout: 'vertical', types: ['Pink Lady', 'Granny Smith', 'Gala'], enable_quantity: true },
+    ];
+    for (const configuration of configurations) {
+      const card = document.createElement('shopping-list-card');
+      card.id = configuration.id;
+      if (!configuration.layout) card.classList.add('wide');
+      const { id, ...config } = configuration;
+      card.setConfig({ type: 'custom:shopping-list-card', todo_list: 'todo.test', ...config });
+      card.hass = hass;
+      card.addEventListener('hass-more-info', () => { moreInfo++; });
+      document.querySelector('#cards').append(card);
+    }
+    window.fixture = {
+      calls,
+      entries,
+      get moreInfo() { return moreInfo; },
+      get subscriptions() { return listeners.size; },
+      failNextWrite() { failNext = true; },
+      pauseWrites() { pauseWrites = true; },
+      resumeWrites() { pauseWrites = false; releaseWrite?.(); releaseWrite = null; },
+      pushUnrelated() { push(); },
+      setConnected(connected) {
+        hass.connected = connected;
+        for (const card of document.querySelectorAll('shopping-list-card')) card.hass = { ...hass };
+      },
+    };
+  </script>
+</body>
+</html>
