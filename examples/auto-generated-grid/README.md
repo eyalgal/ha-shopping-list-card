@@ -2,6 +2,12 @@
 
 Render your entire shopping catalog as a categorized grid of shopping-list-cards, driven by a single JSON file. Add, remove, or reorganize items by editing the JSON; the dashboard rebuilds itself on the next sensor poll.
 
+## Native Catalog Alternative
+
+The same JSON and sensor can also drive `custom:shopping-list-catalog-card` directly. Use [catalog-card.yaml](catalog-card.yaml) instead of the generated grid to get built-in categories, search, and an **On list** filter without `layout-card` or `auto-entities`. The existing to-do list is unchanged, and the old grid can remain on another dashboard.
+
+Each dashboard can reference the same sensor and to-do list. Edit the catalog in the shared JSON source; this card does not save changes back to the file. New top-level category keys must also be exposed in the sensor's `json_attributes` list. They become available after the sensor refreshes.
+
 ## Files in this folder
 
 | File | Where it lives | Purpose |
@@ -9,10 +15,11 @@ Render your entire shopping catalog as a categorized grid of shopping-list-cards
 | [`shopping_items.json`](shopping_items.json) | `/config/shopping_items.json` | Your catalog: categories → list of `{ title, subtitle? }` items. |
 | [`sensor.yaml`](sensor.yaml) | Included in `configuration.yaml` | A `command_line` sensor that loads the JSON as attributes. |
 | [`dashboard.yaml`](dashboard.yaml) | Your Lovelace dashboard | A `layout-card` + `auto-entities` combo that renders one grid per category. |
+| [`catalog-card.yaml`](catalog-card.yaml) | Your Lovelace dashboard | Native catalog alternative using the same JSON-backed sensor and to-do list. |
 
 ## Requirements
 
-Install these via HACS:
+For the generated-grid version, install these via HACS. The native catalog alternative only needs this repository's card bundle and the source sensor:
 
 - [`custom:shopping-list-card`](https://github.com/eyalgal/ha-shopping-list-card) (this repo)
 - [`custom:layout-card`](https://github.com/thomasloven/lovelace-layout-card)

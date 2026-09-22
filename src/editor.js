@@ -1,5 +1,5 @@
 import { CARD_DEFAULTS } from './card-defaults.js';
-import { updateTypeNames } from './item-model.js';
+import './variants-editor.js';
 
 class ShoppingListCardEditor extends HTMLElement {
   constructor() {
@@ -13,7 +13,7 @@ class ShoppingListCardEditor extends HTMLElement {
     this._hass = hass;
     if (!this._rendered) { this._render(); return; }
     this.shadowRoot.querySelectorAll(
-      'ha-entity-picker, ha-icon-picker, ha-picture-upload'
+      'ha-entity-picker, ha-icon-picker, ha-picture-upload, shopping-list-variants-editor'
     ).forEach(el => { el.hass = hass; });
   }
 
@@ -120,19 +120,6 @@ class ShoppingListCardEditor extends HTMLElement {
           font-size: 13px; font-weight: 500;
           color: var(--secondary-text-color);
         }
-        .types-field textarea {
-          width: 100%; box-sizing: border-box; resize: vertical; min-height: 64px;
-          font-family: inherit; font-size: 14px; line-height: 1.5;
-          color: var(--primary-text-color);
-          background: var(--mdc-text-field-fill-color, rgba(127,127,127,0.08));
-          border: none;
-          border-bottom: 1px solid var(--mdc-text-field-idle-line-color, rgba(127,127,127,0.42));
-          border-radius: 4px 4px 0 0; padding: 8px 12px;
-        }
-        .types-field textarea:focus {
-          outline: none;
-          border-bottom: 2px solid var(--primary-color);
-        }
       </style>
 
       <div class="card-config">
@@ -152,9 +139,8 @@ class ShoppingListCardEditor extends HTMLElement {
               <${TF} id="subtitle" label="Subtitle"></${TF}>
             </div>
             <div class="types-field">
-              <span class="types-label">Types (optional)</span>
-              <textarea id="types" rows="3" placeholder="Pink Lady&#10;Granny Smith&#10;Gala"></textarea>
-              <div class="hint">One per line. The chevron expands the variants; the header toggles the title and its optional subtitle. Existing per-variant images and icons are preserved.</div>
+              <span class="types-label">Variants</span>
+              <shopping-list-variants-editor id="types"></shopping-list-variants-editor>
             </div>
             <ha-select id="types_sort" label="Sort types" naturalMenuWidth fixedMenuPosition>
               <mwc-list-item value="none">As listed</mwc-list-item>
@@ -286,13 +272,15 @@ class ShoppingListCardEditor extends HTMLElement {
       el.addEventListener('value-changed', handler);
     });
 
-    // Native <textarea> for the Types list (one type per line).
     const typesEl = this.shadowRoot.querySelector('#types');
-    if (typesEl) {
-      const handler = () => this._handleConfigChanged();
-      typesEl.addEventListener('input', handler);
-      typesEl.addEventListener('change', handler);
-    }
+    typesEl.hass = this._hass;
+    typesEl.addEventListener('value-changed', event => {
+      event.stopPropagation();
+      const config = { ...this._config };
+      if (event.detail.value.length) config.types = event.detail.value;
+      else delete config.types;
+      this._emitConfig(config);
+    });
 
     // ha-select needs special handling. In HA 2026.x, ha-select was rewritten
     // to use ha-dropdown internally and IGNORES slotted <mwc-list-item>
@@ -384,6 +372,7 @@ class ShoppingListCardEditor extends HTMLElement {
           pu.hass = this._hass;
           if (this._config?.image) pu.value = this._config.image;
         }
+        this.shadowRoot.querySelector('#types').hass = this._hass;
       }).catch(() => {});
       setTimeout(() => loader.remove(), 0);
     } catch (_) { /* ignore */ }
@@ -425,15 +414,8 @@ class ShoppingListCardEditor extends HTMLElement {
     s.querySelector('#title').value = c.title || '';
     s.querySelector('#subtitle').value = c.subtitle || '';
     const typesEl = s.querySelector('#types');
-    if (typesEl) {
-      let arr = [];
-      if (Array.isArray(c.types)) {
-        arr = c.types.map(t => (typeof t === 'string' ? t : (t && t.name) || '')).filter(Boolean);
-      } else if (typeof c.types === 'string') {
-        arr = c.types.split(/[,\n]/).map(x => x.trim()).filter(Boolean);
-      }
-      typesEl.value = arr.join('\n');
-    }
+    typesEl.value = c.types;
+    typesEl.sort = c.types_sort;
     const sortEl = s.querySelector('#types_sort');
     if (sortEl) {
       const sortVal = (c.types_sort === 'asc' || c.types_sort === 'desc') ? c.types_sort : 'none';
@@ -482,13 +464,9 @@ class ShoppingListCardEditor extends HTMLElement {
     n.title = s.querySelector('#title').value;
     const sub = s.querySelector('#subtitle').value;
     if (sub) n.subtitle = sub; else delete n.subtitle;
-    const typesEl = s.querySelector('#types');
-    if (typesEl) {
-      const list = updateTypeNames(n.types, typesEl.value);
-      if (list.length) n.types = list; else delete n.types;
-    }
     const sortVal = this._selectVal('types_sort');
     if (sortVal === 'asc' || sortVal === 'desc') n.types_sort = sortVal; else delete n.types_sort;
+    s.querySelector('#types').sort = sortVal;
     const img = s.querySelector('#image').value;
     if (img) n.image = img; else delete n.image;
     const imgBase = s.querySelector('#image_base').value.trim();
@@ -540,8 +518,12 @@ class ShoppingListCardEditor extends HTMLElement {
       else n[`${type}_color`] = col;
     });
 
-    this._config = n;
-    this.dispatchEvent(new CustomEvent('config-changed', { detail: { config: n }, bubbles: true, composed: true }));
+    this._emitConfig(n);
+  }
+
+  _emitConfig(config) {
+    this._config = config;
+    this.dispatchEvent(new CustomEvent('config-changed', { detail: { config }, bubbles: true, composed: true }));
   }
 }
 if (!customElements.get('shopping-list-card-editor')) {

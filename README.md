@@ -57,6 +57,68 @@ _or_
 3. Search for "Shopping List Card".
 4. Click download.
 
+## Native Catalog
+
+Use `custom:shopping-list-catalog-card` to display a shared product catalog with category tabs, search, and an **On list** filter. It is included in the same JavaScript bundle as the single-product card; it does not require `auto-entities` or `layout-card`.
+
+The catalog is not another shopping list. A sensor provides the available products, and the existing `todo` entity stores the items and quantities you need to buy. The catalog uses the same product tiles, variants, quantity controls, and hold actions as single-product cards.
+
+For the [existing JSON-backed sensor example](examples/auto-generated-grid/), the complete card configuration can be:
+
+```yaml
+type: custom:shopping-list-catalog-card
+catalog_entity: sensor.shopping_list_items
+todo_list: todo.shopping_list
+title: Shopping
+columns: 4
+item_options:
+  image_base: /local/images/shopping-list/
+```
+
+Replace the example entity IDs with your own. The visual card picker lists **Shopping Catalog** and its editor has sensor/list pickers, column count, and product defaults. Existing generated grids can remain alongside it; no list migration or item renaming is required.
+
+### Catalog Source
+
+By default, each array-valued sensor attribute is treated as a category. Other attributes, such as `friendly_name`, are ignored. Each product is an object with a required `title` and optional single-product card fields such as `subtitle`, `types`, `image`, `icon` variants, and `list_prefix`. The existing example JSON works unchanged:
+
+```json
+{
+  "Fruits": [
+    { "title": "Apple", "subtitle": "Pink Lady", "types": "Pink Lady, Granny Smith, Gala" },
+    { "title": "Pear" }
+  ],
+  "Dairy": [
+    { "title": "Milk" },
+    { "title": "Milk", "subtitle": "Lactose-free" }
+  ]
+}
+```
+
+If the entire category map is in one attribute, set `catalog_attribute` to its name. That attribute may contain an object or a JSON string. Categories and products follow the source order. Category names do not automatically become list prefixes.
+
+### Catalog Options
+
+| Option | Required | Description | Default |
+|---|---|---|---|
+| `catalog_entity` | Yes | Sensor containing the shared product catalog. | - |
+| `todo_list` | Yes | Existing to-do entity used by every product tile. | - |
+| `catalog_attribute` | No | Attribute containing the entire category map. | Category arrays directly in sensor attributes |
+| `title` | No | Catalog heading. | `Shopping` |
+| `columns` | No | Maximum number of grid columns, from 1 to 6. Narrow containers use fewer columns. | `4` |
+| `item_options` | No | Shared single-product defaults, such as `layout`, `image_base`, `enable_quantity`, colors, and `hold_action`. Per-product values override these defaults. | Vertical tiles with quantity controls enabled |
+
+Products cannot override the catalog's target `todo_list`. Search matches category, title, subtitle, and variant names, ignoring case and accents. **On list** includes a product when its header item or any variant is active; kept-zero entries are inactive. The count shows visible catalog products, not the sum of quantities. Items not present in the catalog remain untouched; keep a native `todo-list` card alongside the catalog to display those items too.
+
+### Sharing and Persistence
+
+- Point each dashboard at the same `catalog_entity` and `todo_list` to share products and shopping selections. No catalog copy is saved in browser storage.
+- Shopping selections persist in the to-do integration and update connected devices through Home Assistant. Catalog changes appear when the source sensor refreshes, including after reopening a dashboard.
+- Search text, the selected category, the **On list** filter, and expanded variants are local view state. They do not change other dashboards and are not restored after a page reload.
+- This version reads the shared catalog; it does not write to the JSON file. Edit products at their source. The sensor must expose new category keys before the card can display them; the example command-line sensor uses an explicit `json_attributes` list and a five-minute scan interval.
+- Writes are confirmed by Home Assistant; offline changes are not queued or automatically retried. The shared pending-write guard covers cards on one browser connection, not atomic transactions across devices. Simultaneous edits from separate devices remain subject to the to-do integration's conflict behavior.
+
+---
+
 ## ⚙️ Configuration
 
 The card ships with a full visual editor. Just add it to your dashboard and fill out the form.
@@ -202,7 +264,11 @@ types:
   - Gala
 ```
 
-Entries can also be objects to give a type its own thumbnail or icon (YAML only):
+In the visual editor, **Content > Variants** lets you add, rename, remove, and reorder variants. Expand a row's image/icon settings to upload a picture, enter an image URL, or choose an icon. Move-up and move-down controls are available when **Sort types** is **As listed**.
+
+Names must be nonempty and unique, ignoring case. Invalid edits remain drafts until corrected; the card preview retains the last valid configuration. Renaming or removing a variant changes only the card configuration, not existing to-do items. Renamed variants will match the new name, so existing entries under the old name remain in your list.
+
+Existing string lists, comma-separated strings, and object entries remain supported. Unrelated edits preserve the original format and custom properties. A plain name becomes an object when it gains an image or icon. Objects can also be configured directly in YAML:
 
 ```yaml
 type: custom:shopping-list-card
@@ -231,10 +297,13 @@ Source ownership:
 - `src/shopping-list-card.js`: card rendering and interactions.
 - `src/todo-store.js`: shared subscriptions, recovery, stale-response protection, and pending writes.
 - `src/item-model.js`: naming, quantity actions, and lossless variant updates.
-- `src/editor.js`: the visual configuration editor.
+- `src/editor.js` and `src/variants-editor.js`: the visual configuration editor and variant rows.
+- `src/catalog-card.js`, `src/catalog-model.js`, and `src/catalog-editor.js`: the sensor-backed catalog view, data validation, and configuration editor.
 - `src/card-defaults.js` and `src/card-styles.js`: shared defaults and card styling.
 
 Tests use mocked Home Assistant services and a DOM implementation; they never connect to a real shopping list. CI tests Node.js 22 and 24 and checks that the committed bundle matches the source.
+
+Serve the repository on a local HTTP server to open `tests/browser.html?catalog` for the full sample catalog, `?catalog&editor` for its settings, or `?editor` for the variants editor. These fixtures use fake list data and simulated Home Assistant controls.
 
 ---
 

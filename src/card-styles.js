@@ -97,6 +97,9 @@ export const CARD_STYLES = `
       .type-row.is-updating { opacity: .6; pointer-events: none; }
       .type-thumb { width: 28px; height: 28px; flex-shrink: 0; }
       .type-thumb img { width: 100%; height: 100%; object-fit: cover; border-radius: 50%; }
+      .type-thumb ha-icon { --mdc-icon-size: 28px; color: var(--secondary-text-color); }
+      .type-thumb .type-image-fallback, .type-thumb.image-error img { display: none; }
+      .type-thumb.image-error .type-image-fallback { display: inline-flex; }
       .type-name { flex: 1; min-width: 0; font-size: 14px; color: var(--primary-text-color); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
       .type-qty { display: flex; align-items: center; gap: 4px; flex-shrink: 0; }
       .type-indicator { width: 28px; height: 28px; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }

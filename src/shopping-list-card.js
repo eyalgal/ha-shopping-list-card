@@ -17,6 +17,7 @@ import { getTodoStore } from './todo-store.js';
 import { CARD_DEFAULTS } from './card-defaults.js';
 import { CARD_STYLES } from './card-styles.js';
 import './editor.js';
+import './catalog-card.js';
 
 const CARD_VERSION = '2.2.0';
 
@@ -354,13 +355,13 @@ class ShoppingListCard extends HTMLElement {
     const offColorN = this._config.off_color || ShoppingListCard.DEFAULT_OFF_COLOR;
     const activeColor = isOn ? onColorN : offColorN;
 
-    const icon    = isOn ? onIcon : offIcon;
-    const bg      = this._rgbaFor(activeColor, 0.2);
-    const fg      = this._solidFor(activeColor);
+    const icon    = escapeHtml(isOn ? onIcon : offIcon);
+    const bg      = escapeHtml(this._rgbaFor(activeColor, 0.2));
+    const fg      = escapeHtml(this._solidFor(activeColor));
 
     let cardBgStyle = '';
     if (isOn && this._config.colorize_background !== false) {
-      cardBgStyle = `style="background-color: ${this._rgbaFor(onColorN, 0.1)};"`;
+      cardBgStyle = `style="background-color: ${escapeHtml(this._rgbaFor(onColorN, 0.1))};"`;
     }
 
     const isVertical = this._config.layout === 'vertical';
@@ -506,9 +507,9 @@ class ShoppingListCard extends HTMLElement {
     // The header icon reflects the whole group: it is in the selected state when
     // the bare item OR any variant is on the list.
     const headColor = anyOn ? onColorN : offColorN;
-    const headBg = this._rgbaFor(headColor, 0.2);
-    const headFg = this._solidFor(headColor);
-    const headIcon = anyOn ? onIcon : offIcon;
+    const headBg = escapeHtml(this._rgbaFor(headColor, 0.2));
+    const headFg = escapeHtml(this._solidFor(headColor));
+    const headIcon = escapeHtml(anyOn ? onIcon : offIcon);
     const effectiveImage = this._resolveImage();
     const safeImage = escapeHtml(effectiveImage);
     const safeTitle = escapeHtml(this._config.title || '');
@@ -552,17 +553,18 @@ class ShoppingListCard extends HTMLElement {
 
     let cardBgStyle = '';
     if (anyOn && this._config.colorize_background !== false) {
-      cardBgStyle = `style="background-color: ${this._rgbaFor(onColorN, 0.1)};"`;
+      cardBgStyle = `style="background-color: ${escapeHtml(this._rgbaFor(onColorN, 0.1))};"`;
     }
 
     const enableQty = !!this._config.enable_quantity;
     const decBtn = `<div class="quantity-btn" role="button" tabindex="0" aria-label="Decrease quantity" data-action="decrement"><ha-icon icon="mdi:minus"></ha-icon></div>`;
     const incBtn = `<div class="quantity-btn" role="button" tabindex="0" aria-label="Increase quantity" data-action="increment"><ha-icon icon="mdi:plus"></ha-icon></div>`;
 
-    const onSolid = this._solidFor(onColorN);
+    const onSolid = escapeHtml(this._solidFor(onColorN));
     const rowsHtml = states.map((s, i) => {
       const thumb = s.image
-        ? `<div class="type-thumb"><img src="${escapeHtml(s.image)}" alt=""></div>` : '';
+        ? `<div class="type-thumb"><img src="${escapeHtml(s.image)}" alt=""><ha-icon class="type-image-fallback" icon="${escapeHtml(s.icon || offIcon)}"></ha-icon></div>`
+        : s.icon ? `<div class="type-thumb"><ha-icon icon="${escapeHtml(s.icon)}"></ha-icon></div>` : '';
       let rightHtml;
       if (s.isOn && enableQty) {
         rightHtml = `<div class="type-qty">
@@ -577,7 +579,7 @@ class ShoppingListCard extends HTMLElement {
         // Inactive: a muted add affordance. Tapping the row adds the variant.
         rightHtml = `<div class="type-indicator type-add"><ha-icon icon="mdi:plus"></ha-icon></div>`;
       }
-      const rowStyle = s.isOn ? ` style="background:${this._rgbaFor(onColorN, 0.12)};"` : '';
+      const rowStyle = s.isOn ? ` style="background:${escapeHtml(this._rgbaFor(onColorN, 0.12))};"` : '';
       return `<div class="type-row ${s.isOn ? 'is-on' : 'is-off'}" data-type-index="${i}"${rowStyle}
                    role="button" tabindex="0" aria-pressed="${s.isOn ? 'true' : 'false'}"
                    aria-label="${escapeHtml(s.label)}">
@@ -801,7 +803,10 @@ class ShoppingListCard extends HTMLElement {
   }
 
   _wireImageError(card) {
-    const img = card.querySelector('img');
+    card.querySelectorAll('.type-thumb img').forEach(image => {
+      image.addEventListener('error', () => image.parentElement?.classList.add('image-error'));
+    });
+    const img = card.querySelector('.image-wrapper img');
     if (!img) return;
     // Try each candidate in order; when all fail, hide the image so the
     // icon-only fallback shows through.

@@ -1,0 +1,7 @@
+type: custom:shopping-list-catalog-card
+catalog_entity: sensor.shopping_list_items
+todo_list: todo.shopping_list
+title: Shopping
+columns: 4
+item_options:
+  image_base: /local/images/shopping-list/

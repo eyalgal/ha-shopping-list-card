@@ -73,25 +73,6 @@ function planItemAction(config, items, subtitle, action = 'toggle') {
   };
 }
 
-function updateTypeNames(previous, text) {
-  const names = text.split('\n').map(name => name.trim()).filter(Boolean);
-  const entries = Array.isArray(previous) ? previous
-    : typeof previous === 'string' ? previous.split(/[,\n]/) : [];
-  const entryName = entry => String(typeof entry === 'string' ? entry : entry?.name || '').trim();
-  const used = new Set();
-  return names.map((name, index) => {
-    let match = entries.findIndex((entry, entryIndex) => !used.has(entryIndex)
-      && entryName(entry).toLowerCase() === name.toLowerCase());
-    if (match === -1 && entries.length === names.length && !used.has(index)
-      && !names.some(next => next.toLowerCase() === entryName(entries[index]).toLowerCase())) {
-      match = index;
-    }
-    used.add(match);
-    const original = entries[match];
-    return original && typeof original === 'object' ? { ...original, name } : name;
-  });
-}
-
 const stores = new WeakMap();
 
 function getTodoStore(hass, entityId) {
@@ -474,12 +455,262 @@ const CARD_STYLES = `
       .type-row.is-updating { opacity: .6; pointer-events: none; }
       .type-thumb { width: 28px; height: 28px; flex-shrink: 0; }
       .type-thumb img { width: 100%; height: 100%; object-fit: cover; border-radius: 50%; }
+      .type-thumb ha-icon { --mdc-icon-size: 28px; color: var(--secondary-text-color); }
+      .type-thumb .type-image-fallback, .type-thumb.image-error img { display: none; }
+      .type-thumb.image-error .type-image-fallback { display: inline-flex; }
       .type-name { flex: 1; min-width: 0; font-size: 14px; color: var(--primary-text-color); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
       .type-qty { display: flex; align-items: center; gap: 4px; flex-shrink: 0; }
       .type-indicator { width: 28px; height: 28px; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
       .type-indicator ha-icon { --mdc-icon-size: 20px; }
       .type-indicator.type-add ha-icon { color: var(--secondary-text-color); opacity: .45; }
 `;
+
+class ShoppingListVariantsEditor extends HTMLElement {
+  constructor() {
+    super();
+    this.attachShadow({ mode: 'open' });
+    this._entries = [];
+    this._nextId = 1;
+    this._sort = 'none';
+    this._textField = !customElements.get('ha-textfield') && customElements.get('ha-input')
+      ? 'ha-input' : 'ha-textfield';
+    this.shadowRoot.innerHTML = `
+      <style>
+        :host { display: block; min-width: 0; container-type: inline-size; }
+        * { box-sizing: border-box; }
+        .variant-row { padding: 8px 0; border-bottom: 1px solid var(--divider-color, #ddd); }
+        .variant-main { display: grid; grid-template-columns: 32px minmax(80px, 1fr) auto; align-items: center; gap: 8px; }
+        .variant-preview { width: 32px; height: 32px; display: flex; align-items: center; justify-content: center; color: var(--secondary-text-color); }
+        .variant-preview img { width: 32px; height: 32px; object-fit: contain; border-radius: 4px; }
+        [hidden] { display: none !important; }
+        .variant-name { width: 100%; min-width: 0; height: 40px; padding: 8px; font: inherit; font-size: 14px; color: var(--primary-text-color); background: var(--input-fill-color, rgba(127,127,127,.08)); border: 1px solid var(--divider-color, #aaa); border-radius: 4px; }
+        .variant-name[aria-invalid="true"] { border-color: var(--error-color, #db4437); }
+        .variant-tools { display: flex; gap: 2px; }
+        button { display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0; width: 34px; height: 36px; padding: 0; border: 0; border-radius: 4px; background: transparent; color: var(--primary-text-color); cursor: pointer; }
+        button:hover:not(:disabled) { background: var(--secondary-background-color, rgba(127,127,127,.12)); }
+        button:disabled { opacity: .35; cursor: default; }
+        button:focus-visible, input:focus-visible { outline: 2px solid var(--primary-color); outline-offset: 1px; }
+        ha-icon { --mdc-icon-size: 20px; }
+        .variant-media { display: grid; gap: 12px; padding: 12px 0 4px 40px; min-width: 0; }
+        ha-textfield, ha-input, ha-picture-upload, ha-icon-picker { display: block; width: 100%; min-width: 0; }
+        .variant-error { color: var(--error-color, #db4437); font-size: 12px; line-height: 1.5; padding: 4px 0 0 40px; overflow-wrap: anywhere; }
+        .add-variant { width: auto; gap: 6px; padding: 0 8px; margin-top: 8px; font: inherit; font-size: 14px; color: var(--primary-color); }
+        @container (max-width: 360px) {
+          .variant-main { grid-template-columns: 32px minmax(0, 1fr); }
+          .variant-tools { grid-column: 2; justify-self: end; }
+          .variant-media { padding-left: 0; }
+        }
+      </style>
+      <div class="variant-list" role="list" aria-label="Variants"></div>
+      <button type="button" class="add-variant"><ha-icon icon="mdi:plus"></ha-icon>Add variant</button>
+    `;
+    this._list = this.shadowRoot.querySelector('.variant-list');
+    this.shadowRoot.querySelector('.add-variant').addEventListener('click', () => {
+      const entry = this._entry('');
+      this._entries.push(entry);
+      this._renderRows();
+      entry.element.querySelector('[data-field="name"]').focus();
+      this._validate();
+    });
+  }
+
+  set hass(hass) {
+    this._hass = hass;
+    this.shadowRoot.querySelectorAll('ha-icon-picker, ha-picture-upload').forEach(control => {
+      control.hass = hass;
+    });
+  }
+
+  set value(value) {
+    const signature = JSON.stringify(value);
+    if (signature === this._signature) return;
+    this._signature = signature;
+    this._value = value;
+    const entries = typeof value === 'string'
+      ? value.split(/[,\n]/).map(name => name.trim()).filter(Boolean)
+      : Array.isArray(value) ? value : [];
+    this._entries = entries.map(entry => this._entry(entry));
+    this._renderRows();
+    this._validate();
+  }
+
+  get value() { return this._value; }
+
+  set sort(value) {
+    this._sort = value === 'asc' || value === 'desc' ? value : 'none';
+    this._updateOrderButtons();
+  }
+
+  _entry(value) {
+    const object = value !== null && typeof value === 'object';
+    return {
+      id: this._nextId++,
+      object,
+      data: object ? { ...value, name: String(value.name ?? '') } : { name: String(value ?? '') },
+    };
+  }
+
+  _createRow(entry) {
+    const row = document.createElement('div');
+    row.className = 'variant-row';
+    row.setAttribute('role', 'listitem');
+    row.dataset.rowId = String(entry.id);
+    row.innerHTML = `
+      <div class="variant-main">
+        <span class="variant-preview" aria-hidden="true"><img alt="" hidden><ha-icon icon="mdi:tag-outline"></ha-icon></span>
+        <input class="variant-name" data-field="name" type="text" required aria-label="Variant name" placeholder="Variant name">
+        <div class="variant-tools">
+          <button type="button" data-action="up" aria-label="Move up" title="Move up"><ha-icon icon="mdi:arrow-up"></ha-icon></button>
+          <button type="button" data-action="down" aria-label="Move down" title="Move down"><ha-icon icon="mdi:arrow-down"></ha-icon></button>
+          <button type="button" data-action="media" aria-label="Image and icon" title="Image and icon" aria-expanded="false" aria-controls="media-${entry.id}"><ha-icon icon="mdi:chevron-down"></ha-icon></button>
+          <button type="button" data-action="remove" aria-label="Remove variant" title="Remove variant"><ha-icon icon="mdi:trash-can-outline"></ha-icon></button>
+        </div>
+      </div>
+      <div class="variant-error" id="error-${entry.id}" role="alert" hidden></div>
+      <div class="variant-media" id="media-${entry.id}" hidden>
+        <ha-picture-upload data-field="upload"></ha-picture-upload>
+        <${this._textField} data-field="image" label="Image URL" placeholder="/local/... or https://..."></${this._textField}>
+        <ha-icon-picker data-field="icon" label="Icon"></ha-icon-picker>
+      </div>
+    `;
+    entry.element = row;
+    for (const field of ['name', 'image', 'icon']) {
+      const control = row.querySelector(`[data-field="${field}"]`);
+      control.value = entry.data[field] || '';
+      if (field === 'icon') control.hass = this._hass;
+      const change = event => {
+        event.stopPropagation();
+        this._changeField(entry, field, event.detail?.value ?? control.value ?? '');
+      };
+      for (const event of ['input', 'change', 'value-changed']) control.addEventListener(event, change);
+    }
+    const name = row.querySelector('[data-field="name"]');
+    name.setAttribute('aria-describedby', `error-${entry.id}`);
+    const upload = row.querySelector('[data-field="upload"]');
+    upload.hass = this._hass;
+    upload.original = false;
+    upload.crop = undefined;
+    upload.value = entry.data.image || '';
+    upload.addEventListener('change', event => {
+      event.stopPropagation();
+      this._changeField(entry, 'image', event.detail?.value ?? upload.value ?? '');
+    });
+    row.querySelector('img').addEventListener('error', () => {
+      row.querySelector('img').hidden = true;
+      row.querySelector('.variant-preview ha-icon').hidden = false;
+    });
+    for (const button of row.querySelectorAll('[data-action]')) {
+      button.addEventListener('click', event => {
+        event.stopPropagation();
+        if (!this._entries.includes(entry)) return;
+        const action = button.dataset.action;
+        if (action === 'media') {
+          const panel = row.querySelector('.variant-media');
+          panel.hidden = !panel.hidden;
+          button.setAttribute('aria-expanded', String(!panel.hidden));
+          button.querySelector('ha-icon').setAttribute('icon', panel.hidden ? 'mdi:chevron-down' : 'mdi:chevron-up');
+          return;
+        }
+        const index = this._entries.indexOf(entry);
+        if (action === 'remove') this._entries.splice(index, 1);
+        else {
+          if (this._sort !== 'none') return;
+          const next = index + (action === 'up' ? -1 : 1);
+          if (next < 0 || next >= this._entries.length) return;
+          this._entries.splice(index, 1);
+          this._entries.splice(next, 0, entry);
+        }
+        this._renderRows();
+        this._publish();
+        if (action === 'remove') {
+          const next = this._entries[Math.min(index, this._entries.length - 1)];
+          (next?.element.querySelector('[data-field="name"]') || this.shadowRoot.querySelector('.add-variant')).focus();
+        } else button.focus();
+      });
+    }
+    this._updatePreview(entry);
+    return row;
+  }
+
+  _changeField(entry, field, value) {
+    if (!this._entries.includes(entry)) return;
+    const text = String(value);
+    if ((entry.data[field] || '') === text) return;
+    if (field !== 'name' && !text) delete entry.data[field];
+    else entry.data[field] = text;
+    if (field === 'image') {
+      const input = entry.element.querySelector('[data-field="image"]');
+      const upload = entry.element.querySelector('[data-field="upload"]');
+      if (input.value !== text) input.value = text;
+      if (upload.value !== text) upload.value = text;
+    }
+    if (field !== 'name') this._updatePreview(entry);
+    this._publish();
+  }
+
+  _updatePreview(entry) {
+    const image = entry.element.querySelector('.variant-preview img');
+    const icon = entry.element.querySelector('.variant-preview ha-icon');
+    const url = entry.data.image || '';
+    if (url && image.getAttribute('src') !== url) image.setAttribute('src', url);
+    if (!url) image.removeAttribute('src');
+    image.hidden = !url;
+    icon.hidden = !!url;
+    icon.setAttribute('icon', entry.data.icon || 'mdi:tag-outline');
+  }
+
+  _renderRows() {
+    const current = new Set(this._entries.map(entry => entry.element || this._createRow(entry)));
+    for (const row of [...this._list.children]) if (!current.has(row)) row.remove();
+    this._entries.forEach((entry, index) => {
+      if (this._list.children[index] !== entry.element) {
+        this._list.insertBefore(entry.element, this._list.children[index] || null);
+      }
+    });
+    this._updateOrderButtons();
+  }
+
+  _updateOrderButtons() {
+    this._entries.forEach((entry, index) => {
+      entry.element.querySelector('[data-action="up"]').disabled = this._sort !== 'none' || index === 0;
+      entry.element.querySelector('[data-action="down"]').disabled = this._sort !== 'none' || index === this._entries.length - 1;
+    });
+  }
+
+  _validate() {
+    const names = this._entries.map(entry => entry.data.name.trim().toLowerCase());
+    let valid = true;
+    this._entries.forEach((entry, index) => {
+      const message = !names[index] ? 'Enter a variant name.'
+        : names.indexOf(names[index]) !== names.lastIndexOf(names[index]) ? 'Variant names must be unique.' : '';
+      const error = entry.element.querySelector('.variant-error');
+      error.textContent = message;
+      error.hidden = !message;
+      const input = entry.element.querySelector('[data-field="name"]');
+      input.setAttribute('aria-invalid', String(!!message));
+      input.setCustomValidity(message);
+      if (message) valid = false;
+    });
+    return valid;
+  }
+
+  _publish() {
+    if (!this._validate()) return;
+    const value = this._entries.map(entry => {
+      const data = { ...entry.data, name: entry.data.name.trim() };
+      return entry.object || Object.keys(data).length > 1 ? data : data.name;
+    });
+    const signature = JSON.stringify(value);
+    if (signature === this._signature) return;
+    this._value = value;
+    this._signature = signature;
+    this.dispatchEvent(new CustomEvent('value-changed', { detail: { value }, bubbles: true, composed: true }));
+  }
+}
+
+if (!customElements.get('shopping-list-variants-editor')) {
+  customElements.define('shopping-list-variants-editor', ShoppingListVariantsEditor);
+}
 
 class ShoppingListCardEditor extends HTMLElement {
   constructor() {
@@ -493,7 +724,7 @@ class ShoppingListCardEditor extends HTMLElement {
     this._hass = hass;
     if (!this._rendered) { this._render(); return; }
     this.shadowRoot.querySelectorAll(
-      'ha-entity-picker, ha-icon-picker, ha-picture-upload'
+      'ha-entity-picker, ha-icon-picker, ha-picture-upload, shopping-list-variants-editor'
     ).forEach(el => { el.hass = hass; });
   }
 
@@ -600,19 +831,6 @@ class ShoppingListCardEditor extends HTMLElement {
           font-size: 13px; font-weight: 500;
           color: var(--secondary-text-color);
         }
-        .types-field textarea {
-          width: 100%; box-sizing: border-box; resize: vertical; min-height: 64px;
-          font-family: inherit; font-size: 14px; line-height: 1.5;
-          color: var(--primary-text-color);
-          background: var(--mdc-text-field-fill-color, rgba(127,127,127,0.08));
-          border: none;
-          border-bottom: 1px solid var(--mdc-text-field-idle-line-color, rgba(127,127,127,0.42));
-          border-radius: 4px 4px 0 0; padding: 8px 12px;
-        }
-        .types-field textarea:focus {
-          outline: none;
-          border-bottom: 2px solid var(--primary-color);
-        }
       </style>
 
       <div class="card-config">
@@ -632,9 +850,8 @@ class ShoppingListCardEditor extends HTMLElement {
               <${TF} id="subtitle" label="Subtitle"></${TF}>
             </div>
             <div class="types-field">
-              <span class="types-label">Types (optional)</span>
-              <textarea id="types" rows="3" placeholder="Pink Lady&#10;Granny Smith&#10;Gala"></textarea>
-              <div class="hint">One per line. The chevron expands the variants; the header toggles the title and its optional subtitle. Existing per-variant images and icons are preserved.</div>
+              <span class="types-label">Variants</span>
+              <shopping-list-variants-editor id="types"></shopping-list-variants-editor>
             </div>
             <ha-select id="types_sort" label="Sort types" naturalMenuWidth fixedMenuPosition>
               <mwc-list-item value="none">As listed</mwc-list-item>
@@ -766,13 +983,15 @@ class ShoppingListCardEditor extends HTMLElement {
       el.addEventListener('value-changed', handler);
     });
 
-    // Native <textarea> for the Types list (one type per line).
     const typesEl = this.shadowRoot.querySelector('#types');
-    if (typesEl) {
-      const handler = () => this._handleConfigChanged();
-      typesEl.addEventListener('input', handler);
-      typesEl.addEventListener('change', handler);
-    }
+    typesEl.hass = this._hass;
+    typesEl.addEventListener('value-changed', event => {
+      event.stopPropagation();
+      const config = { ...this._config };
+      if (event.detail.value.length) config.types = event.detail.value;
+      else delete config.types;
+      this._emitConfig(config);
+    });
 
     // ha-select needs special handling. In HA 2026.x, ha-select was rewritten
     // to use ha-dropdown internally and IGNORES slotted <mwc-list-item>
@@ -864,6 +1083,7 @@ class ShoppingListCardEditor extends HTMLElement {
           pu.hass = this._hass;
           if (this._config?.image) pu.value = this._config.image;
         }
+        this.shadowRoot.querySelector('#types').hass = this._hass;
       }).catch(() => {});
       setTimeout(() => loader.remove(), 0);
     } catch (_) { /* ignore */ }
@@ -905,15 +1125,8 @@ class ShoppingListCardEditor extends HTMLElement {
     s.querySelector('#title').value = c.title || '';
     s.querySelector('#subtitle').value = c.subtitle || '';
     const typesEl = s.querySelector('#types');
-    if (typesEl) {
-      let arr = [];
-      if (Array.isArray(c.types)) {
-        arr = c.types.map(t => (typeof t === 'string' ? t : (t && t.name) || '')).filter(Boolean);
-      } else if (typeof c.types === 'string') {
-        arr = c.types.split(/[,\n]/).map(x => x.trim()).filter(Boolean);
-      }
-      typesEl.value = arr.join('\n');
-    }
+    typesEl.value = c.types;
+    typesEl.sort = c.types_sort;
     const sortEl = s.querySelector('#types_sort');
     if (sortEl) {
       const sortVal = (c.types_sort === 'asc' || c.types_sort === 'desc') ? c.types_sort : 'none';
@@ -962,13 +1175,9 @@ class ShoppingListCardEditor extends HTMLElement {
     n.title = s.querySelector('#title').value;
     const sub = s.querySelector('#subtitle').value;
     if (sub) n.subtitle = sub; else delete n.subtitle;
-    const typesEl = s.querySelector('#types');
-    if (typesEl) {
-      const list = updateTypeNames(n.types, typesEl.value);
-      if (list.length) n.types = list; else delete n.types;
-    }
     const sortVal = this._selectVal('types_sort');
     if (sortVal === 'asc' || sortVal === 'desc') n.types_sort = sortVal; else delete n.types_sort;
+    s.querySelector('#types').sort = sortVal;
     const img = s.querySelector('#image').value;
     if (img) n.image = img; else delete n.image;
     const imgBase = s.querySelector('#image_base').value.trim();
@@ -1020,12 +1229,574 @@ class ShoppingListCardEditor extends HTMLElement {
       else n[`${type}_color`] = col;
     });
 
-    this._config = n;
-    this.dispatchEvent(new CustomEvent('config-changed', { detail: { config: n }, bubbles: true, composed: true }));
+    this._emitConfig(n);
+  }
+
+  _emitConfig(config) {
+    this._config = config;
+    this.dispatchEvent(new CustomEvent('config-changed', { detail: { config }, bubbles: true, composed: true }));
   }
 }
 if (!customElements.get('shopping-list-card-editor')) {
   customElements.define('shopping-list-card-editor', ShoppingListCardEditor);
+}
+
+const itemFields = [
+  'title', 'subtitle', 'types', 'types_sort', 'image', 'image_base', 'list_prefix',
+  'layout', 'show_name', 'enable_quantity', 'quantity_step', 'quantity_max',
+  'remove_zero', 'on_icon', 'off_icon', 'on_color', 'off_color',
+  'colorize_background', 'hold_action', 'haptic',
+];
+
+function itemOptions(options) {
+  return Object.fromEntries(itemFields.filter(field => Object.hasOwn(options, field)).map(field => [field, options[field]]));
+}
+
+function typeNames(types) {
+  const entries = typeof types === 'string' ? types.split(/[,\n]/) : Array.isArray(types) ? types : [];
+  return entries.map(entry => typeof entry === 'string' ? entry.trim() : String(entry?.name ?? '').trim()).filter(Boolean);
+}
+
+function searchText(value) {
+  return String(value).normalize('NFKD').replace(/\p{Mark}/gu, '').toLocaleLowerCase();
+}
+
+function readCatalog(hass, config) {
+  const entity = hass.states?.[config.catalog_entity];
+  if (!entity) throw new Error(`Catalog entity not found: ${config.catalog_entity}`);
+  if (entity.state === 'unavailable' || entity.state === 'unknown') throw new Error('The product catalog is unavailable.');
+  let data = config.catalog_attribute ? entity.attributes?.[config.catalog_attribute] : entity.attributes;
+  if (typeof data === 'string') {
+    try { data = JSON.parse(data); }
+    catch { throw new Error('The catalog attribute does not contain valid JSON.'); }
+  }
+  if (!data || typeof data !== 'object' || Array.isArray(data)) {
+    throw new Error('The catalog must contain categories with product arrays.');
+  }
+  const defaults = { layout: 'vertical', enable_quantity: true, ...itemOptions(config.item_options || {}) };
+  const groups = [];
+  for (const [category, entries] of Object.entries(data)) {
+    if (!Array.isArray(entries)) {
+      if (config.catalog_attribute) throw new Error(`Category "${category}" must be an array.`);
+      continue;
+    }
+    if (!category.trim()) throw new Error('Catalog categories must have a name.');
+    const identities = new Map();
+    const products = entries.map((entry, index) => {
+      if (!entry || typeof entry !== 'object' || Array.isArray(entry)
+        || typeof entry.title !== 'string' || !entry.title.trim()) {
+        throw new Error(`Product ${index + 1} in "${category}" needs a title.`);
+      }
+      const options = {
+        ...defaults, ...itemOptions(entry), type: 'custom:shopping-list-card', todo_list: config.todo_list,
+      };
+      for (const field of ['subtitle', 'image', 'image_base', 'list_prefix', 'on_icon', 'off_icon', 'on_color', 'off_color']) {
+        if (options[field] != null && typeof options[field] !== 'string') {
+          throw new Error(`Product "${entry.title}" has an invalid ${field}.`);
+        }
+      }
+      if (options.types != null && typeof options.types !== 'string' && !Array.isArray(options.types)) {
+        throw new Error(`Product "${entry.title}" has invalid variants.`);
+      }
+      const identity = typeof entry.id === 'string' && entry.id ? entry.id : buildName(options, options.subtitle);
+      const occurrence = identities.get(identity) || 0;
+      identities.set(identity, occurrence + 1);
+      const names = typeNames(options.types);
+      return {
+        key: JSON.stringify([category, identity, occurrence]),
+        config: options,
+        search: searchText([category, options.title, options.subtitle || '', ...names].join(' ')),
+        names: [...new Set([buildName(options, options.subtitle), ...names.map(name => buildName(options, name))])],
+      };
+    });
+    groups.push({ name: category, products });
+  }
+  return groups;
+}
+
+function productOnList(product, items) {
+  return product.names.some(name => matchItem(items, name, product.config).isOn);
+}
+
+class ShoppingListCatalogEditor extends HTMLElement {
+  constructor() {
+    super();
+    this.attachShadow({ mode: 'open' });
+  }
+
+  setConfig(config) {
+    this._config = { ...config };
+    if (this._rendered) this._updateValues();
+  }
+
+  set hass(hass) {
+    this._hass = hass;
+    if (!this._rendered) this._render();
+    this.shadowRoot.querySelectorAll('ha-entity-picker').forEach(picker => { picker.hass = hass; });
+  }
+
+  _render() {
+    const field = !customElements.get('ha-textfield') && customElements.get('ha-input') ? 'ha-input' : 'ha-textfield';
+    this.shadowRoot.innerHTML = `
+      <style>
+        :host { display: block; min-width: 0; }
+        .catalog-form { display: flex; flex-direction: column; gap: 12px; }
+        ha-expansion-panel { border: 1px solid var(--divider-color); border-radius: 8px; --expansion-panel-summary-padding: 0 16px; --expansion-panel-content-padding: 0; }
+        .catalog-panel { display: grid; gap: 16px; padding: 0 16px 16px; }
+        ha-entity-picker, ha-textfield, ha-input, ha-select { display: block; width: 100%; min-width: 0; }
+        .catalog-fields { display: flex; gap: 12px; flex-wrap: wrap; }
+        .catalog-fields > * { flex: 1 1 120px; min-width: 0; }
+        .catalog-toggle { display: flex; align-items: center; gap: 12px; font-size: 14px; color: var(--primary-text-color); }
+        .catalog-toggle ha-switch { flex-shrink: 0; }
+      </style>
+      <div class="catalog-form">
+        <ha-expansion-panel header="Catalog" outlined expanded>
+          <div class="catalog-panel">
+            <ha-entity-picker id="catalog_entity" label="Catalog sensor" required></ha-entity-picker>
+            <${field} id="catalog_attribute" label="Catalog attribute (optional)"></${field}>
+            <ha-entity-picker id="todo_list" label="To-do list" required></ha-entity-picker>
+            <div class="catalog-fields">
+              <${field} id="title" label="Title" placeholder="Shopping"></${field}>
+              <${field} id="columns" label="Maximum columns" type="number" min="1" max="6"></${field}>
+            </div>
+          </div>
+        </ha-expansion-panel>
+        <ha-expansion-panel header="Product defaults" outlined>
+          <div class="catalog-panel">
+            <ha-select id="layout" label="Layout" naturalMenuWidth fixedMenuPosition>
+              <mwc-list-item value="vertical">Vertical</mwc-list-item>
+              <mwc-list-item value="horizontal">Horizontal</mwc-list-item>
+            </ha-select>
+            <${field} id="image_base" label="Image base path" placeholder="/local/images/shopping-list/"></${field}>
+            <${field} id="list_prefix" label="List prefix (optional)"></${field}>
+            <label class="catalog-toggle"><ha-switch id="enable_quantity"></ha-switch><span>Quantity controls</span></label>
+            <div class="catalog-fields">
+              <${field} id="quantity_step" label="Quantity step" type="number" min="1"></${field}>
+              <${field} id="quantity_max" label="Quantity maximum" type="number" min="1"></${field}>
+            </div>
+            <label class="catalog-toggle"><ha-switch id="keep_at_zero"></ha-switch><span>Keep items at zero</span></label>
+          </div>
+        </ha-expansion-panel>
+      </div>
+    `;
+    for (const [id, domain] of [['catalog_entity', 'sensor'], ['todo_list', 'todo']]) {
+      const picker = this.shadowRoot.getElementById(id);
+      picker.includeDomains = [domain];
+      picker.allowCustomEntity = false;
+    }
+    const layout = this.shadowRoot.getElementById('layout');
+    layout.options = [{ value: 'vertical', label: 'Vertical' }, { value: 'horizontal', label: 'Horizontal' }];
+    for (const control of this.shadowRoot.querySelectorAll('[id]')) {
+      const changed = event => {
+        event.stopPropagation();
+        let value = event.detail?.value;
+        if (control.id === 'layout' && value == null && typeof event.detail?.index === 'number') {
+          value = ['vertical', 'horizontal'][event.detail.index];
+        }
+        if (control.localName === 'ha-switch') value = control.checked;
+        this._change(control.id, value ?? control.value);
+      };
+      for (const event of ['input', 'change', 'value-changed']) control.addEventListener(event, changed);
+      if (control.id === 'layout') control.addEventListener('selected', changed);
+    }
+    this._rendered = true;
+    this._updateValues();
+  }
+
+  _updateValues() {
+    if (!this._config) return;
+    const config = this._config;
+    const options = config.item_options || {};
+    const values = {
+      catalog_entity: config.catalog_entity || '', catalog_attribute: config.catalog_attribute || '',
+      todo_list: config.todo_list || '', title: config.title || '', columns: config.columns ?? 4,
+      layout: options.layout || 'vertical', image_base: options.image_base || '', list_prefix: options.list_prefix || '',
+      quantity_step: options.quantity_step ?? 1, quantity_max: options.quantity_max ?? '',
+    };
+    for (const [id, value] of Object.entries(values)) {
+      const control = this.shadowRoot.getElementById(id);
+      if (String(control.value ?? '') !== String(value)) control.value = String(value);
+    }
+    this.shadowRoot.getElementById('enable_quantity').checked = options.enable_quantity !== false;
+    this.shadowRoot.getElementById('keep_at_zero').checked = options.remove_zero === false;
+  }
+
+  _change(field, value) {
+    if (!this._config || value == null) return;
+    const config = { ...this._config };
+    const defaults = ['layout', 'image_base', 'list_prefix', 'enable_quantity', 'quantity_step', 'quantity_max', 'keep_at_zero'];
+    const target = defaults.includes(field) ? { ...(config.item_options || {}) } : config;
+    if (defaults.includes(field)) config.item_options = target;
+    const key = field === 'keep_at_zero' ? 'remove_zero' : field;
+    let next = value;
+    if (['columns', 'quantity_step', 'quantity_max'].includes(field)) {
+      next = value === '' ? undefined : Number(value);
+      if (next !== undefined && (!Number.isInteger(next) || next < 1 || (field === 'columns' && next > 6))) return;
+    } else if (field === 'enable_quantity') next = value ? undefined : false;
+    else if (field === 'keep_at_zero') next = value ? false : undefined;
+    else if (field === 'layout') {
+      if (value !== 'vertical' && value !== 'horizontal') return;
+      next = value === 'vertical' ? undefined : value;
+    } else if (typeof value === 'string') next = value.trim() || undefined;
+    if (next === undefined) delete target[key];
+    else target[key] = next;
+    if (config.item_options && !Object.keys(config.item_options).length) delete config.item_options;
+    if (JSON.stringify(config) === JSON.stringify(this._config)) return;
+    this._config = config;
+    this.dispatchEvent(new CustomEvent('config-changed', { detail: { config }, bubbles: true, composed: true }));
+  }
+}
+
+if (!customElements.get('shopping-list-catalog-card-editor')) {
+  customElements.define('shopping-list-catalog-card-editor', ShoppingListCatalogEditor);
+}
+
+class ShoppingListCatalogCard extends HTMLElement {
+  constructor() {
+    super();
+    this.attachShadow({ mode: 'open' });
+    this._groups = [];
+    this._sections = new Map();
+    this._products = new Map();
+    this._category = null;
+    this._query = '';
+    this._onList = false;
+    this._store = null;
+    this._unsubscribe = null;
+    this._snapshot = null;
+    this._sourceError = null;
+    this._sourceSignature = null;
+    this._sourceEntity = null;
+    this._needsSource = true;
+    this.shadowRoot.innerHTML = `
+      <style>
+        :host { display: block; min-width: 0; container-type: inline-size; color: var(--primary-text-color); }
+        * { box-sizing: border-box; }
+        [hidden] { display: none !important; }
+        .catalog-header { display: flex; align-items: center; gap: 8px; margin-bottom: 12px; }
+        .catalog-title { flex: 1; margin: 0; min-width: 0; font-size: 20px; line-height: 1.3; font-weight: 500; overflow-wrap: anywhere; }
+        .catalog-counter { color: var(--secondary-text-color); font-size: 12px; white-space: nowrap; }
+        button { font: inherit; color: inherit; cursor: pointer; }
+        button:focus-visible, input:focus-visible { outline: 2px solid var(--primary-color); outline-offset: 2px; }
+        .catalog-icon-button { display: inline-flex; align-items: center; justify-content: center; width: 36px; height: 36px; padding: 0; border: 0; border-radius: 4px; background: transparent; flex-shrink: 0; }
+        .catalog-icon-button:hover { background: var(--secondary-background-color); }
+        .catalog-toolbar { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+        .catalog-search { display: flex; flex: 1 1 180px; align-items: center; min-width: 0; height: 44px; padding-inline: 10px 4px; gap: 8px; border: 1px solid var(--divider-color, #aaa); border-radius: 6px; background: var(--card-background-color); }
+        .catalog-search ha-icon { flex-shrink: 0; color: var(--secondary-text-color); --mdc-icon-size: 20px; }
+        .catalog-search input { min-width: 0; width: 100%; padding: 8px 0; border: 0; outline: 0; background: transparent; color: var(--primary-text-color); font: inherit; font-size: 14px; }
+        .catalog-search:focus-within { outline: 2px solid var(--primary-color); outline-offset: 1px; }
+        .catalog-search input::-webkit-search-cancel-button { -webkit-appearance: none; }
+        .catalog-on-list { display: inline-flex; align-items: center; gap: 8px; min-height: 40px; font-size: 14px; cursor: pointer; white-space: nowrap; }
+        .catalog-on-list input { width: 18px; height: 18px; accent-color: var(--primary-color); }
+        .catalog-tabs { display: flex; gap: 2px; overflow-x: auto; margin: 12px 0 0; border-bottom: 1px solid var(--divider-color); scrollbar-width: thin; }
+        .catalog-tab { display: inline-flex; align-items: center; gap: 6px; flex-shrink: 0; min-height: 44px; padding: 8px 12px; border: 0; border-bottom: 2px solid transparent; background: transparent; font-size: 14px; color: var(--secondary-text-color); white-space: nowrap; }
+        .catalog-tab[aria-selected="true"] { color: var(--primary-color); border-bottom-color: var(--primary-color); }
+        .catalog-tab-count { font-size: 12px; opacity: .8; }
+        .catalog-section { margin: 18px 0 0; }
+        .catalog-category-heading { display: flex; align-items: baseline; gap: 8px; margin-bottom: 8px; }
+        .catalog-category-title { margin: 0; min-width: 0; font-size: 16px; font-weight: 500; line-height: 1.4; overflow-wrap: anywhere; }
+        .catalog-category-count { color: var(--secondary-text-color); font-size: 12px; }
+        .catalog-grid { display: grid; grid-template-columns: repeat(var(--catalog-columns, 4), minmax(0, 1fr)); gap: 8px; align-items: start; }
+        .catalog-grid > shopping-list-card { display: block; min-width: 0; }
+        .catalog-grid > shopping-list-card[hidden] { display: none !important; }
+        :host([data-sync-state]:not([data-sync-state="ready"])) shopping-list-card .list-status { display: none; }
+        .catalog-status:not(:empty) { margin-top: 12px; overflow-wrap: anywhere; }
+        .catalog-empty { padding: 24px 0; margin: 0; color: var(--secondary-text-color); font-size: 14px; }
+        @container (max-width: 900px) { .catalog-grid { grid-template-columns: repeat(var(--catalog-medium-columns, 3), minmax(0, 1fr)); } }
+        @container (max-width: 560px) { .catalog-grid { grid-template-columns: repeat(var(--catalog-mobile-columns, 2), minmax(0, 1fr)); } }
+        @container (max-width: 300px) { .catalog-grid { grid-template-columns: minmax(0, 1fr); } .catalog-counter { display: none; } }
+      </style>
+      <div class="catalog-header">
+        <h2 class="catalog-title"></h2>
+        <span class="catalog-counter" aria-live="polite"></span>
+        <button class="catalog-icon-button catalog-open-list" type="button" aria-label="Open shopping list" title="Open shopping list"><ha-icon icon="mdi:format-list-checks"></ha-icon></button>
+      </div>
+      <div class="catalog-toolbar">
+        <label class="catalog-search"><ha-icon icon="mdi:magnify"></ha-icon><input type="search" aria-label="Search catalog" placeholder="Search products" autocomplete="off"><button class="catalog-icon-button catalog-clear-search" type="button" aria-label="Clear search" title="Clear search" hidden><ha-icon icon="mdi:close"></ha-icon></button></label>
+        <label class="catalog-on-list"><input type="checkbox">On list</label>
+      </div>
+      <div class="catalog-tabs" role="tablist" aria-label="Product categories"></div>
+      <div class="catalog-status" role="status" aria-live="polite"></div>
+      <div class="catalog-content" id="catalog-content" role="tabpanel"></div>
+      <p class="catalog-empty" role="status" hidden></p>
+    `;
+    this._content = this.shadowRoot.querySelector('.catalog-content');
+    this._tabs = this.shadowRoot.querySelector('.catalog-tabs');
+    this._status = this.shadowRoot.querySelector('.catalog-status');
+    this._search = this.shadowRoot.querySelector('input[type="search"]');
+    this._search.addEventListener('input', () => {
+      this._query = this._search.value;
+      this._applyFilters();
+    });
+    this.shadowRoot.querySelector('.catalog-clear-search').addEventListener('click', () => {
+      this._query = '';
+      this._search.value = '';
+      this._applyFilters();
+      this._search.focus();
+    });
+    this.shadowRoot.querySelector('.catalog-on-list input').addEventListener('change', event => {
+      this._onList = event.target.checked;
+      this._applyFilters();
+    });
+    this.shadowRoot.querySelector('.catalog-open-list').addEventListener('click', () => {
+      if (!this._config) return;
+      this.dispatchEvent(new CustomEvent('hass-more-info', {
+        detail: { entityId: this._config.todo_list }, bubbles: true, composed: true,
+      }));
+    });
+  }
+
+  setConfig(config) {
+    if (typeof config.catalog_entity !== 'string' || !/^sensor\.[a-z0-9_]+$/.test(config.catalog_entity)) {
+      throw new Error('Select a sensor entity for the catalog.');
+    }
+    if (typeof config.todo_list !== 'string' || !/^todo\.[a-z0-9_]+$/.test(config.todo_list)) {
+      throw new Error('Select a to-do list entity.');
+    }
+    if (config.catalog_attribute != null && typeof config.catalog_attribute !== 'string') {
+      throw new Error('The catalog attribute must be a name.');
+    }
+    if (config.item_options != null && (typeof config.item_options !== 'object' || Array.isArray(config.item_options))) {
+      throw new Error('Item options must be an object.');
+    }
+    const columns = config.columns ?? 4;
+    if (!Number.isInteger(columns) || columns < 1 || columns > 6) throw new Error('Columns must be an integer from 1 to 6.');
+    if (this._config?.catalog_entity !== config.catalog_entity || this._config?.catalog_attribute !== config.catalog_attribute) this._category = null;
+    this._config = { ...config };
+    this._needsSource = true;
+    this.style.setProperty('--catalog-columns', String(columns));
+    this.style.setProperty('--catalog-medium-columns', String(Math.min(columns, 3)));
+    this.style.setProperty('--catalog-mobile-columns', String(Math.min(columns, 2)));
+    this.shadowRoot.querySelector('.catalog-title').textContent = config.title || 'Shopping';
+    this._update();
+  }
+
+  set hass(hass) {
+    this._hass = hass;
+    this._update();
+  }
+
+  connectedCallback() { this._update(); }
+
+  disconnectedCallback() {
+    const unsubscribe = this._unsubscribe;
+    this._unsubscribe = null;
+    this._store = null;
+    this._snapshot = null;
+    unsubscribe?.();
+  }
+
+  _update() {
+    if (!this._config || !this._hass) return;
+    if (this.isConnected) this._ensureSubscription();
+    const entity = this._hass.states?.[this._config.catalog_entity];
+    if (this._needsSource || entity !== this._sourceEntity) {
+      this._needsSource = false;
+      this._sourceEntity = entity;
+      try {
+        const groups = readCatalog(this._hass, this._config);
+        const signature = JSON.stringify(groups);
+        this._sourceError = null;
+        if (signature !== this._sourceSignature) {
+          this._sourceSignature = signature;
+          this._reconcile(groups);
+        }
+      } catch (error) {
+        this._sourceError = error.message;
+        this._sourceSignature = null;
+        this._reconcile([]);
+      }
+    }
+    for (const product of this._products.values()) product.card.hass = this._hass;
+    this._renderStatus();
+    this._applyFilters();
+  }
+
+  _ensureSubscription() {
+    if (this._store?.entityId === this._config.todo_list && this._store.connection === this._hass.connection && this._unsubscribe) {
+      this._store.updateHass(this._hass);
+      return;
+    }
+    this.disconnectedCallback();
+    const store = getTodoStore(this._hass, this._config.todo_list);
+    this._store = store;
+    this._unsubscribe = store.subscribe(snapshot => {
+      if (this._store !== store) return;
+      this._snapshot = snapshot;
+      this._renderStatus();
+      this._applyFilters();
+    });
+  }
+
+  _reconcile(groups) {
+    this._groups = groups;
+    if (this._category !== null && !groups.some(group => group.name === this._category)) this._category = null;
+    const keepProducts = new Set();
+    const keepSections = new Set();
+    groups.forEach((group, groupIndex) => {
+      keepSections.add(group.name);
+      let section = this._sections.get(group.name);
+      if (!section) {
+        const element = document.createElement('section');
+        element.className = 'catalog-section';
+        element.innerHTML = '<div class="catalog-category-heading"><h3 class="catalog-category-title"></h3><span class="catalog-category-count"></span></div><div class="catalog-grid"></div>';
+        element.querySelector('h3').textContent = group.name;
+        section = { element, grid: element.querySelector('.catalog-grid'), count: element.querySelector('.catalog-category-count') };
+        this._sections.set(group.name, section);
+      }
+      if (this._content.children[groupIndex] !== section.element) this._content.insertBefore(section.element, this._content.children[groupIndex] || null);
+      group.products.forEach((product, index) => {
+        keepProducts.add(product.key);
+        let record = this._products.get(product.key);
+        if (!record) {
+          record = { card: document.createElement('shopping-list-card'), signature: null };
+          this._products.set(product.key, record);
+        }
+        record.product = product;
+        const signature = JSON.stringify(product.config);
+        if (record.signature !== signature) {
+          record.card.setConfig(product.config);
+          record.signature = signature;
+        }
+        record.card.hass = this._hass;
+        if (section.grid.children[index] !== record.card) section.grid.insertBefore(record.card, section.grid.children[index] || null);
+      });
+    });
+    for (const [key, record] of this._products) {
+      if (!keepProducts.has(key)) { record.card.remove(); this._products.delete(key); }
+    }
+    for (const [name, section] of this._sections) {
+      if (!keepSections.has(name)) { section.element.remove(); this._sections.delete(name); }
+    }
+    this._renderTabs();
+  }
+
+  _renderTabs() {
+    const categories = [{ name: null, title: 'All', count: this._products.size }, ...this._groups.map(group => ({ name: group.name, title: group.name, count: group.products.length }))];
+    const signature = JSON.stringify(categories);
+    if (signature === this._tabSignature) return;
+    this._tabSignature = signature;
+    this._tabs.replaceChildren();
+    categories.forEach((category, index) => {
+      const button = document.createElement('button');
+      button.className = 'catalog-tab';
+      button.type = 'button';
+      button.id = `catalog-tab-${index}`;
+      button.setAttribute('role', 'tab');
+      button.setAttribute('aria-controls', 'catalog-content');
+      button._category = category.name;
+      const title = document.createElement('span');
+      title.textContent = category.title;
+      const count = document.createElement('span');
+      count.className = 'catalog-tab-count';
+      count.textContent = String(category.count);
+      button.append(title, count);
+      button.addEventListener('click', () => { this._category = category.name; this._applyFilters(); });
+      button.addEventListener('keydown', event => {
+        const keys = ['ArrowLeft', 'ArrowRight', 'Home', 'End'];
+        if (!keys.includes(event.key)) return;
+        event.preventDefault();
+        const buttons = [...this._tabs.children];
+        const direction = event.key === 'ArrowLeft' ? -1 : 1;
+        const next = event.key === 'Home' ? 0 : event.key === 'End' ? buttons.length - 1
+          : (buttons.indexOf(button) + direction + buttons.length) % buttons.length;
+        buttons[next].click();
+        buttons[next].focus();
+      });
+      this._tabs.append(button);
+    });
+  }
+
+  _applyFilters() {
+    const terms = searchText(this._query).trim().split(/\s+/).filter(Boolean);
+    const items = this._snapshot?.items;
+    let visible = 0;
+    for (const group of this._groups) {
+      let count = 0;
+      for (const product of group.products) {
+        const record = this._products.get(product.key);
+        const matches = (this._category === null || this._category === group.name)
+          && terms.every(term => product.search.includes(term))
+          && (!this._onList || productOnList(product, items));
+        if (!matches && !record.card.hidden) record.card._clearHolds?.();
+        record.card.hidden = !matches;
+        record.card.inert = !matches;
+        if (matches) count++;
+      }
+      const section = this._sections.get(group.name);
+      section.element.hidden = count === 0;
+      section.count.textContent = String(count);
+      visible += count;
+    }
+    for (const tab of this._tabs.children) {
+      const selected = tab._category === this._category;
+      tab.setAttribute('aria-selected', String(selected));
+      tab.tabIndex = selected ? 0 : -1;
+      if (selected) this._content.setAttribute('aria-labelledby', tab.id);
+    }
+    this.shadowRoot.querySelector('.catalog-counter').textContent = `${visible} / ${this._products.size}`;
+    this.shadowRoot.querySelector('.catalog-clear-search').hidden = !this._query;
+    const empty = this.shadowRoot.querySelector('.catalog-empty');
+    empty.hidden = visible > 0 || !!this._sourceError || !this._hass
+      || (this._onList && items === null);
+    empty.textContent = !this._products.size ? 'The product catalog is empty.'
+      : this._onList ? 'No catalog products match the selected list filters.' : 'No products match your search.';
+  }
+
+  _renderStatus() {
+    const status = this._snapshot?.status || 'loading';
+    this.setAttribute('data-sync-state', status);
+    const message = this._sourceError || this._snapshot?.error || (status === 'loading' ? 'Loading shopping list...' : '');
+    const key = `${status}|${message}|${!!this._sourceError}`;
+    if (key === this._statusKey) return;
+    this._statusKey = key;
+    this._status.replaceChildren();
+    if (!message) return;
+    const alert = document.createElement('ha-alert');
+    alert.setAttribute('alert-type', this._sourceError || status === 'error' ? 'error' : status === 'loading' ? 'info' : 'warning');
+    alert.textContent = message;
+    if (!this._sourceError && status !== 'loading') {
+      const refresh = document.createElement('button');
+      refresh.className = 'catalog-icon-button';
+      refresh.type = 'button';
+      refresh.setAttribute('aria-label', 'Refresh shopping list');
+      refresh.title = 'Refresh shopping list';
+      refresh.innerHTML = '<ha-icon icon="mdi:refresh"></ha-icon>';
+      refresh.addEventListener('click', () => { void this._store?.refresh().catch(() => {}); });
+      alert.append(refresh);
+    }
+    this._status.append(alert);
+  }
+
+  getCardSize() {
+    return Math.max(3, 2 + this._groups.reduce((rows, group) => rows + 1 + Math.ceil(group.products.length / (this._config?.columns || 4)) * 2, 0));
+  }
+
+  getLayoutOptions() { return { grid_rows: 'auto', grid_columns: 12, grid_min_columns: 4 }; }
+
+  static getConfigElement() { return document.createElement('shopping-list-catalog-card-editor'); }
+
+  static getStubConfig(hass) {
+    const entities = Object.entries(hass?.states || {});
+    const catalog = entities.find(([entityId, state]) => entityId.startsWith('sensor.')
+      && Object.values(state.attributes || {}).some(value => Array.isArray(value) && value.some(entry => typeof entry?.title === 'string')));
+    return {
+      type: 'custom:shopping-list-catalog-card',
+      catalog_entity: catalog?.[0] || '',
+      todo_list: entities.find(([entityId]) => entityId.startsWith('todo.'))?.[0] || '',
+    };
+  }
+}
+
+if (!customElements.get('shopping-list-catalog-card')) {
+  customElements.define('shopping-list-catalog-card', ShoppingListCatalogCard);
+}
+window.customCards = window.customCards || [];
+if (!window.customCards.some(card => card.type === 'shopping-list-catalog-card')) {
+  window.customCards.push({
+    type: 'shopping-list-catalog-card', name: 'Shopping Catalog', preview: true,
+    description: 'A shared product catalog with categories, search, and shopping-list controls.',
+  });
 }
 
 /*
@@ -1379,13 +2150,13 @@ class ShoppingListCard extends HTMLElement {
     const offColorN = this._config.off_color || ShoppingListCard.DEFAULT_OFF_COLOR;
     const activeColor = isOn ? onColorN : offColorN;
 
-    const icon    = isOn ? onIcon : offIcon;
-    const bg      = this._rgbaFor(activeColor, 0.2);
-    const fg      = this._solidFor(activeColor);
+    const icon    = escapeHtml(isOn ? onIcon : offIcon);
+    const bg      = escapeHtml(this._rgbaFor(activeColor, 0.2));
+    const fg      = escapeHtml(this._solidFor(activeColor));
 
     let cardBgStyle = '';
     if (isOn && this._config.colorize_background !== false) {
-      cardBgStyle = `style="background-color: ${this._rgbaFor(onColorN, 0.1)};"`;
+      cardBgStyle = `style="background-color: ${escapeHtml(this._rgbaFor(onColorN, 0.1))};"`;
     }
 
     const isVertical = this._config.layout === 'vertical';
@@ -1531,9 +2302,9 @@ class ShoppingListCard extends HTMLElement {
     // The header icon reflects the whole group: it is in the selected state when
     // the bare item OR any variant is on the list.
     const headColor = anyOn ? onColorN : offColorN;
-    const headBg = this._rgbaFor(headColor, 0.2);
-    const headFg = this._solidFor(headColor);
-    const headIcon = anyOn ? onIcon : offIcon;
+    const headBg = escapeHtml(this._rgbaFor(headColor, 0.2));
+    const headFg = escapeHtml(this._solidFor(headColor));
+    const headIcon = escapeHtml(anyOn ? onIcon : offIcon);
     const effectiveImage = this._resolveImage();
     const safeImage = escapeHtml(effectiveImage);
     const safeTitle = escapeHtml(this._config.title || '');
@@ -1577,17 +2348,18 @@ class ShoppingListCard extends HTMLElement {
 
     let cardBgStyle = '';
     if (anyOn && this._config.colorize_background !== false) {
-      cardBgStyle = `style="background-color: ${this._rgbaFor(onColorN, 0.1)};"`;
+      cardBgStyle = `style="background-color: ${escapeHtml(this._rgbaFor(onColorN, 0.1))};"`;
     }
 
     const enableQty = !!this._config.enable_quantity;
     const decBtn = `<div class="quantity-btn" role="button" tabindex="0" aria-label="Decrease quantity" data-action="decrement"><ha-icon icon="mdi:minus"></ha-icon></div>`;
     const incBtn = `<div class="quantity-btn" role="button" tabindex="0" aria-label="Increase quantity" data-action="increment"><ha-icon icon="mdi:plus"></ha-icon></div>`;
 
-    const onSolid = this._solidFor(onColorN);
+    const onSolid = escapeHtml(this._solidFor(onColorN));
     const rowsHtml = states.map((s, i) => {
       const thumb = s.image
-        ? `<div class="type-thumb"><img src="${escapeHtml(s.image)}" alt=""></div>` : '';
+        ? `<div class="type-thumb"><img src="${escapeHtml(s.image)}" alt=""><ha-icon class="type-image-fallback" icon="${escapeHtml(s.icon || offIcon)}"></ha-icon></div>`
+        : s.icon ? `<div class="type-thumb"><ha-icon icon="${escapeHtml(s.icon)}"></ha-icon></div>` : '';
       let rightHtml;
       if (s.isOn && enableQty) {
         rightHtml = `<div class="type-qty">
@@ -1602,7 +2374,7 @@ class ShoppingListCard extends HTMLElement {
         // Inactive: a muted add affordance. Tapping the row adds the variant.
         rightHtml = `<div class="type-indicator type-add"><ha-icon icon="mdi:plus"></ha-icon></div>`;
       }
-      const rowStyle = s.isOn ? ` style="background:${this._rgbaFor(onColorN, 0.12)};"` : '';
+      const rowStyle = s.isOn ? ` style="background:${escapeHtml(this._rgbaFor(onColorN, 0.12))};"` : '';
       return `<div class="type-row ${s.isOn ? 'is-on' : 'is-off'}" data-type-index="${i}"${rowStyle}
                    role="button" tabindex="0" aria-pressed="${s.isOn ? 'true' : 'false'}"
                    aria-label="${escapeHtml(s.label)}">
@@ -1826,7 +2598,10 @@ class ShoppingListCard extends HTMLElement {
   }
 
   _wireImageError(card) {
-    const img = card.querySelector('img');
+    card.querySelectorAll('.type-thumb img').forEach(image => {
+      image.addEventListener('error', () => image.parentElement?.classList.add('image-error'));
+    });
+    const img = card.querySelector('.image-wrapper img');
     if (!img) return;
     // Try each candidate in order; when all fail, hide the image so the
     // icon-only fallback shows through.

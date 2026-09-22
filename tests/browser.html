@@ -24,8 +24,14 @@
     main { max-width: 1000px; margin: auto; }
     h1 { font-size: 20px; margin: 0 0 20px; }
     #cards { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); align-items: start; gap: 12px; }
+    #editor-view { display: grid; grid-template-columns: minmax(0, 560px) minmax(0, 1fr); gap: 24px; align-items: start; }
+    #editor-view > * { min-width: 0; }
+    @media (max-width: 700px) {
+      #editor-view { grid-template-columns: minmax(0, 1fr); }
+    }
     shopping-list-card.wide { grid-column: span 2; }
     ha-card { display: block; }
+    shopping-list-catalog-card { display: block; }
     ha-icon { display: inline-flex; align-items: center; justify-content: center; font-size: var(--mdc-icon-size, 24px); width: 24px; height: 24px; }
     ha-alert { display: block; font-size: 13px; line-height: 1.5; color: #9e2424; }
     ha-alert[alert-type="info"] { color: #365a6d; }
@@ -40,14 +46,99 @@
   <script type="module">
     class TestIcon extends HTMLElement {
       static get observedAttributes() { return ['icon']; }
+      constructor() {
+        super();
+        this.attachShadow({ mode: 'open' });
+        this.shadowRoot.innerHTML = '<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@mdi/font@7.4.47/css/materialdesignicons.min.css"><style>:host{display:inline-flex;align-items:center;justify-content:center;width:24px;height:24px}span{font-size:var(--mdc-icon-size,24px)}</style><span class="mdi"></span>';
+      }
       attributeChangedCallback() {
         const name = this.getAttribute('icon')?.replace('mdi:', 'mdi-');
-        for (const token of [...this.classList]) if (token.startsWith('mdi-')) this.classList.remove(token);
-        this.classList.add('mdi');
-        if (name) this.classList.add(name);
+        this.shadowRoot.querySelector('span').className = `mdi ${name || ''}`;
       }
     }
     customElements.define('ha-icon', TestIcon);
+    const editorMode = new URLSearchParams(location.search).has('editor');
+    const catalogMode = new URLSearchParams(location.search).has('catalog');
+    customElements.define('ha-card', class extends HTMLElement {
+      constructor() {
+        super();
+        this.attachShadow({ mode: 'open' });
+        this.shadowRoot.innerHTML = '<style>:host{display:block}</style><slot></slot>';
+      }
+    });
+    customElements.define('ha-alert', class extends HTMLElement {
+      constructor() {
+        super();
+        this.attachShadow({ mode: 'open' });
+        this.shadowRoot.innerHTML = '<style>:host{display:block;font-size:13px;line-height:1.5;color:#9e2424}:host([alert-type="info"]){color:#365a6d}</style><slot></slot>';
+      }
+    });
+    if (editorMode) {
+      class TestField extends HTMLElement {
+        constructor() {
+          super();
+          this.attachShadow({ mode: 'open' });
+          this.shadowRoot.innerHTML = '<style>:host{display:block;min-width:0}label{display:grid;gap:6px;font-size:12px;color:#656970}input,select{box-sizing:border-box;width:100%;height:40px;min-width:0;border:1px solid #adb4bd;border-radius:4px;padding:8px;background:#fff;color:#212121;font:inherit;font-size:14px}input:focus-visible,select:focus-visible{outline:2px solid #0288d1}</style><label><span></span></label>';
+          this._input = document.createElement(this.localName === 'ha-select' ? 'select' : 'input');
+          this.shadowRoot.querySelector('label').append(this._input);
+          this._input.addEventListener('input', event => {
+            event.stopPropagation();
+            this.dispatchEvent(new CustomEvent('value-changed', { detail: { value: this.value }, bubbles: true, composed: true }));
+          });
+          this._input.addEventListener('change', event => {
+            event.stopPropagation();
+            const type = this.localName === 'ha-select' ? 'selected' : 'change';
+            this.dispatchEvent(new CustomEvent(type, { detail: { value: this.value }, bubbles: true, composed: true }));
+          });
+        }
+        connectedCallback() { this.shadowRoot.querySelector('span').textContent = this.getAttribute('label') || ''; }
+        get value() { return this._input.value; }
+        set value(value) { if (this._input.value !== String(value ?? '')) this._input.value = value ?? ''; }
+        set options(options) {
+          this._input.replaceChildren(...options.map(option => {
+            const element = document.createElement('option');
+            element.value = option.value;
+            element.textContent = option.label;
+            return element;
+          }));
+        }
+      }
+      for (const name of ['ha-input', 'ha-entity-picker', 'ha-icon-picker', 'ha-select']) {
+        customElements.define(name, class extends TestField {});
+      }
+      customElements.define('ha-switch', class extends HTMLElement {
+        constructor() {
+          super();
+          this.attachShadow({ mode: 'open' });
+          this.shadowRoot.innerHTML = '<input type="checkbox" aria-label="Enabled">';
+          this.shadowRoot.querySelector('input').addEventListener('change', () => this.dispatchEvent(new Event('change', { bubbles: true })));
+        }
+        get checked() { return this.shadowRoot.querySelector('input').checked; }
+        set checked(value) { this.shadowRoot.querySelector('input').checked = value; }
+      });
+      customElements.define('ha-expansion-panel', class extends HTMLElement {
+        constructor() {
+          super();
+          this.attachShadow({ mode: 'open' });
+          this.shadowRoot.innerHTML = '<style>summary{padding:14px 16px;font-weight:500;cursor:pointer}</style><details><summary></summary><slot></slot></details>';
+        }
+        connectedCallback() {
+          this.shadowRoot.querySelector('summary').textContent = this.getAttribute('header') || '';
+          this.shadowRoot.querySelector('details').open = this.hasAttribute('expanded');
+        }
+      });
+      customElements.define('ha-picture-upload', class extends HTMLElement {
+        constructor() {
+          super();
+          this.attachShadow({ mode: 'open' });
+          this.shadowRoot.innerHTML = '<style>button{display:inline-flex;align-items:center;gap:6px;min-height:36px;border:1px solid #adb4bd;border-radius:4px;background:white;padding:4px 10px;cursor:pointer;font:inherit;color:#212121}</style><button type="button"><ha-icon icon="mdi:upload"></ha-icon>Upload image</button>';
+          this.shadowRoot.querySelector('button').addEventListener('click', () => {
+            this.value = window.fixture.image;
+            this.dispatchEvent(new Event('change', { bubbles: true, composed: true }));
+          });
+        }
+      });
+    }
     await import('../shopping-list-card.js');
     const entries = [
       { uid: 'milk', summary: 'Milk (2)', status: 'needs_action' },
@@ -99,6 +190,23 @@
         push();
       },
     };
+    let catalogData;
+    if (catalogMode) {
+      const response = await fetch('../examples/auto-generated-grid/shopping_items.json');
+      catalogData = await response.json();
+      const icons = {
+        Fruits: 'mdi:food-apple-outline', Vegetables: 'mdi:carrot', Frozen: 'mdi:snowflake',
+        'Dairy and Eggs': 'mdi:bottle-soda-outline', Meat: 'mdi:food-drumstick',
+        'Condiments, Herbs & Spices': 'mdi:shaker-outline', Grains: 'mdi:barley', Snacks: 'mdi:cookie-outline',
+      };
+      for (const [category, products] of Object.entries(catalogData)) {
+        for (const product of products) {
+          product.off_icon = icons[category] || 'mdi:cart-outline';
+          if (product.title === 'Milk') product.image = image;
+        }
+      }
+      hass.states['sensor.catalog'] = { state: '1', attributes: catalogData };
+    }
     const configurations = [
       { id: 'milk', title: 'Milk', enable_quantity: true, image },
       { id: 'bread', title: 'Bread', off_icon: 'mdi:bread-slice', hold_action: { action: 'none' } },
@@ -107,7 +215,7 @@
       { id: 'oats', title: 'Rolled oats', layout: 'vertical', off_icon: 'mdi:barley' },
       { id: 'apple-vertical', title: 'Apple', layout: 'vertical', types: ['Pink Lady', 'Granny Smith', 'Gala'], enable_quantity: true },
     ];
-    for (const configuration of configurations) {
+    for (const configuration of catalogMode || editorMode ? [] : configurations) {
       const card = document.createElement('shopping-list-card');
       card.id = configuration.id;
       if (!configuration.layout) card.classList.add('wide');
@@ -117,18 +225,68 @@
       card.addEventListener('hass-more-info', () => { moreInfo++; });
       document.querySelector('#cards').append(card);
     }
+    const editorChanges = [];
+    const catalogConfig = {
+      type: 'custom:shopping-list-catalog-card', catalog_entity: 'sensor.catalog', todo_list: 'todo.test',
+      title: 'Shopping', columns: 4,
+    };
+    if (editorMode) {
+      document.querySelector('h1').textContent = 'Card settings';
+      document.querySelector('#cards').remove();
+      const view = document.createElement('div');
+      view.id = 'editor-view';
+      const editor = document.createElement(catalogMode ? 'shopping-list-catalog-card-editor' : 'shopping-list-card-editor');
+      const preview = document.createElement(catalogMode ? 'shopping-list-catalog-card' : 'shopping-list-card');
+      preview.id = 'editor-preview';
+      const config = catalogMode ? catalogConfig : {
+        type: 'custom:shopping-list-card', title: 'Apple', todo_list: 'todo.test', enable_quantity: true,
+        types: [{ name: 'Pink Lady', image, icon: 'mdi:food-apple' }, 'Granny Smith', { name: 'Gala', icon: 'mdi:food-apple-outline' }],
+      };
+      editor.setConfig(config);
+      editor.hass = hass;
+      preview.setConfig(config);
+      preview.hass = hass;
+      editor.addEventListener('config-changed', event => {
+        const saved = structuredClone(event.detail.config);
+        editorChanges.push(saved);
+        editor.setConfig(saved);
+        preview.setConfig(saved);
+      });
+      view.append(editor, preview);
+      document.querySelector('main').append(view);
+    } else if (catalogMode) {
+      document.querySelector('h1').remove();
+      const catalog = document.createElement('shopping-list-catalog-card');
+      catalog.id = 'catalog-preview';
+      catalog.setConfig(catalogConfig);
+      catalog.hass = hass;
+      catalog.addEventListener('hass-more-info', () => { moreInfo++; });
+      document.querySelector('#cards').replaceWith(catalog);
+    }
     window.fixture = {
       calls,
       entries,
+      image,
+      editorChanges,
+      catalogData,
       get moreInfo() { return moreInfo; },
       get subscriptions() { return listeners.size; },
       failNextWrite() { failNext = true; },
       pauseWrites() { pauseWrites = true; },
       resumeWrites() { pauseWrites = false; releaseWrite?.(); releaseWrite = null; },
       pushUnrelated() { push(); },
+      updateCatalog(data) {
+        catalogData = structuredClone(data);
+        hass.states['sensor.catalog'] = { state: String(Date.now()), attributes: catalogData };
+        for (const catalog of document.querySelectorAll('shopping-list-catalog-card')) catalog.hass = { ...hass };
+      },
+      setCatalogAvailable(available) {
+        hass.states['sensor.catalog'] = { state: available ? '1' : 'unavailable', attributes: catalogData };
+        for (const catalog of document.querySelectorAll('shopping-list-catalog-card')) catalog.hass = { ...hass };
+      },
       setConnected(connected) {
         hass.connected = connected;
-        for (const card of document.querySelectorAll('shopping-list-card')) card.hass = { ...hass };
+        for (const card of document.querySelectorAll('shopping-list-card, shopping-list-catalog-card')) card.hass = { ...hass };
       },
     };
   </script>
