@@ -1257,6 +1257,47 @@ function typeNames(types) {
   return entries.map(entry => typeof entry === 'string' ? entry.trim() : String(entry?.name ?? '').trim()).filter(Boolean);
 }
 
+function groupSubtitleProducts(products, entries, defaults) {
+  const groups = new Map();
+  products.forEach((product, index) => {
+    const entry = entries[index];
+    if (Object.hasOwn(entry, 'types') || Object.hasOwn(defaults, 'types') || entry.id != null
+      || (product.config.subtitle && product.config.subtitle !== product.config.subtitle.trim())) {
+      return;
+    }
+    const signature = JSON.stringify(itemFields.filter(field => field !== 'subtitle' && field !== 'image')
+      .map(field => [field, product.config[field]]));
+    let group = groups.get(signature);
+    if (!group) {
+      group = [];
+      groups.set(signature, group);
+    }
+    group.push(product);
+  });
+  const replacements = new Map();
+  const merged = new Set();
+  for (const group of groups.values()) {
+    if (group.length < 2 || !group.some(product => product.config.subtitle)) continue;
+    const header = group.find(product => !product.config.subtitle) || group[0];
+    const seen = new Set();
+    const types = [];
+    for (const product of group) {
+      const name = product.config.subtitle;
+      if (!name || seen.has(name.toLowerCase())) continue;
+      seen.add(name.toLowerCase());
+      types.push(product.config.image ? { name, image: product.config.image } : name);
+    }
+    replacements.set(group[0], {
+      ...header,
+      config: { ...header.config, types },
+      search: group.map(product => product.search).join(' '),
+      names: [...new Set(group.flatMap(product => product.names))],
+    });
+    for (const product of group.slice(1)) merged.add(product);
+  }
+  return products.flatMap(product => merged.has(product) ? [] : [replacements.get(product) || product]);
+}
+
 function searchText(value) {
   return String(value).normalize('NFKD').replace(/\p{Mark}/gu, '').toLocaleLowerCase();
 }
@@ -1309,7 +1350,7 @@ function readCatalog(hass, config) {
         names: [...new Set([buildName(options, options.subtitle), ...names.map(name => buildName(options, name))])],
       };
     });
-    groups.push({ name: category, products });
+    groups.push({ name: category, products: groupSubtitleProducts(products, entries, defaults) });
   }
   return groups;
 }

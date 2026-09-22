@@ -94,7 +94,11 @@ By default, each array-valued sensor attribute is treated as a category. Other a
 }
 ```
 
-If the entire category map is in one attribute, set `catalog_attribute` to its name. That attribute may contain an object or a JSON string. Categories and products follow the source order. Category names do not automatically become list prefixes.
+Flat catalogs are supported too. Repeated products with the same title and compatible settings in one category are grouped into a variant dropdown using their subtitles. For example, separate `Chicken` entries with `subtitle: Breast` and `subtitle: Legs` become one Chicken tile with both variants. A bare entry is used for the header when present; otherwise the first subtitle remains the header's default. Stored to-do names are unchanged, and per-variant images are preserved.
+
+Explicit `types` entries and products with their own `id` remain as configured. Products with different list prefixes, quantity limits, or other behavior/display options are not merged. Single subtitle entries remain ordinary tiles. Groups appear where their first member occurred; other products retain their source order.
+
+If the entire category map is in one attribute, set `catalog_attribute` to its name. That attribute may contain an object or a JSON string. Categories follow the source order. Category names do not automatically become list prefixes.
 
 ### Catalog Options
 

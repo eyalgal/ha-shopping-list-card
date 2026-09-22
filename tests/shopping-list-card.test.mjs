@@ -464,6 +464,127 @@ test('a native catalog reads category attributes and shares the existing to-do s
   assert.deepEqual(environment.errors, []);
 });
 
+test('catalog groups repeated title and subtitle rows into a variant dropdown', async context => {
+  const environment = createEnvironment(context);
+  const setup = createHass([item('Chicken - Legs')]);
+  const entries = [
+    { title: 'Apple' },
+    { title: 'Apple', subtitle: 'Pink lady' },
+    { title: 'Chicken', subtitle: 'Breast' },
+    { title: 'Chicken', subtitle: 'Legs' },
+  ];
+  catalogSource(setup, { Products: entries });
+  const catalog = mountCatalog(environment, setup.hass);
+  await settle();
+  const cards = [...catalog.shadowRoot.querySelectorAll('shopping-list-card')];
+  assert.equal(cards.length, 2);
+  assert.equal(cards[0]._config.title, 'Apple');
+  assert.equal(cards[0]._config.subtitle, undefined);
+  assert.deepEqual(Array.from(cards[0]._getTypes(), type => type.name), ['Pink lady']);
+  const chicken = cards[1];
+  assert.equal(chicken._config.subtitle, 'Breast');
+  assert.deepEqual(Array.from(chicken._getTypes(), type => type.name), ['Breast', 'Legs']);
+  assert.ok(chicken.querySelector('.types-chevron'));
+  chicken.querySelector('.types-chevron').click();
+  assert.equal(chicken.querySelector('.types-list').inert, false);
+  assert.equal(chicken.querySelectorAll('.type-row')[1].getAttribute('aria-pressed'), 'true');
+  assert.deepEqual(setup.hass.states['sensor.catalog'].attributes.Products, entries);
+  assert.equal(setup.services.length, 0);
+});
+
+test('repeated products without subtitles retain their original order', async context => {
+  const environment = createEnvironment(context);
+  const setup = createHass();
+  catalogSource(setup, { Products: [{ title: 'Milk' }, { title: 'Pear' }, { title: 'Milk' }] });
+  const catalog = mountCatalog(environment, setup.hass);
+  await settle();
+  assert.deepEqual([...catalog.shadowRoot.querySelectorAll('shopping-list-card')].map(card => card._config.title), ['Milk', 'Pear', 'Milk']);
+});
+
+test('grouping keeps the bare header and variant images even when the bare row is last', async context => {
+  const environment = createEnvironment(context);
+  const setup = createHass();
+  catalogSource(setup, { Fruits: [
+    { title: 'Apple', subtitle: 'Pink lady', image: '/local/pink.png' },
+    { title: 'Pear' },
+    { title: 'Apple', subtitle: 'Gala', image: '/local/gala.png' },
+    { title: 'Apple', image: '/local/apple.png' },
+  ] });
+  const catalog = mountCatalog(environment, setup.hass);
+  await settle();
+  const cards = [...catalog.shadowRoot.querySelectorAll('shopping-list-card')];
+  assert.deepEqual(cards.map(card => card._config.title), ['Apple', 'Pear']);
+  assert.equal(cards[0]._config.subtitle, undefined);
+  assert.equal(cards[0]._config.image, '/local/apple.png');
+  assert.deepEqual(JSON.parse(JSON.stringify(cards[0]._config.types)), [
+    { name: 'Pink lady', image: '/local/pink.png' }, { name: 'Gala', image: '/local/gala.png' },
+  ]);
+});
+
+test('grouping respects categories, prefixes, explicit types, product IDs, and quantity overrides', async context => {
+  const environment = createEnvironment(context);
+  const setup = createHass();
+  catalogSource(setup, {
+    Dairy: [
+      { title: 'Milk', subtitle: 'Whole', list_prefix: 'Dairy' },
+      { title: 'Milk', subtitle: 'Skim', list_prefix: 'Dairy' },
+      { title: 'Milk', subtitle: 'Oat', list_prefix: 'Plant' },
+      { title: 'Milk', subtitle: 'Soy', list_prefix: 'Plant' },
+      { title: 'Milk', types: 'Almond, Cashew' },
+      { title: 'Milk', subtitle: 'Heavy', quantity_max: 4 },
+      { title: 'Milk', subtitle: 'Light', quantity_max: 9 },
+      { title: 'Milk', subtitle: 'A', id: 'first' },
+      { title: 'Milk', subtitle: 'B', id: 'second' },
+      { title: 'Milk', subtitle: 'Uncombined', types: [] },
+    ],
+    Frozen: [{ title: 'Milk', subtitle: 'Whole' }, { title: 'Milk', subtitle: 'Skim' }],
+  });
+  const catalog = mountCatalog(environment, setup.hass);
+  await settle();
+  const sections = catalog.shadowRoot.querySelectorAll('.catalog-section');
+  const cards = [...sections[0].querySelectorAll('shopping-list-card')];
+  assert.equal(cards.length, 8);
+  assert.equal(cards[0]._config.list_prefix, 'Dairy');
+  assert.deepEqual(Array.from(cards[0]._getTypes(), type => type.name), ['Whole', 'Skim']);
+  assert.equal(cards[1]._config.list_prefix, 'Plant');
+  assert.equal(cards[2]._config.types, 'Almond, Cashew');
+  assert.equal(cards[3]._config.quantity_max, 4);
+  assert.equal(cards[4]._config.quantity_max, 9);
+  assert.equal(cards[5]._config.subtitle, 'A');
+  assert.equal(cards[6]._config.subtitle, 'B');
+  assert.equal(cards[7]._getTypes().length, 0);
+  assert.equal(sections[1].querySelectorAll('shopping-list-card').length, 1);
+});
+
+test('inferred variant actions preserve stored names and do not remove an unconfigured bare item', async context => {
+  const environment = createEnvironment(context);
+  const setup = createHass([item('Chicken - Legs', 'legs'), item('Chicken', 'unrelated')], {
+    service(domain, service, data) {
+      let next = setup.state.items.map(entry => ({ ...entry }));
+      if (service === 'add_item') next.push(item(data.item, 'breast'));
+      else if (service === 'update_item') next.find(entry => entry.uid === data.item).summary = data.rename;
+      else next = next.filter(entry => entry.uid !== data.item);
+      setup.push(next);
+    },
+  });
+  catalogSource(setup, { Meat: [
+    { title: 'Chicken', subtitle: 'Breast' }, { title: 'Chicken', subtitle: 'Legs' },
+  ] });
+  const catalog = mountCatalog(environment, setup.hass);
+  await settle();
+  const chicken = catalog.shadowRoot.querySelector('shopping-list-card');
+  chicken.querySelector('.types-header').click();
+  await settle();
+  assert.equal(setup.services[0].data.item, 'Chicken - Breast');
+  chicken.querySelectorAll('.type-row')[1].querySelector('[data-action="increment"]').click();
+  await settle();
+  assert.equal(setup.services[1].data.item, 'legs');
+  assert.equal(setup.services[1].data.rename, 'Chicken - Legs (2)');
+  await chicken._removeAllTypes();
+  assert.deepEqual(setup.state.items, [item('Chicken', 'unrelated')]);
+  assert.equal(setup.services.filter(call => call.service === 'remove_item').length, 2);
+});
+
 function mountCatalog(environment, hass, config = {}) {
   const catalog = environment.document.createElement('shopping-list-catalog-card');
   catalog.setConfig({ catalog_entity: 'sensor.catalog', todo_list: 'todo.shopping', ...config });
