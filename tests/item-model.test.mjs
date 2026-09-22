@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { buildName, itemSummary, matchItem, planItemAction, updateTypeNames } from '../src/item-model.js';
+import { buildName, itemSummary, matchItem, planItemAction, planListAddition, updateTypeNames } from '../src/item-model.js';
 
 const config = { title: 'Milk', enable_quantity: true };
 const item = (summary, uid = 'milk') => ({ summary, uid, status: 'needs_action' });
@@ -69,4 +69,17 @@ test('variant metadata survives unrelated edits, reordering, and renaming', () =
   assert.deepEqual(updateTypeNames(variants, 'Whole'), [variants[0]]);
   assert.deepEqual(updateTypeNames('Whole, Skim', 'Whole\nSkim'), ['Whole', 'Skim']);
   assert.deepEqual(updateTypeNames(variants, ''), []);
+});
+
+test('quick-add trims names, suppresses existing items, and restores kept-zero entries', () => {
+  assert.equal(planListAddition([], '  '), null);
+  const addition = planListAddition([], '  Dishwasher tablets  ');
+  assert.equal(addition.service, 'add_item');
+  assert.deepEqual(addition.data, { item: 'Dishwasher tablets' });
+  assert.equal(addition.confirmed([item('Dishwasher tablets')]), true);
+  assert.equal(planListAddition([item('MILK (3)')], 'Milk'), null);
+  const zero = planListAddition([item('Milk (0)')], 'Milk');
+  assert.equal(zero.service, 'update_item');
+  assert.deepEqual(zero.data, { item: 'milk', rename: 'Milk (1)' });
+  assert.equal(zero.confirmed([item('Milk (1)')]), true);
 });

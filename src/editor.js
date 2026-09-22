@@ -1,5 +1,6 @@
 import { CARD_DEFAULTS } from './card-defaults.js';
 import './variants-editor.js';
+import './catalog-editor.js';
 
 class ShoppingListCardEditor extends HTMLElement {
   constructor() {
@@ -12,18 +13,31 @@ class ShoppingListCardEditor extends HTMLElement {
   set hass(hass) {
     this._hass = hass;
     if (!this._rendered) { this._render(); return; }
+    if (this._catalogEditor) {
+      this._catalogEditor.hass = hass;
+      return;
+    }
     this.shadowRoot.querySelectorAll(
       'ha-entity-picker, ha-icon-picker, ha-picture-upload, shopping-list-variants-editor'
     ).forEach(el => { el.hass = hass; });
   }
 
   setConfig(config) {
+    const previousMode = this._config?.mode || 'single';
     this._config = { ...config };
-    if (this._rendered) this._updateFormValues();
+    if (!this._rendered) return;
+    if (previousMode !== (config.mode || 'single')) this._render();
+    else if (this._catalogEditor) this._catalogEditor.setConfig(this._config);
+    else this._updateFormValues();
   }
 
   _render() {
     if (!this.shadowRoot || !this._hass) return;
+    if (this._config?.mode === 'catalog') {
+      this._renderCatalog();
+      return;
+    }
+    this._catalogEditor = null;
 
     const todoEntities = Object.keys(this._hass.states).filter(id => id.startsWith('todo.'));
     const hasTodoEntities = todoEntities.length > 0;
@@ -241,6 +255,8 @@ class ShoppingListCardEditor extends HTMLElement {
       </div>
     `;
 
+    this._renderModeSelector();
+
     // Wire hass-consuming components
     const ep = this.shadowRoot.querySelector('#todo_list');
     ep.hass = this._hass;
@@ -256,6 +272,7 @@ class ShoppingListCardEditor extends HTMLElement {
       pu.original = false;
       pu.crop = undefined;
       pu.addEventListener('change', () => {
+        if (this.shadowRoot.querySelector('#image_upload') !== pu) return;
         const tf = this.shadowRoot.querySelector('#image');
         tf.value = pu.value || '';
         this._handleConfigChanged();
@@ -276,6 +293,7 @@ class ShoppingListCardEditor extends HTMLElement {
     typesEl.hass = this._hass;
     typesEl.addEventListener('value-changed', event => {
       event.stopPropagation();
+      if (this.shadowRoot.querySelector('#types') !== typesEl) return;
       const config = { ...this._config };
       if (event.detail.value.length) config.types = event.detail.value;
       else delete config.types;
@@ -348,6 +366,66 @@ class ShoppingListCardEditor extends HTMLElement {
     if (this._config) this._updateFormValues();
   }
 
+  _renderCatalog() {
+    this.shadowRoot.innerHTML = '<style>:host { display: block; min-width: 0; } shopping-list-catalog-editor { display: block; min-width: 0; }</style>';
+    const editor = document.createElement('shopping-list-catalog-editor');
+    this._catalogEditor = editor;
+    editor.setConfig(this._config);
+    editor.hass = this._hass;
+    editor.addEventListener('config-changed', event => {
+      event.stopPropagation();
+      if (this._catalogEditor !== editor) return;
+      this._emitConfig({ ...event.detail.config, type: 'custom:shopping-list-card', mode: 'catalog' });
+    });
+    this.shadowRoot.append(editor);
+    this._renderModeSelector();
+    this._rendered = true;
+  }
+
+  _renderModeSelector() {
+    const container = document.createElement('div');
+    container.innerHTML = `
+      <style>
+        .card-mode { min-width: 0; padding: 0; margin: 0 0 16px; border: 0; }
+        .card-mode legend { padding: 0 0 8px; color: var(--primary-text-color); font-size: 14px; font-weight: 500; }
+        .card-mode-options { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 2px; padding: 2px; border: 1px solid var(--divider-color, #aaa); border-radius: 6px; background: var(--secondary-background-color); }
+        .card-mode label { position: relative; cursor: pointer; min-width: 0; }
+        .card-mode input { position: absolute; width: 1px; height: 1px; opacity: 0; }
+        .card-mode span { display: flex; align-items: center; justify-content: center; height: 40px; border-radius: 4px; font-size: 14px; color: var(--primary-text-color); }
+        .card-mode input:checked + span { background: var(--primary-color, #03a9f4); color: var(--text-primary-color, #fff); }
+        .card-mode input:focus-visible + span { outline: 2px solid var(--primary-color); outline-offset: 2px; }
+      </style>
+      <fieldset class="card-mode">
+        <legend>Card mode</legend>
+        <div class="card-mode-options">
+          <label><input type="radio" name="card-mode" value="single"><span>Single</span></label>
+          <label><input type="radio" name="card-mode" value="catalog"><span>Catalog</span></label>
+        </div>
+      </fieldset>
+    `;
+    const mode = this._config?.mode || 'single';
+    for (const radio of container.querySelectorAll('input')) {
+      radio.checked = radio.value === mode;
+      radio.addEventListener('change', () => {
+        if (radio.checked) this._changeMode(radio.value);
+      });
+    }
+    this.shadowRoot.prepend(container);
+  }
+
+  _changeMode(mode) {
+    if (mode === (this._config?.mode || 'single')) return;
+    const config = { ...this._config, type: 'custom:shopping-list-card', mode };
+    if (mode === 'catalog') {
+      const defaults = customElements.get('shopping-list-catalog').getStubConfig(this._hass);
+      if (!config.catalog_entity && defaults.catalog_entity) config.catalog_entity = defaults.catalog_entity;
+      if (!config.todo_list && defaults.todo_list) config.todo_list = defaults.todo_list;
+    }
+    this.setConfig(config);
+    this._emitConfig(config);
+    this.shadowRoot.querySelector(`.card-mode input[value="${mode}"]`).focus();
+  }
+
   /**
    * Force-load ha-picture-upload by creating a hidden ha-form whose schema
    * uses the image-upload media selector. HA lazy-loads ha-picture-upload
@@ -372,7 +450,8 @@ class ShoppingListCardEditor extends HTMLElement {
           pu.hass = this._hass;
           if (this._config?.image) pu.value = this._config.image;
         }
-        this.shadowRoot.querySelector('#types').hass = this._hass;
+        const types = this.shadowRoot.querySelector('#types');
+        if (types) types.hass = this._hass;
       }).catch(() => {});
       setTimeout(() => loader.remove(), 0);
     } catch (_) { /* ignore */ }
@@ -458,6 +537,7 @@ class ShoppingListCardEditor extends HTMLElement {
   }
 
   _handleConfigChanged() {
+    if (this._config?.mode === 'catalog') return;
     const s = this.shadowRoot;
     const n = { ...this._config };
 

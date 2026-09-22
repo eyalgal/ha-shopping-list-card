@@ -49,6 +49,7 @@ class ShoppingListCard extends HTMLElement {
     this._syncState = null;
     this._actionError = null;
     this._configVersion = 0;
+    this._catalogCard = null;
     this._lastRenderKey = null;
     this._expanded = false;
     this._holdCleanups = new Set();
@@ -66,14 +67,26 @@ class ShoppingListCard extends HTMLElement {
 
   set hass(hass) {
     this._hass = hass;
+    if (this._catalogCard) {
+      this._catalogCard.hass = hass;
+      return;
+    }
     if (this._config && this.isConnected) this._ensureSubscription();
   }
 
   setConfig(config) {
+    if (config.mode !== undefined && config.mode !== 'single' && config.mode !== 'catalog') {
+      throw new Error('Card mode must be single or catalog.');
+    }
+    if (config.mode === 'catalog') {
+      this._setCatalogConfig(config);
+      return;
+    }
     if (typeof config.title !== 'string' || !config.title.trim()) throw new Error('You must define a title.');
     if (typeof config.todo_list !== 'string' || !config.todo_list.startsWith('todo.')) {
       throw new Error('You must define a todo_list entity_id.');
     }
+    if (this._catalogCard) this._resetView();
     const prev = this._config;
     this._clearHolds();
     this._config = { ...config };
@@ -92,6 +105,10 @@ class ShoppingListCard extends HTMLElement {
   }
 
   connectedCallback() {
+    if (this._catalogCard) {
+      if (this._hass) this._catalogCard.hass = this._hass;
+      return;
+    }
     if (this._hass && this._config) this._ensureSubscription();
   }
 
@@ -105,7 +122,39 @@ class ShoppingListCard extends HTMLElement {
     this._isUpdating = false;
   }
 
+  _setCatalogConfig(config) {
+    const catalog = this._catalogCard || document.createElement('shopping-list-catalog');
+    catalog.setConfig(config);
+    if (!this._catalogCard) {
+      this._resetView();
+      this._catalogCard = catalog;
+      this.append(catalog);
+    }
+    this._config = { ...config };
+    if (this._hass) catalog.hass = this._hass;
+  }
+
+  _resetView() {
+    this._clearHolds();
+    clearTimeout(this._clickResetTimer);
+    this._clickResetTimer = null;
+    this._suppressClick = false;
+    this._teardownSubscription();
+    this._catalogCard = null;
+    this._items = null;
+    this.content = null;
+    this._statusElement = null;
+    this._lastRenderKey = null;
+    this._lastStatusKey = null;
+    this._expanded = false;
+    this._actionError = null;
+    this._isUpdating = false;
+    this._configVersion++;
+    this.replaceChildren();
+  }
+
   _ensureSubscription() {
+    if (this._config?.mode === 'catalog') return;
     if (!this._hass || !this._config?.todo_list) return;
     if (this._store?.entityId === this._config.todo_list
       && this._store.connection === this._hass.connection && this._unsubscribe) {
@@ -133,11 +182,12 @@ class ShoppingListCard extends HTMLElement {
   }
 
   static getConfigElement() { return document.createElement('shopping-list-card-editor'); }
-  static getStubConfig() {
+  static getStubConfig(hass) {
     return {
       type: 'custom:shopping-list-card',
+      mode: 'single',
       title: 'New Item',
-      todo_list: '' // Add empty string to pass validation, editor will populate
+      todo_list: Object.keys(hass?.states || {}).find(entityId => entityId.startsWith('todo.')) || '',
     };
   }
 
@@ -323,6 +373,7 @@ class ShoppingListCard extends HTMLElement {
   }
 
   _render() {
+    if (this._catalogCard) return;
     this._ensureShell();
     this._renderStatus();
     this._applyBusyState();
@@ -874,6 +925,7 @@ class ShoppingListCard extends HTMLElement {
   }
 
   getCardSize() {
+    if (this._catalogCard) return this._catalogCard.getCardSize();
     if (this._config && this._getTypes().length) return 2;
     if (this._config && this._config.layout === 'vertical') {
       return this._config.show_name === false ? 1 : 2;
@@ -882,6 +934,7 @@ class ShoppingListCard extends HTMLElement {
   }
 
   getLayoutOptions() {
+    if (this._catalogCard) return this._catalogCard.getLayoutOptions();
     if (this._config && this._getTypes().length) {
       // Expandable: let the card grow with its content. `grid_rows: auto` keeps
       // the height flexible by default so the expanded variant list is never
@@ -907,7 +960,7 @@ if (!window.customCards.some(c => c.type === 'shopping-list-card')) {
     type: 'shopping-list-card',
     name: 'Shopping List Card',
     preview: true,
-    description: 'A card to manage items on a shopping list.',
+    description: 'Single-product tiles or a shared shopping catalog.',
     getEntitySuggestion: (hass, entityId) => {
       if (typeof entityId !== 'string' || entityId.split('.')[0] !== 'todo') return null;
       return { config: { type: 'custom:shopping-list-card', title: 'New item', todo_list: entityId } };

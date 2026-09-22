@@ -73,6 +73,21 @@ function planItemAction(config, items, subtitle, action = 'toggle') {
   };
 }
 
+function planListAddition(items, text) {
+  const name = text.trim();
+  if (!name) return null;
+  const config = { enable_quantity: true, remove_zero: false };
+  const state = matchItem(items, name, config);
+  if (state.isOn) return null;
+  if (state.present) {
+    return planItemAction({ ...config, title: name }, items, null);
+  }
+  return {
+    key: name.toLowerCase(), service: 'add_item', data: { item: name },
+    confirmed: current => matchItem(current, name, config).isOn,
+  };
+}
+
 const stores = new WeakMap();
 
 function getTodoStore(hass, entityId) {
@@ -712,6 +727,334 @@ if (!customElements.get('shopping-list-variants-editor')) {
   customElements.define('shopping-list-variants-editor', ShoppingListVariantsEditor);
 }
 
+const itemFields = [
+  'title', 'subtitle', 'types', 'types_sort', 'image', 'image_base', 'list_prefix',
+  'layout', 'show_name', 'enable_quantity', 'quantity_step', 'quantity_max',
+  'remove_zero', 'on_icon', 'off_icon', 'on_color', 'off_color',
+  'colorize_background', 'hold_action', 'haptic',
+];
+
+function itemOptions(options) {
+  return Object.fromEntries(itemFields.filter(field => Object.hasOwn(options, field)).map(field => [field, options[field]]));
+}
+
+function typeNames(types) {
+  const entries = typeof types === 'string' ? types.split(/[,\n]/) : Array.isArray(types) ? types : [];
+  return entries.map(entry => typeof entry === 'string' ? entry.trim() : String(entry?.name ?? '').trim()).filter(Boolean);
+}
+
+function groupSubtitleProducts(products, entries, defaults) {
+  const groups = new Map();
+  products.forEach((product, index) => {
+    const entry = entries[index];
+    if (Object.hasOwn(entry, 'types') || Object.hasOwn(defaults, 'types') || entry.id != null
+      || (product.config.subtitle && product.config.subtitle !== product.config.subtitle.trim())) {
+      return;
+    }
+    const signature = JSON.stringify(itemFields.filter(field => field !== 'subtitle' && field !== 'image')
+      .map(field => [field, product.config[field]]));
+    let group = groups.get(signature);
+    if (!group) {
+      group = [];
+      groups.set(signature, group);
+    }
+    group.push(product);
+  });
+  const replacements = new Map();
+  const merged = new Set();
+  for (const group of groups.values()) {
+    if (group.length < 2 || !group.some(product => product.config.subtitle)) continue;
+    const header = group.find(product => !product.config.subtitle) || group[0];
+    const seen = new Set();
+    const types = [];
+    for (const product of group) {
+      const name = product.config.subtitle;
+      if (!name || seen.has(name.toLowerCase())) continue;
+      seen.add(name.toLowerCase());
+      types.push(product.config.image ? { name, image: product.config.image } : name);
+    }
+    replacements.set(group[0], {
+      ...header,
+      config: { ...header.config, types },
+      search: group.map(product => product.search).join(' '),
+      names: [...new Set(group.flatMap(product => product.names))],
+    });
+    for (const product of group.slice(1)) merged.add(product);
+  }
+  return products.flatMap(product => merged.has(product) ? [] : [replacements.get(product) || product]);
+}
+
+function searchText(value) {
+  return String(value).normalize('NFKD').replace(/\p{Mark}/gu, '').toLocaleLowerCase();
+}
+
+function readCatalog(hass, config) {
+  const entity = hass.states?.[config.catalog_entity];
+  if (!entity) throw new Error(`Catalog entity not found: ${config.catalog_entity}`);
+  if (entity.state === 'unavailable' || entity.state === 'unknown') throw new Error('The product catalog is unavailable.');
+  let data = config.catalog_attribute ? entity.attributes?.[config.catalog_attribute] : entity.attributes;
+  if (typeof data === 'string') {
+    try { data = JSON.parse(data); }
+    catch { throw new Error('The catalog attribute does not contain valid JSON.'); }
+  }
+  if (!data || typeof data !== 'object' || Array.isArray(data)) {
+    throw new Error('The catalog must contain categories with product arrays.');
+  }
+  const defaults = { layout: 'vertical', enable_quantity: true, ...itemOptions(config.item_options || {}) };
+  const groups = [];
+  for (const [category, entries] of Object.entries(data)) {
+    if (config.categories && !config.categories.includes(category)) continue;
+    if (!Array.isArray(entries)) {
+      if (config.catalog_attribute) throw new Error(`Category "${category}" must be an array.`);
+      continue;
+    }
+    if (!category.trim()) throw new Error('Catalog categories must have a name.');
+    const identities = new Map();
+    const products = entries.map((entry, index) => {
+      if (!entry || typeof entry !== 'object' || Array.isArray(entry)
+        || typeof entry.title !== 'string' || !entry.title.trim()) {
+        throw new Error(`Product ${index + 1} in "${category}" needs a title.`);
+      }
+      const options = {
+        ...defaults, ...itemOptions(entry), type: 'custom:shopping-list-card', todo_list: config.todo_list,
+      };
+      for (const field of ['subtitle', 'image', 'image_base', 'list_prefix', 'on_icon', 'off_icon', 'on_color', 'off_color']) {
+        if (options[field] != null && typeof options[field] !== 'string') {
+          throw new Error(`Product "${entry.title}" has an invalid ${field}.`);
+        }
+      }
+      if (options.types != null && typeof options.types !== 'string' && !Array.isArray(options.types)) {
+        throw new Error(`Product "${entry.title}" has invalid variants.`);
+      }
+      const identity = typeof entry.id === 'string' && entry.id ? entry.id : buildName(options, options.subtitle);
+      const occurrence = identities.get(identity) || 0;
+      identities.set(identity, occurrence + 1);
+      const names = typeNames(options.types);
+      return {
+        key: JSON.stringify([category, identity, occurrence]),
+        config: options,
+        search: searchText([category, options.title, options.subtitle || '', ...names].join(' ')),
+        names: [...new Set([buildName(options, options.subtitle), ...names.map(name => buildName(options, name))])],
+      };
+    });
+    groups.push({ name: category, products: groupSubtitleProducts(products, entries, defaults) });
+  }
+  return groups;
+}
+
+function productOnList(product, items) {
+  return product.names.some(name => matchItem(items, name, product.config).isOn);
+}
+
+class ShoppingListCatalogEditor extends HTMLElement {
+  constructor() {
+    super();
+    this.attachShadow({ mode: 'open' });
+    this._categoryRows = new Map();
+  }
+
+  setConfig(config) {
+    this._config = { ...config };
+    if (this._rendered) this._updateValues();
+  }
+
+  set hass(hass) {
+    this._hass = hass;
+    if (!this._rendered) this._render();
+    this.shadowRoot.querySelectorAll('ha-entity-picker').forEach(picker => { picker.hass = hass; });
+    this._updateCategories();
+  }
+
+  _render() {
+    const field = !customElements.get('ha-textfield') && customElements.get('ha-input') ? 'ha-input' : 'ha-textfield';
+    this.shadowRoot.innerHTML = `
+      <style>
+        :host { display: block; min-width: 0; }
+        .catalog-form { display: flex; flex-direction: column; gap: 12px; }
+        ha-expansion-panel { border: 1px solid var(--divider-color); border-radius: 8px; --expansion-panel-summary-padding: 0 16px; --expansion-panel-content-padding: 0; }
+        .catalog-panel { display: grid; gap: 16px; padding: 0 16px 16px; }
+        ha-entity-picker, ha-textfield, ha-input, ha-select { display: block; width: 100%; min-width: 0; }
+        .catalog-fields { display: flex; gap: 12px; flex-wrap: wrap; }
+        .catalog-fields > * { flex: 1 1 120px; min-width: 0; }
+        .catalog-toggle { display: flex; align-items: center; gap: 12px; font-size: 14px; color: var(--primary-text-color); }
+        .catalog-toggle ha-switch { flex-shrink: 0; }
+        [hidden] { display: none !important; }
+        .catalog-category-options { border: 0; margin: 0; padding: 0; min-width: 0; }
+        .catalog-category-options legend { font-size: 13px; color: var(--secondary-text-color); padding: 0 0 8px; }
+        .catalog-category-choices { display: grid; gap: 8px; }
+        .catalog-category-option { display: flex; align-items: center; gap: 8px; font-size: 14px; overflow-wrap: anywhere; }
+        input[type="checkbox"] { width: 18px; height: 18px; flex-shrink: 0; accent-color: var(--primary-color); }
+      </style>
+      <div class="catalog-form">
+        <ha-expansion-panel header="Catalog" outlined expanded>
+          <div class="catalog-panel">
+            <ha-entity-picker id="catalog_entity" label="Catalog sensor" required></ha-entity-picker>
+            <${field} id="catalog_attribute" label="Catalog attribute (optional)"></${field}>
+            <ha-entity-picker id="todo_list" label="To-do list" required></ha-entity-picker>
+            <div class="catalog-fields">
+              <${field} id="title" label="Title" placeholder="Shopping"></${field}>
+              <${field} id="columns" label="Maximum columns" type="number" min="1" max="6"></${field}>
+            </div>
+          </div>
+        </ha-expansion-panel>
+        <ha-expansion-panel header="Display" outlined>
+          <div class="catalog-panel">
+            <label class="catalog-toggle"><input type="checkbox" class="catalog-all-categories">All categories</label>
+            <fieldset class="catalog-category-options" hidden>
+              <legend>Categories</legend>
+              <div class="catalog-category-choices"></div>
+            </fieldset>
+            <label class="catalog-toggle"><ha-switch id="show_category_tabs"></ha-switch><span>Category tabs</span></label>
+            <label class="catalog-toggle"><ha-switch id="show_search"></ha-switch><span>Search</span></label>
+            <label class="catalog-toggle"><ha-switch id="show_title"></ha-switch><span>Title</span></label>
+            <label class="catalog-toggle"><ha-switch id="show_list_button"></ha-switch><span>Shopping list button</span></label>
+            <label class="catalog-toggle"><ha-switch id="show_add_button"></ha-switch><span>Add item button</span></label>
+          </div>
+        </ha-expansion-panel>
+        <ha-expansion-panel header="Product defaults" outlined>
+          <div class="catalog-panel">
+            <ha-select id="layout" label="Layout" naturalMenuWidth fixedMenuPosition>
+              <mwc-list-item value="vertical">Vertical</mwc-list-item>
+              <mwc-list-item value="horizontal">Horizontal</mwc-list-item>
+            </ha-select>
+            <${field} id="image_base" label="Image base path" placeholder="/local/images/shopping-list/"></${field}>
+            <${field} id="list_prefix" label="List prefix (optional)"></${field}>
+            <label class="catalog-toggle"><ha-switch id="enable_quantity"></ha-switch><span>Quantity controls</span></label>
+            <div class="catalog-fields">
+              <${field} id="quantity_step" label="Quantity step" type="number" min="1"></${field}>
+              <${field} id="quantity_max" label="Quantity maximum" type="number" min="1"></${field}>
+            </div>
+            <label class="catalog-toggle"><ha-switch id="keep_at_zero"></ha-switch><span>Keep items at zero</span></label>
+          </div>
+        </ha-expansion-panel>
+      </div>
+    `;
+    for (const [id, domain] of [['catalog_entity', 'sensor'], ['todo_list', 'todo']]) {
+      const picker = this.shadowRoot.getElementById(id);
+      picker.includeDomains = [domain];
+      picker.allowCustomEntity = false;
+    }
+    const layout = this.shadowRoot.getElementById('layout');
+    layout.options = [{ value: 'vertical', label: 'Vertical' }, { value: 'horizontal', label: 'Horizontal' }];
+    for (const control of this.shadowRoot.querySelectorAll('[id]')) {
+      const changed = event => {
+        event.stopPropagation();
+        let value = event.detail?.value;
+        if (control.id === 'layout' && value == null && typeof event.detail?.index === 'number') {
+          value = ['vertical', 'horizontal'][event.detail.index];
+        }
+        if (control.localName === 'ha-switch') value = control.checked;
+        this._change(control.id, value ?? control.value);
+      };
+      for (const event of ['input', 'change', 'value-changed']) control.addEventListener(event, changed);
+      if (control.id === 'layout') control.addEventListener('selected', changed);
+    }
+    this.shadowRoot.querySelector('.catalog-all-categories').addEventListener('change', event => {
+      if (!this._config) return;
+      const config = { ...this._config };
+      if (event.target.checked) delete config.categories;
+      else config.categories = [...this._availableCategories];
+      this._emitConfig(config);
+      this._updateCategories();
+    });
+    this._rendered = true;
+    this._updateValues();
+  }
+
+  _updateValues() {
+    if (!this._config) return;
+    const config = this._config;
+    const options = config.item_options || {};
+    const values = {
+      catalog_entity: config.catalog_entity || '', catalog_attribute: config.catalog_attribute || '',
+      todo_list: config.todo_list || '', title: config.title || '', columns: config.columns ?? 4,
+      layout: options.layout || 'vertical', image_base: options.image_base || '', list_prefix: options.list_prefix || '',
+      quantity_step: options.quantity_step ?? 1, quantity_max: options.quantity_max ?? '',
+    };
+    for (const [id, value] of Object.entries(values)) {
+      const control = this.shadowRoot.getElementById(id);
+      if (String(control.value ?? '') !== String(value)) control.value = String(value);
+    }
+    this.shadowRoot.getElementById('enable_quantity').checked = options.enable_quantity !== false;
+    this.shadowRoot.getElementById('keep_at_zero').checked = options.remove_zero === false;
+    for (const option of ['show_category_tabs', 'show_search', 'show_title', 'show_list_button', 'show_add_button']) {
+      this.shadowRoot.getElementById(option).checked = config[option] !== false;
+    }
+    this._updateCategories();
+  }
+
+  _updateCategories() {
+    if (!this._rendered || !this._config || !this._hass) return;
+    let available = [];
+    try { available = readCatalog(this._hass, { ...this._config, categories: undefined }).map(group => group.name); }
+    catch {}
+    this._availableCategories = available;
+    const selected = this._config.categories;
+    this.shadowRoot.querySelector('.catalog-all-categories').checked = selected === undefined;
+    this.shadowRoot.querySelector('.catalog-category-options').hidden = selected === undefined;
+    const names = [...new Set([...available, ...(selected || [])])];
+    const container = this.shadowRoot.querySelector('.catalog-category-choices');
+    for (const [name, label] of this._categoryRows) {
+      if (!names.includes(name)) { label.remove(); this._categoryRows.delete(name); }
+    }
+    names.forEach((name, index) => {
+      let label = this._categoryRows.get(name);
+      if (!label) {
+        label = document.createElement('label');
+        label.className = 'catalog-category-option';
+        const checkbox = document.createElement('input');
+        checkbox.type = 'checkbox';
+        checkbox.value = name;
+        const text = document.createElement('span');
+        text.textContent = name;
+        label.append(checkbox, text);
+        checkbox.addEventListener('change', () => {
+          const categories = new Set(this._config.categories || []);
+          if (checkbox.checked) categories.add(name);
+          else categories.delete(name);
+          this._emitConfig({ ...this._config, categories: [...categories] });
+        });
+        this._categoryRows.set(name, label);
+      }
+      label.querySelector('input').checked = selected === undefined || selected.includes(name);
+      if (container.children[index] !== label) container.insertBefore(label, container.children[index] || null);
+    });
+  }
+
+  _change(field, value) {
+    if (!this._config || value == null) return;
+    const config = { ...this._config };
+    const defaults = ['layout', 'image_base', 'list_prefix', 'enable_quantity', 'quantity_step', 'quantity_max', 'keep_at_zero'];
+    const target = defaults.includes(field) ? { ...(config.item_options || {}) } : config;
+    if (defaults.includes(field)) config.item_options = target;
+    const key = field === 'keep_at_zero' ? 'remove_zero' : field;
+    let next = value;
+    if (['columns', 'quantity_step', 'quantity_max'].includes(field)) {
+      next = value === '' ? undefined : Number(value);
+      if (next !== undefined && (!Number.isInteger(next) || next < 1 || (field === 'columns' && next > 6))) return;
+    } else if (['show_category_tabs', 'show_search', 'show_title', 'show_list_button', 'show_add_button', 'enable_quantity'].includes(field)) next = value ? undefined : false;
+    else if (field === 'keep_at_zero') next = value ? false : undefined;
+    else if (field === 'layout') {
+      if (value !== 'vertical' && value !== 'horizontal') return;
+      next = value === 'vertical' ? undefined : value;
+    } else if (typeof value === 'string') next = value.trim() || undefined;
+    if (next === undefined) delete target[key];
+    else target[key] = next;
+    if (config.item_options && !Object.keys(config.item_options).length) delete config.item_options;
+    this._emitConfig(config);
+  }
+
+  _emitConfig(config) {
+    if (JSON.stringify(config) === JSON.stringify(this._config)) return;
+    this._config = config;
+    this.dispatchEvent(new CustomEvent('config-changed', { detail: { config }, bubbles: true, composed: true }));
+  }
+}
+
+if (!customElements.get('shopping-list-catalog-editor')) {
+  customElements.define('shopping-list-catalog-editor', ShoppingListCatalogEditor);
+}
+
 class ShoppingListCardEditor extends HTMLElement {
   constructor() {
     super();
@@ -723,18 +1066,31 @@ class ShoppingListCardEditor extends HTMLElement {
   set hass(hass) {
     this._hass = hass;
     if (!this._rendered) { this._render(); return; }
+    if (this._catalogEditor) {
+      this._catalogEditor.hass = hass;
+      return;
+    }
     this.shadowRoot.querySelectorAll(
       'ha-entity-picker, ha-icon-picker, ha-picture-upload, shopping-list-variants-editor'
     ).forEach(el => { el.hass = hass; });
   }
 
   setConfig(config) {
+    const previousMode = this._config?.mode || 'single';
     this._config = { ...config };
-    if (this._rendered) this._updateFormValues();
+    if (!this._rendered) return;
+    if (previousMode !== (config.mode || 'single')) this._render();
+    else if (this._catalogEditor) this._catalogEditor.setConfig(this._config);
+    else this._updateFormValues();
   }
 
   _render() {
     if (!this.shadowRoot || !this._hass) return;
+    if (this._config?.mode === 'catalog') {
+      this._renderCatalog();
+      return;
+    }
+    this._catalogEditor = null;
 
     const todoEntities = Object.keys(this._hass.states).filter(id => id.startsWith('todo.'));
     const hasTodoEntities = todoEntities.length > 0;
@@ -952,6 +1308,8 @@ class ShoppingListCardEditor extends HTMLElement {
       </div>
     `;
 
+    this._renderModeSelector();
+
     // Wire hass-consuming components
     const ep = this.shadowRoot.querySelector('#todo_list');
     ep.hass = this._hass;
@@ -967,6 +1325,7 @@ class ShoppingListCardEditor extends HTMLElement {
       pu.original = false;
       pu.crop = undefined;
       pu.addEventListener('change', () => {
+        if (this.shadowRoot.querySelector('#image_upload') !== pu) return;
         const tf = this.shadowRoot.querySelector('#image');
         tf.value = pu.value || '';
         this._handleConfigChanged();
@@ -987,6 +1346,7 @@ class ShoppingListCardEditor extends HTMLElement {
     typesEl.hass = this._hass;
     typesEl.addEventListener('value-changed', event => {
       event.stopPropagation();
+      if (this.shadowRoot.querySelector('#types') !== typesEl) return;
       const config = { ...this._config };
       if (event.detail.value.length) config.types = event.detail.value;
       else delete config.types;
@@ -1059,6 +1419,66 @@ class ShoppingListCardEditor extends HTMLElement {
     if (this._config) this._updateFormValues();
   }
 
+  _renderCatalog() {
+    this.shadowRoot.innerHTML = '<style>:host { display: block; min-width: 0; } shopping-list-catalog-editor { display: block; min-width: 0; }</style>';
+    const editor = document.createElement('shopping-list-catalog-editor');
+    this._catalogEditor = editor;
+    editor.setConfig(this._config);
+    editor.hass = this._hass;
+    editor.addEventListener('config-changed', event => {
+      event.stopPropagation();
+      if (this._catalogEditor !== editor) return;
+      this._emitConfig({ ...event.detail.config, type: 'custom:shopping-list-card', mode: 'catalog' });
+    });
+    this.shadowRoot.append(editor);
+    this._renderModeSelector();
+    this._rendered = true;
+  }
+
+  _renderModeSelector() {
+    const container = document.createElement('div');
+    container.innerHTML = `
+      <style>
+        .card-mode { min-width: 0; padding: 0; margin: 0 0 16px; border: 0; }
+        .card-mode legend { padding: 0 0 8px; color: var(--primary-text-color); font-size: 14px; font-weight: 500; }
+        .card-mode-options { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 2px; padding: 2px; border: 1px solid var(--divider-color, #aaa); border-radius: 6px; background: var(--secondary-background-color); }
+        .card-mode label { position: relative; cursor: pointer; min-width: 0; }
+        .card-mode input { position: absolute; width: 1px; height: 1px; opacity: 0; }
+        .card-mode span { display: flex; align-items: center; justify-content: center; height: 40px; border-radius: 4px; font-size: 14px; color: var(--primary-text-color); }
+        .card-mode input:checked + span { background: var(--primary-color, #03a9f4); color: var(--text-primary-color, #fff); }
+        .card-mode input:focus-visible + span { outline: 2px solid var(--primary-color); outline-offset: 2px; }
+      </style>
+      <fieldset class="card-mode">
+        <legend>Card mode</legend>
+        <div class="card-mode-options">
+          <label><input type="radio" name="card-mode" value="single"><span>Single</span></label>
+          <label><input type="radio" name="card-mode" value="catalog"><span>Catalog</span></label>
+        </div>
+      </fieldset>
+    `;
+    const mode = this._config?.mode || 'single';
+    for (const radio of container.querySelectorAll('input')) {
+      radio.checked = radio.value === mode;
+      radio.addEventListener('change', () => {
+        if (radio.checked) this._changeMode(radio.value);
+      });
+    }
+    this.shadowRoot.prepend(container);
+  }
+
+  _changeMode(mode) {
+    if (mode === (this._config?.mode || 'single')) return;
+    const config = { ...this._config, type: 'custom:shopping-list-card', mode };
+    if (mode === 'catalog') {
+      const defaults = customElements.get('shopping-list-catalog').getStubConfig(this._hass);
+      if (!config.catalog_entity && defaults.catalog_entity) config.catalog_entity = defaults.catalog_entity;
+      if (!config.todo_list && defaults.todo_list) config.todo_list = defaults.todo_list;
+    }
+    this.setConfig(config);
+    this._emitConfig(config);
+    this.shadowRoot.querySelector(`.card-mode input[value="${mode}"]`).focus();
+  }
+
   /**
    * Force-load ha-picture-upload by creating a hidden ha-form whose schema
    * uses the image-upload media selector. HA lazy-loads ha-picture-upload
@@ -1083,7 +1503,8 @@ class ShoppingListCardEditor extends HTMLElement {
           pu.hass = this._hass;
           if (this._config?.image) pu.value = this._config.image;
         }
-        this.shadowRoot.querySelector('#types').hass = this._hass;
+        const types = this.shadowRoot.querySelector('#types');
+        if (types) types.hass = this._hass;
       }).catch(() => {});
       setTimeout(() => loader.remove(), 0);
     } catch (_) { /* ignore */ }
@@ -1169,6 +1590,7 @@ class ShoppingListCardEditor extends HTMLElement {
   }
 
   _handleConfigChanged() {
+    if (this._config?.mode === 'catalog') return;
     const s = this.shadowRoot;
     const n = { ...this._config };
 
@@ -1241,257 +1663,6 @@ if (!customElements.get('shopping-list-card-editor')) {
   customElements.define('shopping-list-card-editor', ShoppingListCardEditor);
 }
 
-const itemFields = [
-  'title', 'subtitle', 'types', 'types_sort', 'image', 'image_base', 'list_prefix',
-  'layout', 'show_name', 'enable_quantity', 'quantity_step', 'quantity_max',
-  'remove_zero', 'on_icon', 'off_icon', 'on_color', 'off_color',
-  'colorize_background', 'hold_action', 'haptic',
-];
-
-function itemOptions(options) {
-  return Object.fromEntries(itemFields.filter(field => Object.hasOwn(options, field)).map(field => [field, options[field]]));
-}
-
-function typeNames(types) {
-  const entries = typeof types === 'string' ? types.split(/[,\n]/) : Array.isArray(types) ? types : [];
-  return entries.map(entry => typeof entry === 'string' ? entry.trim() : String(entry?.name ?? '').trim()).filter(Boolean);
-}
-
-function groupSubtitleProducts(products, entries, defaults) {
-  const groups = new Map();
-  products.forEach((product, index) => {
-    const entry = entries[index];
-    if (Object.hasOwn(entry, 'types') || Object.hasOwn(defaults, 'types') || entry.id != null
-      || (product.config.subtitle && product.config.subtitle !== product.config.subtitle.trim())) {
-      return;
-    }
-    const signature = JSON.stringify(itemFields.filter(field => field !== 'subtitle' && field !== 'image')
-      .map(field => [field, product.config[field]]));
-    let group = groups.get(signature);
-    if (!group) {
-      group = [];
-      groups.set(signature, group);
-    }
-    group.push(product);
-  });
-  const replacements = new Map();
-  const merged = new Set();
-  for (const group of groups.values()) {
-    if (group.length < 2 || !group.some(product => product.config.subtitle)) continue;
-    const header = group.find(product => !product.config.subtitle) || group[0];
-    const seen = new Set();
-    const types = [];
-    for (const product of group) {
-      const name = product.config.subtitle;
-      if (!name || seen.has(name.toLowerCase())) continue;
-      seen.add(name.toLowerCase());
-      types.push(product.config.image ? { name, image: product.config.image } : name);
-    }
-    replacements.set(group[0], {
-      ...header,
-      config: { ...header.config, types },
-      search: group.map(product => product.search).join(' '),
-      names: [...new Set(group.flatMap(product => product.names))],
-    });
-    for (const product of group.slice(1)) merged.add(product);
-  }
-  return products.flatMap(product => merged.has(product) ? [] : [replacements.get(product) || product]);
-}
-
-function searchText(value) {
-  return String(value).normalize('NFKD').replace(/\p{Mark}/gu, '').toLocaleLowerCase();
-}
-
-function readCatalog(hass, config) {
-  const entity = hass.states?.[config.catalog_entity];
-  if (!entity) throw new Error(`Catalog entity not found: ${config.catalog_entity}`);
-  if (entity.state === 'unavailable' || entity.state === 'unknown') throw new Error('The product catalog is unavailable.');
-  let data = config.catalog_attribute ? entity.attributes?.[config.catalog_attribute] : entity.attributes;
-  if (typeof data === 'string') {
-    try { data = JSON.parse(data); }
-    catch { throw new Error('The catalog attribute does not contain valid JSON.'); }
-  }
-  if (!data || typeof data !== 'object' || Array.isArray(data)) {
-    throw new Error('The catalog must contain categories with product arrays.');
-  }
-  const defaults = { layout: 'vertical', enable_quantity: true, ...itemOptions(config.item_options || {}) };
-  const groups = [];
-  for (const [category, entries] of Object.entries(data)) {
-    if (!Array.isArray(entries)) {
-      if (config.catalog_attribute) throw new Error(`Category "${category}" must be an array.`);
-      continue;
-    }
-    if (!category.trim()) throw new Error('Catalog categories must have a name.');
-    const identities = new Map();
-    const products = entries.map((entry, index) => {
-      if (!entry || typeof entry !== 'object' || Array.isArray(entry)
-        || typeof entry.title !== 'string' || !entry.title.trim()) {
-        throw new Error(`Product ${index + 1} in "${category}" needs a title.`);
-      }
-      const options = {
-        ...defaults, ...itemOptions(entry), type: 'custom:shopping-list-card', todo_list: config.todo_list,
-      };
-      for (const field of ['subtitle', 'image', 'image_base', 'list_prefix', 'on_icon', 'off_icon', 'on_color', 'off_color']) {
-        if (options[field] != null && typeof options[field] !== 'string') {
-          throw new Error(`Product "${entry.title}" has an invalid ${field}.`);
-        }
-      }
-      if (options.types != null && typeof options.types !== 'string' && !Array.isArray(options.types)) {
-        throw new Error(`Product "${entry.title}" has invalid variants.`);
-      }
-      const identity = typeof entry.id === 'string' && entry.id ? entry.id : buildName(options, options.subtitle);
-      const occurrence = identities.get(identity) || 0;
-      identities.set(identity, occurrence + 1);
-      const names = typeNames(options.types);
-      return {
-        key: JSON.stringify([category, identity, occurrence]),
-        config: options,
-        search: searchText([category, options.title, options.subtitle || '', ...names].join(' ')),
-        names: [...new Set([buildName(options, options.subtitle), ...names.map(name => buildName(options, name))])],
-      };
-    });
-    groups.push({ name: category, products: groupSubtitleProducts(products, entries, defaults) });
-  }
-  return groups;
-}
-
-function productOnList(product, items) {
-  return product.names.some(name => matchItem(items, name, product.config).isOn);
-}
-
-class ShoppingListCatalogEditor extends HTMLElement {
-  constructor() {
-    super();
-    this.attachShadow({ mode: 'open' });
-  }
-
-  setConfig(config) {
-    this._config = { ...config };
-    if (this._rendered) this._updateValues();
-  }
-
-  set hass(hass) {
-    this._hass = hass;
-    if (!this._rendered) this._render();
-    this.shadowRoot.querySelectorAll('ha-entity-picker').forEach(picker => { picker.hass = hass; });
-  }
-
-  _render() {
-    const field = !customElements.get('ha-textfield') && customElements.get('ha-input') ? 'ha-input' : 'ha-textfield';
-    this.shadowRoot.innerHTML = `
-      <style>
-        :host { display: block; min-width: 0; }
-        .catalog-form { display: flex; flex-direction: column; gap: 12px; }
-        ha-expansion-panel { border: 1px solid var(--divider-color); border-radius: 8px; --expansion-panel-summary-padding: 0 16px; --expansion-panel-content-padding: 0; }
-        .catalog-panel { display: grid; gap: 16px; padding: 0 16px 16px; }
-        ha-entity-picker, ha-textfield, ha-input, ha-select { display: block; width: 100%; min-width: 0; }
-        .catalog-fields { display: flex; gap: 12px; flex-wrap: wrap; }
-        .catalog-fields > * { flex: 1 1 120px; min-width: 0; }
-        .catalog-toggle { display: flex; align-items: center; gap: 12px; font-size: 14px; color: var(--primary-text-color); }
-        .catalog-toggle ha-switch { flex-shrink: 0; }
-      </style>
-      <div class="catalog-form">
-        <ha-expansion-panel header="Catalog" outlined expanded>
-          <div class="catalog-panel">
-            <ha-entity-picker id="catalog_entity" label="Catalog sensor" required></ha-entity-picker>
-            <${field} id="catalog_attribute" label="Catalog attribute (optional)"></${field}>
-            <ha-entity-picker id="todo_list" label="To-do list" required></ha-entity-picker>
-            <div class="catalog-fields">
-              <${field} id="title" label="Title" placeholder="Shopping"></${field}>
-              <${field} id="columns" label="Maximum columns" type="number" min="1" max="6"></${field}>
-            </div>
-          </div>
-        </ha-expansion-panel>
-        <ha-expansion-panel header="Product defaults" outlined>
-          <div class="catalog-panel">
-            <ha-select id="layout" label="Layout" naturalMenuWidth fixedMenuPosition>
-              <mwc-list-item value="vertical">Vertical</mwc-list-item>
-              <mwc-list-item value="horizontal">Horizontal</mwc-list-item>
-            </ha-select>
-            <${field} id="image_base" label="Image base path" placeholder="/local/images/shopping-list/"></${field}>
-            <${field} id="list_prefix" label="List prefix (optional)"></${field}>
-            <label class="catalog-toggle"><ha-switch id="enable_quantity"></ha-switch><span>Quantity controls</span></label>
-            <div class="catalog-fields">
-              <${field} id="quantity_step" label="Quantity step" type="number" min="1"></${field}>
-              <${field} id="quantity_max" label="Quantity maximum" type="number" min="1"></${field}>
-            </div>
-            <label class="catalog-toggle"><ha-switch id="keep_at_zero"></ha-switch><span>Keep items at zero</span></label>
-          </div>
-        </ha-expansion-panel>
-      </div>
-    `;
-    for (const [id, domain] of [['catalog_entity', 'sensor'], ['todo_list', 'todo']]) {
-      const picker = this.shadowRoot.getElementById(id);
-      picker.includeDomains = [domain];
-      picker.allowCustomEntity = false;
-    }
-    const layout = this.shadowRoot.getElementById('layout');
-    layout.options = [{ value: 'vertical', label: 'Vertical' }, { value: 'horizontal', label: 'Horizontal' }];
-    for (const control of this.shadowRoot.querySelectorAll('[id]')) {
-      const changed = event => {
-        event.stopPropagation();
-        let value = event.detail?.value;
-        if (control.id === 'layout' && value == null && typeof event.detail?.index === 'number') {
-          value = ['vertical', 'horizontal'][event.detail.index];
-        }
-        if (control.localName === 'ha-switch') value = control.checked;
-        this._change(control.id, value ?? control.value);
-      };
-      for (const event of ['input', 'change', 'value-changed']) control.addEventListener(event, changed);
-      if (control.id === 'layout') control.addEventListener('selected', changed);
-    }
-    this._rendered = true;
-    this._updateValues();
-  }
-
-  _updateValues() {
-    if (!this._config) return;
-    const config = this._config;
-    const options = config.item_options || {};
-    const values = {
-      catalog_entity: config.catalog_entity || '', catalog_attribute: config.catalog_attribute || '',
-      todo_list: config.todo_list || '', title: config.title || '', columns: config.columns ?? 4,
-      layout: options.layout || 'vertical', image_base: options.image_base || '', list_prefix: options.list_prefix || '',
-      quantity_step: options.quantity_step ?? 1, quantity_max: options.quantity_max ?? '',
-    };
-    for (const [id, value] of Object.entries(values)) {
-      const control = this.shadowRoot.getElementById(id);
-      if (String(control.value ?? '') !== String(value)) control.value = String(value);
-    }
-    this.shadowRoot.getElementById('enable_quantity').checked = options.enable_quantity !== false;
-    this.shadowRoot.getElementById('keep_at_zero').checked = options.remove_zero === false;
-  }
-
-  _change(field, value) {
-    if (!this._config || value == null) return;
-    const config = { ...this._config };
-    const defaults = ['layout', 'image_base', 'list_prefix', 'enable_quantity', 'quantity_step', 'quantity_max', 'keep_at_zero'];
-    const target = defaults.includes(field) ? { ...(config.item_options || {}) } : config;
-    if (defaults.includes(field)) config.item_options = target;
-    const key = field === 'keep_at_zero' ? 'remove_zero' : field;
-    let next = value;
-    if (['columns', 'quantity_step', 'quantity_max'].includes(field)) {
-      next = value === '' ? undefined : Number(value);
-      if (next !== undefined && (!Number.isInteger(next) || next < 1 || (field === 'columns' && next > 6))) return;
-    } else if (field === 'enable_quantity') next = value ? undefined : false;
-    else if (field === 'keep_at_zero') next = value ? false : undefined;
-    else if (field === 'layout') {
-      if (value !== 'vertical' && value !== 'horizontal') return;
-      next = value === 'vertical' ? undefined : value;
-    } else if (typeof value === 'string') next = value.trim() || undefined;
-    if (next === undefined) delete target[key];
-    else target[key] = next;
-    if (config.item_options && !Object.keys(config.item_options).length) delete config.item_options;
-    if (JSON.stringify(config) === JSON.stringify(this._config)) return;
-    this._config = config;
-    this.dispatchEvent(new CustomEvent('config-changed', { detail: { config }, bubbles: true, composed: true }));
-  }
-}
-
-if (!customElements.get('shopping-list-catalog-card-editor')) {
-  customElements.define('shopping-list-catalog-card-editor', ShoppingListCatalogEditor);
-}
-
 class ShoppingListCatalogCard extends HTMLElement {
   constructor() {
     super();
@@ -1509,6 +1680,9 @@ class ShoppingListCatalogCard extends HTMLElement {
     this._sourceSignature = null;
     this._sourceEntity = null;
     this._needsSource = true;
+    this._listRequest = null;
+    this._listCard = null;
+    this._addRequest = null;
     this.shadowRoot.innerHTML = `
       <style>
         :host { display: block; min-width: 0; container-type: inline-size; color: var(--primary-text-color); }
@@ -1521,6 +1695,17 @@ class ShoppingListCatalogCard extends HTMLElement {
         button:focus-visible, input:focus-visible { outline: 2px solid var(--primary-color); outline-offset: 2px; }
         .catalog-icon-button { display: inline-flex; align-items: center; justify-content: center; width: 36px; height: 36px; padding: 0; border: 0; border-radius: 4px; background: transparent; flex-shrink: 0; }
         .catalog-icon-button:hover { background: var(--secondary-background-color); }
+        .catalog-icon-button:disabled { opacity: .45; cursor: default; }
+        .catalog-list-panel { margin-block: 16px; border-block: 1px solid var(--divider-color); padding-block: 12px; }
+        .catalog-list-header { display: flex; align-items: center; gap: 8px; }
+        .catalog-list-title { flex: 1; margin: 0; min-width: 0; font-size: 16px; font-weight: 500; overflow-wrap: anywhere; }
+        .catalog-list-content { margin-top: 8px; max-height: 65vh; overflow: auto; --ha-card-box-shadow: none; --ha-card-border-width: 0; --ha-card-border-radius: 0; }
+        .catalog-list-content > * { display: block; }
+        .catalog-add-form { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 12px; }
+        .catalog-add-input { flex: 1 1 160px; width: 0; min-width: 0; height: 44px; border: 1px solid var(--divider-color, #aaa); border-radius: 6px; background: var(--card-background-color); color: var(--primary-text-color); padding: 8px 12px; font: inherit; font-size: 14px; }
+        .catalog-add-message { flex: 1 0 100%; color: var(--secondary-text-color); font-size: 13px; overflow-wrap: anywhere; }
+        .catalog-add-message:empty { display: none; }
+        .catalog-add-message[data-error="true"] { color: var(--error-color, #db4437); }
         .catalog-toolbar { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
         .catalog-search { display: flex; flex: 1 1 180px; align-items: center; min-width: 0; height: 44px; padding-inline: 10px 4px; gap: 8px; border: 1px solid var(--divider-color, #aaa); border-radius: 6px; background: var(--card-background-color); }
         .catalog-search ha-icon { flex-shrink: 0; color: var(--secondary-text-color); --mdc-icon-size: 20px; }
@@ -1550,12 +1735,26 @@ class ShoppingListCatalogCard extends HTMLElement {
       <div class="catalog-header">
         <h2 class="catalog-title"></h2>
         <span class="catalog-counter" aria-live="polite"></span>
-        <button class="catalog-icon-button catalog-open-list" type="button" aria-label="Open shopping list" title="Open shopping list"><ha-icon icon="mdi:format-list-checks"></ha-icon></button>
+        <button class="catalog-icon-button catalog-add-toggle" type="button" aria-label="Add item to shopping list" title="Add item to shopping list" aria-expanded="false" aria-controls="catalog-add-form"><ha-icon icon="mdi:plus"></ha-icon></button>
+        <button class="catalog-icon-button catalog-open-list" type="button" aria-label="Open shopping list" title="Open shopping list" aria-expanded="false" aria-controls="catalog-list-panel"><ha-icon icon="mdi:format-list-checks"></ha-icon></button>
       </div>
       <div class="catalog-toolbar">
         <label class="catalog-search"><ha-icon icon="mdi:magnify"></ha-icon><input type="search" aria-label="Search catalog" placeholder="Search products" autocomplete="off"><button class="catalog-icon-button catalog-clear-search" type="button" aria-label="Clear search" title="Clear search" hidden><ha-icon icon="mdi:close"></ha-icon></button></label>
         <label class="catalog-on-list"><input type="checkbox">On list</label>
       </div>
+      <form class="catalog-add-form" id="catalog-add-form" aria-label="Add item to shopping list" hidden>
+        <input class="catalog-add-input" type="text" aria-label="Item to add" placeholder="Add to shopping list" required autocomplete="off">
+        <button class="catalog-icon-button catalog-add-submit" type="submit" title="Add item" aria-label="Add item"><ha-icon icon="mdi:plus"></ha-icon></button>
+        <button class="catalog-icon-button catalog-add-close" type="button" title="Close add item" aria-label="Close add item"><ha-icon icon="mdi:close"></ha-icon></button>
+        <div class="catalog-add-message" role="status" aria-live="polite"></div>
+      </form>
+      <section class="catalog-list-panel" id="catalog-list-panel" aria-labelledby="catalog-list-title" hidden>
+        <div class="catalog-list-header">
+          <h3 class="catalog-list-title" id="catalog-list-title"></h3>
+          <button class="catalog-icon-button catalog-close-list" type="button" title="Close shopping list" aria-label="Close shopping list"><ha-icon icon="mdi:close"></ha-icon></button>
+        </div>
+        <div class="catalog-list-content"></div>
+      </section>
       <div class="catalog-tabs" role="tablist" aria-label="Product categories"></div>
       <div class="catalog-status" role="status" aria-live="polite"></div>
       <div class="catalog-content" id="catalog-content" role="tabpanel"></div>
@@ -1581,9 +1780,30 @@ class ShoppingListCatalogCard extends HTMLElement {
     });
     this.shadowRoot.querySelector('.catalog-open-list').addEventListener('click', () => {
       if (!this._config) return;
-      this.dispatchEvent(new CustomEvent('hass-more-info', {
-        detail: { entityId: this._config.todo_list }, bubbles: true, composed: true,
-      }));
+      this._toggleList(this.shadowRoot.querySelector('.catalog-list-panel').hidden);
+    });
+    this.shadowRoot.querySelector('.catalog-close-list').addEventListener('click', () => {
+      this._toggleList(false);
+      this.shadowRoot.querySelector('.catalog-open-list').focus();
+    });
+    this.shadowRoot.querySelector('.catalog-list-content').addEventListener('ll-rebuild', event => {
+      event.stopPropagation();
+      if (!this.shadowRoot.querySelector('.catalog-list-panel').hidden) void this._loadListCard();
+    });
+    this._addForm = this.shadowRoot.querySelector('.catalog-add-form');
+    this._addInput = this.shadowRoot.querySelector('.catalog-add-input');
+    this._addMessage = this.shadowRoot.querySelector('.catalog-add-message');
+    this.shadowRoot.querySelector('.catalog-add-toggle').addEventListener('click', () => {
+      this._toggleAddForm(this._addForm.hidden);
+    });
+    this.shadowRoot.querySelector('.catalog-add-close').addEventListener('click', () => this._toggleAddForm(false));
+    this._addInput.addEventListener('input', () => {
+      this._setAddMessage('');
+      this._updateAddState();
+    });
+    this._addForm.addEventListener('submit', event => {
+      event.preventDefault();
+      void this._addItem();
     });
   }
 
@@ -1600,15 +1820,45 @@ class ShoppingListCatalogCard extends HTMLElement {
     if (config.item_options != null && (typeof config.item_options !== 'object' || Array.isArray(config.item_options))) {
       throw new Error('Item options must be an object.');
     }
+    if (config.categories !== undefined && (!Array.isArray(config.categories)
+      || config.categories.some(category => typeof category !== 'string' || !category.trim()))) {
+      throw new Error('Categories must be a list of category names.');
+    }
+    for (const option of ['show_category_tabs', 'show_search', 'show_title', 'show_list_button', 'show_add_button']) {
+      if (config[option] !== undefined && typeof config[option] !== 'boolean') {
+        throw new Error(`${option} must be true or false.`);
+      }
+    }
     const columns = config.columns ?? 4;
     if (!Number.isInteger(columns) || columns < 1 || columns > 6) throw new Error('Columns must be an integer from 1 to 6.');
     if (this._config?.catalog_entity !== config.catalog_entity || this._config?.catalog_attribute !== config.catalog_attribute) this._category = null;
+    if (this._config && this._config.todo_list !== config.todo_list) {
+      this._toggleList(false);
+      this._toggleAddForm(false);
+      this._addInput.value = '';
+      this._setAddMessage('');
+    }
     this._config = { ...config };
     this._needsSource = true;
     this.style.setProperty('--catalog-columns', String(columns));
     this.style.setProperty('--catalog-medium-columns', String(Math.min(columns, 3)));
     this.style.setProperty('--catalog-mobile-columns', String(Math.min(columns, 2)));
     this.shadowRoot.querySelector('.catalog-title').textContent = config.title || 'Shopping';
+    this.shadowRoot.querySelector('.catalog-title').hidden = config.show_title === false;
+    this._tabs.hidden = config.show_category_tabs === false;
+    this.shadowRoot.querySelector('.catalog-search').hidden = config.show_search === false;
+    if (config.show_search === false) {
+      this._query = '';
+      this._search.value = '';
+    }
+    if (config.show_category_tabs === false) this._category = null;
+    this._content.setAttribute('role', config.show_category_tabs === false ? 'region' : 'tabpanel');
+    this._content.setAttribute('aria-label', config.title || 'Shopping catalog');
+    if (config.show_category_tabs === false) this._content.removeAttribute('aria-labelledby');
+    this.shadowRoot.querySelector('.catalog-open-list').hidden = config.show_list_button === false;
+    this.shadowRoot.querySelector('.catalog-add-toggle').hidden = config.show_add_button === false;
+    if (config.show_list_button === false) this._toggleList(false);
+    if (config.show_add_button === false) this._toggleAddForm(false);
     this._update();
   }
 
@@ -1620,6 +1870,12 @@ class ShoppingListCatalogCard extends HTMLElement {
   connectedCallback() { this._update(); }
 
   disconnectedCallback() {
+    this._toggleList(false);
+    this._addRequest = null;
+    this._teardownSubscription();
+  }
+
+  _teardownSubscription() {
     const unsubscribe = this._unsubscribe;
     this._unsubscribe = null;
     this._store = null;
@@ -1649,6 +1905,9 @@ class ShoppingListCatalogCard extends HTMLElement {
       }
     }
     for (const product of this._products.values()) product.card.hass = this._hass;
+    if (this._listCard) this._listCard.hass = this._hass;
+    this.shadowRoot.querySelector('.catalog-list-title').textContent = this._hass.states?.[this._config.todo_list]?.attributes?.friendly_name || 'Shopping list';
+    this._updateAddState();
     this._renderStatus();
     this._applyFilters();
   }
@@ -1658,15 +1917,165 @@ class ShoppingListCatalogCard extends HTMLElement {
       this._store.updateHass(this._hass);
       return;
     }
-    this.disconnectedCallback();
+    this._teardownSubscription();
+    this._addRequest = null;
     const store = getTodoStore(this._hass, this._config.todo_list);
     this._store = store;
     this._unsubscribe = store.subscribe(snapshot => {
       if (this._store !== store) return;
       this._snapshot = snapshot;
+      this._updateAddState();
       this._renderStatus();
       this._applyFilters();
     });
+  }
+
+  _toggleList(open) {
+    const panel = this.shadowRoot.querySelector('.catalog-list-panel');
+    panel.hidden = !open;
+    const button = this.shadowRoot.querySelector('.catalog-open-list');
+    button.setAttribute('aria-expanded', String(open));
+    button.setAttribute('aria-label', open ? 'Hide shopping list' : 'Open shopping list');
+    button.title = open ? 'Hide shopping list' : 'Open shopping list';
+    if (open) void this._loadListCard();
+    else {
+      this._listRequest?.cancel?.();
+      this._listRequest = null;
+      this._listCard = null;
+      this.shadowRoot.querySelector('.catalog-list-content').replaceChildren();
+    }
+  }
+
+  async _loadListCard() {
+    if (!this._config || !this._hass || !this.isConnected) return;
+    this._listRequest?.cancel?.();
+    const request = { entityId: this._config.todo_list };
+    this._listRequest = request;
+    const current = () => this._listRequest === request && this.isConnected;
+    const container = this.shadowRoot.querySelector('.catalog-list-content');
+    container.textContent = 'Loading shopping list...';
+    this._listCard = null;
+    try {
+      const config = { type: 'todo-list', entity: request.entityId };
+      let card;
+      if (customElements.get('hui-todo-list-card')) {
+        card = document.createElement('hui-todo-list-card');
+        card.setConfig(config);
+      } else {
+        if (typeof window.loadCardHelpers !== 'function') throw new Error('Home Assistant card helpers are unavailable.');
+        const helpers = await window.loadCardHelpers();
+        if (!current()) return;
+        card = await helpers.createCardElement(config);
+      }
+      if (!current()) return;
+      if (!(card instanceof HTMLElement)) throw new Error('Home Assistant did not create the to-do list card.');
+      if (card.localName === 'hui-todo-list-card' && typeof card.setConfig !== 'function') {
+        const loaded = await new Promise((resolve, reject) => {
+          const timer = setTimeout(() => {
+            request.cancel = null;
+            reject(new Error('Loading the native to-do card timed out.'));
+          }, 10000);
+          const finish = result => {
+            clearTimeout(timer);
+            request.cancel = null;
+            resolve(result);
+          };
+          request.cancel = () => finish(false);
+          customElements.whenDefined('hui-todo-list-card').then(() => finish(true));
+        });
+        if (!loaded || !current()) return;
+        card = document.createElement('hui-todo-list-card');
+        card.setConfig(config);
+      }
+      card.hass = this._hass;
+      this._listCard = card;
+      container.replaceChildren(card);
+    } catch (error) {
+      if (!current()) return;
+      const alert = document.createElement('ha-alert');
+      alert.setAttribute('alert-type', 'error');
+      alert.textContent = `Could not open the shopping list. ${error.message || ''}`;
+      const retry = document.createElement('button');
+      retry.className = 'catalog-icon-button';
+      retry.type = 'button';
+      retry.title = 'Retry loading shopping list';
+      retry.setAttribute('aria-label', retry.title);
+      retry.innerHTML = '<ha-icon icon="mdi:refresh"></ha-icon>';
+      retry.addEventListener('click', () => { void this._loadListCard(); });
+      container.replaceChildren(alert, retry);
+    }
+  }
+
+  _toggleAddForm(open) {
+    this._addForm.hidden = !open;
+    this.shadowRoot.querySelector('.catalog-add-toggle').setAttribute('aria-expanded', String(open));
+    if (open) {
+      this._updateAddState();
+      this._addInput.focus();
+    } else if (this._addForm.contains(this.shadowRoot.activeElement)) {
+      this.shadowRoot.querySelector('.catalog-add-toggle').focus();
+    }
+  }
+
+  _setAddMessage(message, error = false) {
+    this._addMessage.textContent = message;
+    this._addMessage.dataset.error = String(error);
+  }
+
+  _canAddItems() {
+    const features = this._hass?.states?.[this._config?.todo_list]?.attributes?.supported_features;
+    return features === undefined || (features & 1) !== 0;
+  }
+
+  _updateAddState() {
+    if (!this._addInput) return;
+    const key = this._addInput.value.trim().toLowerCase();
+    const busy = !!this._addRequest || !!this._store?.pending.has(key);
+    const canAdd = this._canAddItems();
+    this._addInput.disabled = !!this._addRequest;
+    this._addForm.setAttribute('aria-busy', String(busy));
+    this.shadowRoot.querySelector('.catalog-add-submit').disabled = !key || busy || !canAdd || !this._store?.ready;
+    this.shadowRoot.querySelector('.catalog-add-toggle').disabled = !canAdd;
+  }
+
+  async _addItem() {
+    const name = this._addInput.value.trim();
+    if (!name || this._addRequest || !this.isConnected || this._config?.show_add_button === false) return;
+    const store = this._store;
+    if (!store?.ready || !this._canAddItems()) {
+      this._setAddMessage(!this._canAddItems() ? 'This list does not support adding items.'
+        : store?.error || 'Wait for the shopping list to reconnect.', true);
+      return;
+    }
+    if (store.pending.has(name.toLowerCase())) {
+      this._setAddMessage('This item is still being updated.');
+      return;
+    }
+    const request = { store };
+    this._addRequest = request;
+    this._setAddMessage('Adding item...');
+    this._updateAddState();
+    try {
+      const added = await store.execute([name.toLowerCase()], items => {
+        const action = planListAddition(items, name);
+        const features = this._hass.states[this._config.todo_list]?.attributes?.supported_features;
+        if (action?.service === 'update_item' && features !== undefined && !(features & 4)) {
+          throw new Error('This list does not support updating an existing item.');
+        }
+        return action ? [action] : [];
+      });
+      if (this._addRequest !== request || this._store !== store) return;
+      if (added) this._addInput.value = '';
+      this._setAddMessage(added ? `Added ${name}.` : 'This item is already on the list.');
+    } catch (error) {
+      if (this._addRequest === request && this._store === store) this._setAddMessage(error.message || 'Could not add the item.', true);
+    } finally {
+      if (this._addRequest === request) {
+        this._addRequest = null;
+        this._updateAddState();
+        if (!this._addForm.hidden) this._addInput.focus();
+      }
+    }
   }
 
   _reconcile(groups) {
@@ -1732,7 +2141,11 @@ class ShoppingListCatalogCard extends HTMLElement {
       count.className = 'catalog-tab-count';
       count.textContent = String(category.count);
       button.append(title, count);
-      button.addEventListener('click', () => { this._category = category.name; this._applyFilters(); });
+      button.addEventListener('click', () => {
+        if (this._config.show_category_tabs === false) return;
+        this._category = category.name;
+        this._applyFilters();
+      });
       button.addEventListener('keydown', event => {
         const keys = ['ArrowLeft', 'ArrowRight', 'Home', 'End'];
         if (!keys.includes(event.key)) return;
@@ -1773,14 +2186,14 @@ class ShoppingListCatalogCard extends HTMLElement {
       const selected = tab._category === this._category;
       tab.setAttribute('aria-selected', String(selected));
       tab.tabIndex = selected ? 0 : -1;
-      if (selected) this._content.setAttribute('aria-labelledby', tab.id);
+      if (selected && this._config?.show_category_tabs !== false) this._content.setAttribute('aria-labelledby', tab.id);
     }
     this.shadowRoot.querySelector('.catalog-counter').textContent = `${visible} / ${this._products.size}`;
     this.shadowRoot.querySelector('.catalog-clear-search').hidden = !this._query;
     const empty = this.shadowRoot.querySelector('.catalog-empty');
     empty.hidden = visible > 0 || !!this._sourceError || !this._hass
       || (this._onList && items === null);
-    empty.textContent = !this._products.size ? 'The product catalog is empty.'
+    empty.textContent = !this._products.size ? this._config?.categories ? 'No products in the selected categories.' : 'The product catalog is empty.'
       : this._onList ? 'No catalog products match the selected list filters.' : 'No products match your search.';
   }
 
@@ -1815,29 +2228,23 @@ class ShoppingListCatalogCard extends HTMLElement {
 
   getLayoutOptions() { return { grid_rows: 'auto', grid_columns: 12, grid_min_columns: 4 }; }
 
-  static getConfigElement() { return document.createElement('shopping-list-catalog-card-editor'); }
+  static getConfigElement() { return document.createElement('shopping-list-catalog-editor'); }
 
   static getStubConfig(hass) {
     const entities = Object.entries(hass?.states || {});
     const catalog = entities.find(([entityId, state]) => entityId.startsWith('sensor.')
       && Object.values(state.attributes || {}).some(value => Array.isArray(value) && value.some(entry => typeof entry?.title === 'string')));
     return {
-      type: 'custom:shopping-list-catalog-card',
+      type: 'custom:shopping-list-card',
+      mode: 'catalog',
       catalog_entity: catalog?.[0] || '',
       todo_list: entities.find(([entityId]) => entityId.startsWith('todo.'))?.[0] || '',
     };
   }
 }
 
-if (!customElements.get('shopping-list-catalog-card')) {
-  customElements.define('shopping-list-catalog-card', ShoppingListCatalogCard);
-}
-window.customCards = window.customCards || [];
-if (!window.customCards.some(card => card.type === 'shopping-list-catalog-card')) {
-  window.customCards.push({
-    type: 'shopping-list-catalog-card', name: 'Shopping Catalog', preview: true,
-    description: 'A shared product catalog with categories, search, and shopping-list controls.',
-  });
+if (!customElements.get('shopping-list-catalog')) {
+  customElements.define('shopping-list-catalog', ShoppingListCatalogCard);
 }
 
 /*
@@ -1885,6 +2292,7 @@ class ShoppingListCard extends HTMLElement {
     this._syncState = null;
     this._actionError = null;
     this._configVersion = 0;
+    this._catalogCard = null;
     this._lastRenderKey = null;
     this._expanded = false;
     this._holdCleanups = new Set();
@@ -1902,14 +2310,26 @@ class ShoppingListCard extends HTMLElement {
 
   set hass(hass) {
     this._hass = hass;
+    if (this._catalogCard) {
+      this._catalogCard.hass = hass;
+      return;
+    }
     if (this._config && this.isConnected) this._ensureSubscription();
   }
 
   setConfig(config) {
+    if (config.mode !== undefined && config.mode !== 'single' && config.mode !== 'catalog') {
+      throw new Error('Card mode must be single or catalog.');
+    }
+    if (config.mode === 'catalog') {
+      this._setCatalogConfig(config);
+      return;
+    }
     if (typeof config.title !== 'string' || !config.title.trim()) throw new Error('You must define a title.');
     if (typeof config.todo_list !== 'string' || !config.todo_list.startsWith('todo.')) {
       throw new Error('You must define a todo_list entity_id.');
     }
+    if (this._catalogCard) this._resetView();
     const prev = this._config;
     this._clearHolds();
     this._config = { ...config };
@@ -1928,6 +2348,10 @@ class ShoppingListCard extends HTMLElement {
   }
 
   connectedCallback() {
+    if (this._catalogCard) {
+      if (this._hass) this._catalogCard.hass = this._hass;
+      return;
+    }
     if (this._hass && this._config) this._ensureSubscription();
   }
 
@@ -1941,7 +2365,39 @@ class ShoppingListCard extends HTMLElement {
     this._isUpdating = false;
   }
 
+  _setCatalogConfig(config) {
+    const catalog = this._catalogCard || document.createElement('shopping-list-catalog');
+    catalog.setConfig(config);
+    if (!this._catalogCard) {
+      this._resetView();
+      this._catalogCard = catalog;
+      this.append(catalog);
+    }
+    this._config = { ...config };
+    if (this._hass) catalog.hass = this._hass;
+  }
+
+  _resetView() {
+    this._clearHolds();
+    clearTimeout(this._clickResetTimer);
+    this._clickResetTimer = null;
+    this._suppressClick = false;
+    this._teardownSubscription();
+    this._catalogCard = null;
+    this._items = null;
+    this.content = null;
+    this._statusElement = null;
+    this._lastRenderKey = null;
+    this._lastStatusKey = null;
+    this._expanded = false;
+    this._actionError = null;
+    this._isUpdating = false;
+    this._configVersion++;
+    this.replaceChildren();
+  }
+
   _ensureSubscription() {
+    if (this._config?.mode === 'catalog') return;
     if (!this._hass || !this._config?.todo_list) return;
     if (this._store?.entityId === this._config.todo_list
       && this._store.connection === this._hass.connection && this._unsubscribe) {
@@ -1969,11 +2425,12 @@ class ShoppingListCard extends HTMLElement {
   }
 
   static getConfigElement() { return document.createElement('shopping-list-card-editor'); }
-  static getStubConfig() {
+  static getStubConfig(hass) {
     return {
       type: 'custom:shopping-list-card',
+      mode: 'single',
       title: 'New Item',
-      todo_list: '' // Add empty string to pass validation, editor will populate
+      todo_list: Object.keys(hass?.states || {}).find(entityId => entityId.startsWith('todo.')) || '',
     };
   }
 
@@ -2159,6 +2616,7 @@ class ShoppingListCard extends HTMLElement {
   }
 
   _render() {
+    if (this._catalogCard) return;
     this._ensureShell();
     this._renderStatus();
     this._applyBusyState();
@@ -2710,6 +3168,7 @@ class ShoppingListCard extends HTMLElement {
   }
 
   getCardSize() {
+    if (this._catalogCard) return this._catalogCard.getCardSize();
     if (this._config && this._getTypes().length) return 2;
     if (this._config && this._config.layout === 'vertical') {
       return this._config.show_name === false ? 1 : 2;
@@ -2718,6 +3177,7 @@ class ShoppingListCard extends HTMLElement {
   }
 
   getLayoutOptions() {
+    if (this._catalogCard) return this._catalogCard.getLayoutOptions();
     if (this._config && this._getTypes().length) {
       // Expandable: let the card grow with its content. `grid_rows: auto` keeps
       // the height flexible by default so the expanded variant list is never
@@ -2743,7 +3203,7 @@ if (!window.customCards.some(c => c.type === 'shopping-list-card')) {
     type: 'shopping-list-card',
     name: 'Shopping List Card',
     preview: true,
-    description: 'A card to manage items on a shopping list.',
+    description: 'Single-product tiles or a shared shopping catalog.',
     getEntitySuggestion: (hass, entityId) => {
       if (typeof entityId !== 'string' || entityId.split('.')[0] !== 'todo') return null;
       return { config: { type: 'custom:shopping-list-card', title: 'New item', todo_list: entityId } };

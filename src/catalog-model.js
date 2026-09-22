@@ -76,6 +76,7 @@ export function readCatalog(hass, config) {
   const defaults = { layout: 'vertical', enable_quantity: true, ...itemOptions(config.item_options || {}) };
   const groups = [];
   for (const [category, entries] of Object.entries(data)) {
+    if (config.categories && !config.categories.includes(category)) continue;
     if (!Array.isArray(entries)) {
       if (config.catalog_attribute) throw new Error(`Category "${category}" must be an array.`);
       continue;

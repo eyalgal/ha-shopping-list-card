@@ -73,6 +73,21 @@ export function planItemAction(config, items, subtitle, action = 'toggle') {
   };
 }
 
+export function planListAddition(items, text) {
+  const name = text.trim();
+  if (!name) return null;
+  const config = { enable_quantity: true, remove_zero: false };
+  const state = matchItem(items, name, config);
+  if (state.isOn) return null;
+  if (state.present) {
+    return planItemAction({ ...config, title: name }, items, null);
+  }
+  return {
+    key: name.toLowerCase(), service: 'add_item', data: { item: name },
+    confirmed: current => matchItem(current, name, config).isOn,
+  };
+}
+
 export function updateTypeNames(previous, text) {
   const names = text.split('\n').map(name => name.trim()).filter(Boolean);
   const entries = Array.isArray(previous) ? previous

@@ -57,16 +57,26 @@ _or_
 3. Search for "Shopping List Card".
 4. Click download.
 
+## Card Modes
+
+Add **Shopping List Card** from the dashboard card picker, then choose **Single** or **Catalog** using **Card mode** at the top of its visual editor. Both modes use `type: custom:shopping-list-card`.
+
+- `mode: single` displays one product with its optional variants. Omitting `mode` also selects Single.
+- `mode: catalog` displays the shared sensor-backed product catalog. Its settings include the source sensor, categories, display controls, and product defaults.
+
+The separate `custom:shopping-list-catalog-card` type has been removed. Replace it with `type: custom:shopping-list-card` and add `mode: catalog`; the remaining catalog settings stay the same. There is no alias for the removed type.
+
 ## Native Catalog
 
-Use `custom:shopping-list-catalog-card` to display a shared product catalog with category tabs, search, and an **On list** filter. It is included in the same JavaScript bundle as the single-product card; it does not require `auto-entities` or `layout-card`.
+Choose **Catalog** mode to display a shared product catalog with category tabs, search, and an **On list** filter. It does not require `auto-entities` or `layout-card`.
 
 The catalog is not another shopping list. A sensor provides the available products, and the existing `todo` entity stores the items and quantities you need to buy. The catalog uses the same product tiles, variants, quantity controls, and hold actions as single-product cards.
 
 For the [existing JSON-backed sensor example](examples/auto-generated-grid/), the complete card configuration can be:
 
 ```yaml
-type: custom:shopping-list-catalog-card
+type: custom:shopping-list-card
+mode: catalog
 catalog_entity: sensor.shopping_list_items
 todo_list: todo.shopping_list
 title: Shopping
@@ -75,7 +85,7 @@ item_options:
   image_base: /local/images/shopping-list/
 ```
 
-Replace the example entity IDs with your own. The visual card picker lists **Shopping Catalog** and its editor has sensor/list pickers, column count, and product defaults. Existing generated grids can remain alongside it; no list migration or item renaming is required.
+Replace the example entity IDs with your own. Select **Shopping List Card > Card mode > Catalog** to access the sensor/list pickers, column count, and product defaults. Existing generated grids can remain alongside it; no list migration or item renaming is required.
 
 ### Catalog Source
 
@@ -104,14 +114,46 @@ If the entire category map is in one attribute, set `catalog_attribute` to its n
 
 | Option | Required | Description | Default |
 |---|---|---|---|
+| `mode` | Yes | Set to `catalog` on `custom:shopping-list-card`. | `single` when omitted |
 | `catalog_entity` | Yes | Sensor containing the shared product catalog. | - |
 | `todo_list` | Yes | Existing to-do entity used by every product tile. | - |
 | `catalog_attribute` | No | Attribute containing the entire category map. | Category arrays directly in sensor attributes |
 | `title` | No | Catalog heading. | `Shopping` |
 | `columns` | No | Maximum number of grid columns, from 1 to 6. Narrow containers use fewer columns. | `4` |
+| `categories` | No | Category names to display. Omit for all categories; an empty list displays none. Missing names never fall back to showing other categories. | All categories |
+| `show_category_tabs` | No | Show the category selector. When `false`, all allowed categories are displayed together. | `true` |
+| `show_search` | No | Show the catalog search box. Disabling it clears any active search. | `true` |
+| `show_title` | No | Show the main catalog heading. | `true` |
+| `show_list_button` | No | Show the button that expands the full native Home Assistant to-do list. | `true` |
+| `show_add_button` | No | Show the quick-add button for a missing shopping-list item. | `true` |
 | `item_options` | No | Shared single-product defaults, such as `layout`, `image_base`, `enable_quantity`, colors, and `hold_action`. Per-product values override these defaults. | Vertical tiles with quantity controls enabled |
 
-Products cannot override the catalog's target `todo_list`. Search matches category, title, subtitle, and variant names, ignoring case and accents. **On list** includes a product when its header item or any variant is active; kept-zero entries are inactive. The count shows visible catalog products, not the sum of quantities. Items not present in the catalog remain untouched; keep a native `todo-list` card alongside the catalog to display those items too.
+In the visual editor, **Display** contains category checkboxes and the visibility switches. For a fixed view of selected categories without navigation, search, or a title:
+
+```yaml
+type: custom:shopping-list-card
+mode: catalog
+catalog_entity: sensor.shopping_list_items
+todo_list: todo.shopping_list
+categories:
+  - Fruits
+  - Dairy and Eggs
+show_category_tabs: false
+show_search: false
+show_title: false
+```
+
+Omit `categories` to show every category together. These options only affect this card, not other dashboards or the shared catalog. Disabling category tabs clears the previous selected tab. Category section headings remain visible when the main title is hidden.
+
+Products cannot override the catalog's target `todo_list`. Search matches category, title, subtitle, and variant names, ignoring case and accents. **On list** includes a product when its header item or any variant is active; kept-zero entries are inactive. The count shows visible catalog products, not the sum of quantities.
+
+### Shopping List and Quick Add
+
+The list icon expands Home Assistant's native `todo-list` card instead of the entity's count-only more-info dialog. It shows the entire selected list, including items that are not in the catalog and completed items. Catalog category/search filters do not restrict this list. Native item editing, completion, and removal follow the capabilities of the to-do integration. Closing the section unloads the native card.
+
+The plus button opens a quick-add field. Type a missing item and submit to add it directly to `todo_list`. This does not add a product to the JSON catalog or apply a catalog category prefix. An existing active item is not added twice, and an existing kept-zero item is reactivated when the list supports updates. The form clears only after Home Assistant confirms the change; failed saves keep the text for correction, and offline writes are not queued. Pending protection is shared with the existing catalog tiles on the same connection.
+
+Adding a permanent catalog product from the card is not supported with the read-only JSON/sensor source. Continue editing the shared JSON for permanent products; the quick-add field is for the shopping list only.
 
 ### Sharing and Persistence
 
@@ -125,12 +167,13 @@ Products cannot override the catalog's target `todo_list`. Search matches catego
 
 ## ⚙️ Configuration
 
-The card ships with a full visual editor. Just add it to your dashboard and fill out the form.
+The card ships with a full visual editor. The following options are for **Single** mode; use the catalog options above for **Catalog** mode.
 
 ### YAML example
 
 ```yaml
 type: custom:shopping-list-card
+mode: single
 title: Feed Guinness
 subtitle: Morning & Evening
 todo_list: todo.daily_chores
@@ -151,6 +194,7 @@ haptic: true
 | Name | Type | Required | Description | Default |
 |---|---|---|---|---|
 | `type` | string | yes | Must be `custom:shopping-list-card`. | - |
+| `mode` | string | no | `single` for one product or `catalog` for the sensor-backed catalog. | `single` |
 | `title` | string | yes | The item name. | - |
 | `subtitle` | string | no | A secondary line of text. Included when matching/writing: the stored item is `"<title> - <subtitle>"`. | `''` |
 | `types` | list or string | no | Turns the card into an expandable group. A list of entries (a string, or `{ name, image, icon }`), or a single comma-separated string like `"Pink Lady, Granny Smith, Gala"` (handy from a JSON catalog). Each is added as `"<title> - <type>"`. Tapping the card header adds the bare title (or `"<title> - <subtitle>"` when `subtitle` is set); the chevron expands the variant list. Works in both `horizontal` and `vertical` layouts. | - |

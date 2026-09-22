@@ -1,4 +1,5 @@
-type: custom:shopping-list-catalog-card
+type: custom:shopping-list-card
+mode: catalog
 catalog_entity: sensor.shopping_list_items
 todo_list: todo.shopping_list
 title: Shopping

@@ -29,9 +29,10 @@
     @media (max-width: 700px) {
       #editor-view { grid-template-columns: minmax(0, 1fr); }
     }
+    shopping-list-card { display: block; min-width: 0; }
     shopping-list-card.wide { grid-column: span 2; }
     ha-card { display: block; }
-    shopping-list-catalog-card { display: block; }
+    shopping-list-catalog { display: block; }
     ha-icon { display: inline-flex; align-items: center; justify-content: center; font-size: var(--mdc-icon-size, 24px); width: 24px; height: 24px; }
     ha-alert { display: block; font-size: 13px; line-height: 1.5; color: #9e2424; }
     ha-alert[alert-type="info"] { color: #365a6d; }
@@ -185,13 +186,65 @@
           const index = entries.findIndex(entry => entry.uid === data.item || entry.summary === data.item);
           if (index === -1) throw new Error('Item no longer exists');
           if (service === 'remove_item') entries.splice(index, 1);
-          else entries[index].summary = data.rename;
+          else {
+            if (data.rename !== undefined) entries[index].summary = data.rename;
+            if (data.status !== undefined) entries[index].status = data.status;
+          }
         }
         push();
       },
     };
+    class TestTodoList extends HTMLElement {
+      constructor() {
+        super();
+        this.attachShadow({ mode: 'open' });
+        this.shadowRoot.innerHTML = '<style>:host{display:block}*{box-sizing:border-box}form{display:flex;gap:8px;margin-bottom:12px}input[type=text]{min-width:0;flex:1;height:40px;padding:8px;border:1px solid #adb4bd;border-radius:4px;font:inherit}button{border:0;border-radius:4px;min-width:36px;background:transparent;color:inherit;cursor:pointer}label{display:flex;align-items:center;gap:10px;padding:10px 0;border-top:1px solid #d7dce1;font-size:14px}label span{overflow-wrap:anywhere}label input{width:18px;height:18px;flex-shrink:0}label:has(input:checked) span{text-decoration:line-through;color:#656970}</style><form><input type="text" aria-label="New list item" placeholder="Add item" required><button type="submit" aria-label="Add list item" title="Add item"><ha-icon icon="mdi:plus"></ha-icon></button></form><div class="items"></div>';
+        this.shadowRoot.querySelector('form').addEventListener('submit', async event => {
+          event.preventDefault();
+          const input = this.shadowRoot.querySelector('input[type=text]');
+          if (!input.value.trim()) return;
+          await this.hass.callService('todo', 'add_item', { entity_id: this._config.entity, item: input.value.trim() });
+          input.value = '';
+        });
+      }
+      setConfig(config) { this._config = config; }
+      connectedCallback() {
+        this._active = true;
+        this.hass.connection.subscribeMessage(message => this._renderItems(message.items), {
+          type: 'todo/item/subscribe', entity_id: this._config.entity,
+        }).then(unsubscribe => {
+          if (this._active) this._unsubscribe = unsubscribe;
+          else unsubscribe();
+        });
+      }
+      disconnectedCallback() { this._active = false; this._unsubscribe?.(); }
+      _renderItems(items) {
+        const container = this.shadowRoot.querySelector('.items');
+        container.replaceChildren();
+        for (const item of items) {
+          const label = document.createElement('label');
+          const checkbox = document.createElement('input');
+          checkbox.type = 'checkbox';
+          checkbox.checked = item.status === 'completed';
+          const title = document.createElement('span');
+          title.textContent = item.summary;
+          checkbox.addEventListener('change', () => this.hass.callService('todo', 'update_item', {
+            entity_id: this._config.entity, item: item.uid,
+            status: checkbox.checked ? 'completed' : 'needs_action',
+          }));
+          label.append(checkbox, title);
+          container.append(label);
+        }
+      }
+    }
+    window.loadCardHelpers = async () => ({ createCardElement(config) {
+      if (!customElements.get('hui-todo-list-card')) customElements.define('hui-todo-list-card', TestTodoList);
+      const card = document.createElement('hui-todo-list-card');
+      card.setConfig(config);
+      return card;
+    } });
     let catalogData;
-    if (catalogMode) {
+    if (catalogMode || editorMode) {
       const response = await fetch('../examples/auto-generated-grid/shopping_items.json');
       catalogData = await response.json();
       const icons = {
@@ -217,6 +270,7 @@
     ];
     for (const configuration of catalogMode || editorMode ? [] : configurations) {
       const card = document.createElement('shopping-list-card');
+      card.dataset.fixtureCard = '';
       card.id = configuration.id;
       if (!configuration.layout) card.classList.add('wide');
       const { id, ...config } = configuration;
@@ -227,7 +281,7 @@
     }
     const editorChanges = [];
     const catalogConfig = {
-      type: 'custom:shopping-list-catalog-card', catalog_entity: 'sensor.catalog', todo_list: 'todo.test',
+      type: 'custom:shopping-list-card', mode: 'catalog', catalog_entity: 'sensor.catalog', todo_list: 'todo.test',
       title: 'Shopping', columns: 4,
     };
     if (editorMode) {
@@ -235,8 +289,9 @@
       document.querySelector('#cards').remove();
       const view = document.createElement('div');
       view.id = 'editor-view';
-      const editor = document.createElement(catalogMode ? 'shopping-list-catalog-card-editor' : 'shopping-list-card-editor');
-      const preview = document.createElement(catalogMode ? 'shopping-list-catalog-card' : 'shopping-list-card');
+      const editor = document.createElement('shopping-list-card-editor');
+      const preview = document.createElement('shopping-list-card');
+      preview.dataset.fixtureCard = '';
       preview.id = 'editor-preview';
       const config = catalogMode ? catalogConfig : {
         type: 'custom:shopping-list-card', title: 'Apple', todo_list: 'todo.test', enable_quantity: true,
@@ -256,7 +311,8 @@
       document.querySelector('main').append(view);
     } else if (catalogMode) {
       document.querySelector('h1').remove();
-      const catalog = document.createElement('shopping-list-catalog-card');
+      const catalog = document.createElement('shopping-list-card');
+      catalog.dataset.fixtureCard = '';
       catalog.id = 'catalog-preview';
       catalog.setConfig(catalogConfig);
       catalog.hass = hass;
@@ -278,15 +334,19 @@
       updateCatalog(data) {
         catalogData = structuredClone(data);
         hass.states['sensor.catalog'] = { state: String(Date.now()), attributes: catalogData };
-        for (const catalog of document.querySelectorAll('shopping-list-catalog-card')) catalog.hass = { ...hass };
+        for (const card of document.querySelectorAll('shopping-list-card[data-fixture-card]')) card.hass = { ...hass };
       },
       setCatalogAvailable(available) {
         hass.states['sensor.catalog'] = { state: available ? '1' : 'unavailable', attributes: catalogData };
-        for (const catalog of document.querySelectorAll('shopping-list-catalog-card')) catalog.hass = { ...hass };
+        for (const card of document.querySelectorAll('shopping-list-card[data-fixture-card]')) card.hass = { ...hass };
       },
       setConnected(connected) {
         hass.connected = connected;
-        for (const card of document.querySelectorAll('shopping-list-card, shopping-list-catalog-card')) card.hass = { ...hass };
+        for (const card of document.querySelectorAll('shopping-list-card[data-fixture-card]')) card.hass = { ...hass };
+      },
+      configureCatalog(options) {
+        const card = document.querySelector('shopping-list-card[data-fixture-card]');
+        card.setConfig({ ...card._config, ...options });
       },
     };
   </script>

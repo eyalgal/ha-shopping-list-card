@@ -66,6 +66,240 @@ function mount(environment, hass, config = {}) {
   return card;
 }
 
+test('shopping-list-card catalog mode renders products without requiring a single-item title', async context => {
+  const environment = createEnvironment(context);
+  const setup = createHass([item('Milk')]);
+  catalogSource(setup, { Dairy: [{ title: 'Milk' }], Fruits: [{ title: 'Apple', types: ['Gala'] }] });
+  const card = environment.document.createElement('shopping-list-card');
+  card.setConfig({ type: 'custom:shopping-list-card', mode: 'catalog', catalog_entity: 'sensor.catalog', todo_list: 'todo.shopping' });
+  card.hass = setup.hass;
+  environment.document.body.append(card);
+  await settle();
+  const catalog = card.querySelector('shopping-list-catalog');
+  assert.ok(catalog);
+  const products = [...catalog.shadowRoot.querySelectorAll('shopping-list-card')];
+  assert.deepEqual(products.map(product => product._config.title), ['Milk', 'Apple']);
+  assert.equal(products[0].querySelector('.card-container').getAttribute('aria-pressed'), 'true');
+  assert.ok(products[1].querySelector('.types-chevron'));
+  assert.equal(products.some(product => product.querySelector('shopping-list-catalog')), false);
+  assert.equal(card.getLayoutOptions().grid_columns, 12);
+  assert.equal(card.getLayoutOptions().grid_rows, 'auto');
+  assert.equal(setup.subscriptions.length, 1);
+  assert.equal(setup.fetches.length, 0);
+  assert.equal(setup.services.length, 0);
+  assert.deepEqual(environment.errors, []);
+});
+
+test('single mode remains the default and invalid modes leave the current view intact', async context => {
+  const environment = createEnvironment(context);
+  const setup = createHass([item('Milk')]);
+  const card = mount(environment, setup.hass);
+  await settle();
+  const container = card.querySelector('.card-container');
+  assert.equal(container.getAttribute('aria-pressed'), 'true');
+  assert.equal(card.getCardSize(), 1);
+  assert.throws(() => card.setConfig({ title: 'Milk', todo_list: 'todo.shopping', mode: 'invalid' }), /single or catalog/);
+  assert.equal(card.querySelector('.card-container'), container);
+  assert.throws(() => card.setConfig({ todo_list: 'todo.shopping', mode: 'catalog' }), /sensor entity/);
+  assert.equal(card.querySelector('.card-container'), container);
+  card.setConfig({ title: 'Milk', todo_list: 'todo.shopping', mode: 'single' });
+  assert.equal(card.querySelectorAll('shopping-list-catalog').length, 0);
+  assert.equal(card.querySelector('.card-container').getAttribute('aria-pressed'), 'true');
+  assert.equal(setup.subscriptions.length, 1);
+});
+
+test('switching modes cleans up holds, old product tiles, and subscriptions', async context => {
+  const environment = createEnvironment(context);
+  const setup = createHass([item('Milk')]);
+  catalogSource(setup, { Dairy: [{ title: 'Milk' }], Fruits: [{ title: 'Apple' }] });
+  const card = mount(environment, setup.hass);
+  await settle();
+  card.querySelector('.card-container').dispatchEvent(new environment.window.PointerEvent('pointerdown', {
+    bubbles: true, button: 0, isPrimary: true,
+  }));
+  assert.equal([...environment.timers.values()].filter(timer => timer.delay === 500).length, 1);
+  card.setConfig({ mode: 'catalog', catalog_entity: 'sensor.catalog', todo_list: 'todo.shopping' });
+  await settle();
+  const catalog = card.querySelector('shopping-list-catalog');
+  const product = catalog.shadowRoot.querySelector('shopping-list-card');
+  assert.equal([...environment.timers.values()].filter(timer => timer.delay === 500).length, 0);
+  assert.equal(card.querySelectorAll('.card-container').length, 0);
+  assert.equal(setup.subscriptions.filter(subscription => subscription.active).length, 1);
+  card.setConfig({ mode: 'single', title: 'Milk', todo_list: 'todo.shopping' });
+  await settle();
+  assert.equal(catalog.isConnected, false);
+  assert.equal(product.isConnected, false);
+  assert.equal(catalog._store, null);
+  assert.equal(card.querySelector('.card-container').getAttribute('aria-pressed'), 'true');
+  assert.equal(card.getLayoutOptions().grid_columns, 4);
+  assert.equal(setup.subscriptions.filter(subscription => subscription.active).length, 1);
+  card.remove();
+  await settle();
+  assert.equal(setup.subscriptions.filter(subscription => subscription.active).length, 0);
+  assert.equal(setup.services.length, 0);
+  assert.deepEqual(environment.errors, []);
+});
+
+test('catalog mode retains its view across configuration echoes, source updates, and reattachment', async context => {
+  const environment = createEnvironment(context);
+  const setup = createHass();
+  catalogSource(setup, { Fruits: [{ title: 'Apple', types: ['Gala'] }] });
+  const card = mount(environment, setup.hass, { mode: 'catalog', catalog_entity: 'sensor.catalog' });
+  await settle();
+  const catalog = card.querySelector('shopping-list-catalog');
+  const apple = catalog.shadowRoot.querySelector('shopping-list-card');
+  apple.querySelector('.types-chevron').click();
+  card.setConfig({ ...card._config, columns: 2, show_search: false });
+  assert.equal(card.querySelector('shopping-list-catalog'), catalog);
+  assert.equal(catalog.shadowRoot.querySelector('shopping-list-card'), apple);
+  assert.equal(apple._expanded, true);
+  assert.equal(catalog.shadowRoot.querySelector('.catalog-search').hidden, true);
+  setup.push([item('Apple - Gala')]);
+  assert.equal(apple.querySelector('.type-row').getAttribute('aria-pressed'), 'true');
+  catalogSource(setup, { Fruits: [{ title: 'Apple', types: ['Gala'] }, { title: 'Pear' }] });
+  card.hass = { ...setup.hass };
+  await settle();
+  assert.equal(catalog.shadowRoot.querySelectorAll('shopping-list-card').length, 2);
+  card.remove();
+  await settle();
+  assert.equal(setup.subscriptions.filter(subscription => subscription.active).length, 0);
+  environment.document.body.append(card);
+  await settle();
+  assert.equal(card.querySelector('shopping-list-catalog'), catalog);
+  assert.equal(setup.subscriptions.filter(subscription => subscription.active).length, 1);
+  assert.equal(setup.services.length, 0);
+});
+
+test('a pending single-item write stays guarded after switching to catalog mode', async context => {
+  const environment = createEnvironment(context);
+  let finishService;
+  const setup = createHass([], { service: () => new Promise(resolve => { finishService = resolve; }) });
+  catalogSource(setup, { Dairy: [{ title: 'Milk' }] });
+  const card = mount(environment, setup.hass);
+  await settle();
+  card.querySelector('.card-container').click();
+  await settle();
+  card.setConfig({ mode: 'catalog', catalog_entity: 'sensor.catalog', todo_list: 'todo.shopping' });
+  await settle();
+  const catalog = card.querySelector('shopping-list-catalog');
+  const milk = catalog.shadowRoot.querySelector('shopping-list-card');
+  milk.querySelector('.card-container').click();
+  await settle();
+  assert.equal(setup.services.length, 1);
+  assert.equal(milk.querySelector('.card-container').getAttribute('aria-busy'), 'true');
+  setup.push([item('Milk')]);
+  finishService();
+  await settle();
+  assert.equal(card.querySelector('shopping-list-catalog'), catalog);
+  assert.equal(milk.querySelector('.card-container').getAttribute('aria-pressed'), 'true');
+  assert.equal(milk.querySelector('.card-container').getAttribute('aria-busy'), 'false');
+  assert.equal(card.querySelectorAll('.card-content').length, 0);
+  assert.deepEqual(environment.errors, []);
+});
+
+test('one visual editor switches between single and catalog without losing saved settings', context => {
+  const environment = createEnvironment(context);
+  const setup = createHass();
+  catalogSource(setup, { Dairy: [{ title: 'Milk' }] });
+  const editor = environment.document.createElement('shopping-list-card-editor');
+  const variants = [{ name: 'Whole', image: '/local/whole.png', custom: true }];
+  editor.setConfig({
+    type: 'custom:shopping-list-card', title: 'Milk', todo_list: 'todo.shopping', types: variants,
+    item_options: { quantity_max: 5 }, show_search: false, card_mod: { style: 'ha-card {}' },
+  });
+  editor.hass = setup.hass;
+  environment.document.body.append(editor);
+  const changes = [];
+  editor.addEventListener('config-changed', event => {
+    changes.push(JSON.parse(JSON.stringify(event.detail.config)));
+    editor.setConfig(JSON.parse(JSON.stringify(event.detail.config)));
+  });
+  const selectMode = mode => {
+    const radio = editor.shadowRoot.querySelector(`.card-mode input[value="${mode}"]`);
+    assert.ok(radio);
+    radio.checked = true;
+    radio.dispatchEvent(new environment.window.Event('change', { bubbles: true }));
+  };
+  selectMode('catalog');
+  assert.equal(changes.length, 1);
+  assert.equal(changes[0].type, 'custom:shopping-list-card');
+  assert.equal(changes[0].mode, 'catalog');
+  assert.equal(changes[0].catalog_entity, 'sensor.catalog');
+  assert.equal(changes[0].todo_list, 'todo.shopping');
+  const catalogEditor = editor.shadowRoot.querySelector('shopping-list-catalog-editor');
+  assert.ok(catalogEditor);
+  const columns = catalogEditor.shadowRoot.getElementById('columns');
+  columns.value = '2';
+  columns.dispatchEvent(new environment.window.Event('input', { bubbles: true, composed: true }));
+  assert.equal(changes.length, 2);
+  assert.equal(changes[1].columns, 2);
+  assert.equal(changes[1].mode, 'catalog');
+  assert.deepEqual(changes[1].types, variants);
+  assert.equal(editor.shadowRoot.querySelector('shopping-list-catalog-editor'), catalogEditor);
+  selectMode('single');
+  assert.equal(changes.at(-1).mode, 'single');
+  assert.deepEqual(changes.at(-1).types, variants);
+  assert.deepEqual(changes.at(-1).card_mod, { style: 'ha-card {}' });
+  assert.deepEqual(changes.at(-1).item_options, { quantity_max: 5 });
+  assert.equal(editor.shadowRoot.querySelector('#title').value, 'Milk');
+  assert.equal(editor.shadowRoot.querySelector('shopping-list-variants-editor').value[0].name, 'Whole');
+  selectMode('catalog');
+  assert.equal(editor.shadowRoot.querySelector('shopping-list-catalog-editor').shadowRoot.getElementById('columns').value, '2');
+  assert.equal(setup.services.length, 0);
+});
+
+test('switching out of catalog mode cancels pending native-list loading', async context => {
+  const environment = createEnvironment(context);
+  const setup = createHass([item('Milk')]);
+  catalogSource(setup, { Dairy: [{ title: 'Milk' }] });
+  let finishLoading;
+  let created = 0;
+  environment.window.loadCardHelpers = () => new Promise(resolve => { finishLoading = resolve; });
+  const card = mount(environment, setup.hass, { mode: 'catalog', catalog_entity: 'sensor.catalog' });
+  await settle();
+  const catalog = card.querySelector('shopping-list-catalog');
+  catalog.shadowRoot.querySelector('.catalog-open-list').click();
+  card.setConfig({ mode: 'single', title: 'Milk', todo_list: 'todo.shopping' });
+  await settle();
+  finishLoading({ createCardElement() { created++; return environment.document.createElement('hui-todo-list-card'); } });
+  await settle();
+  assert.equal(created, 0);
+  assert.equal(catalog.isConnected, false);
+  assert.equal(catalog.shadowRoot.querySelector('.catalog-list-content').children.length, 0);
+  assert.equal(card.querySelector('.card-container').getAttribute('aria-pressed'), 'true');
+  assert.equal(setup.subscriptions.filter(subscription => subscription.active).length, 1);
+  assert.equal(setup.services.length, 0);
+});
+
+test('inactive editor callbacks cannot modify the newly selected mode', context => {
+  const environment = createEnvironment(context);
+  const setup = createHass();
+  catalogSource(setup, { Dairy: [{ title: 'Milk' }] });
+  const editor = environment.document.createElement('shopping-list-card-editor');
+  const single = { type: 'custom:shopping-list-card', title: 'Milk', todo_list: 'todo.shopping', types: ['Whole'] };
+  editor.setConfig(single);
+  editor.hass = setup.hass;
+  const oldUpload = editor.shadowRoot.querySelector('#image_upload');
+  const oldVariants = editor.shadowRoot.querySelector('#types');
+  const changes = [];
+  editor.addEventListener('config-changed', event => changes.push(event.detail.config));
+  const catalog = { ...single, mode: 'catalog', catalog_entity: 'sensor.catalog' };
+  editor.setConfig(catalog);
+  const catalogEditor = editor.shadowRoot.querySelector('shopping-list-catalog-editor');
+  assert.ok(catalogEditor);
+  assert.equal(editor.shadowRoot.querySelector('.card-mode input[value="catalog"]').checked, true);
+  oldUpload.value = '/local/late-upload.png';
+  oldUpload.dispatchEvent(new environment.window.Event('change'));
+  oldVariants.dispatchEvent(new environment.window.CustomEvent('value-changed', { detail: { value: ['Late variant'] } }));
+  assert.equal(changes.length, 0);
+  editor.setConfig({ ...single, mode: 'single' });
+  catalogEditor.dispatchEvent(new environment.window.CustomEvent('config-changed', { detail: { config: { ...catalog, title: 'Stale title' } } }));
+  assert.equal(changes.length, 0);
+  assert.equal(editor.shadowRoot.querySelector('#title').value, 'Milk');
+  assert.equal(editor.shadowRoot.querySelector('#image').value, '');
+  assert.equal(setup.services.length, 0);
+});
+
 test('variant header hold honors more-info without deleting items', async context => {
   const environment = createEnvironment(context);
   const setup = createHass([item('Apple'), item('Apple - Pink Lady')]);
@@ -446,7 +680,7 @@ test('a native catalog reads category attributes and shares the existing to-do s
       Dairy: [{ title: 'Milk', image: '/local/milk.png' }],
     },
   };
-  const catalog = environment.document.createElement('shopping-list-catalog-card');
+  const catalog = environment.document.createElement('shopping-list-catalog');
   assert.equal(typeof catalog.setConfig, 'function');
   catalog.setConfig({ catalog_entity: 'sensor.catalog', todo_list: 'todo.shopping' });
   catalog.hass = setup.hass;
@@ -586,11 +820,11 @@ test('inferred variant actions preserve stored names and do not remove an unconf
 });
 
 function mountCatalog(environment, hass, config = {}) {
-  const catalog = environment.document.createElement('shopping-list-catalog-card');
-  catalog.setConfig({ catalog_entity: 'sensor.catalog', todo_list: 'todo.shopping', ...config });
-  catalog.hass = hass;
-  environment.document.body.append(catalog);
-  return catalog;
+  const card = environment.document.createElement('shopping-list-card');
+  card.setConfig({ type: 'custom:shopping-list-card', mode: 'catalog', catalog_entity: 'sensor.catalog', todo_list: 'todo.shopping', ...config });
+  card.hass = hass;
+  environment.document.body.append(card);
+  return card.querySelector('shopping-list-catalog');
 }
 
 function catalogSource(setup, categories, extraAttributes = {}) {
@@ -810,7 +1044,7 @@ test('catalog filters remain independent across dashboards sharing the same cata
   assert.equal(setup.subscriptions.length, 1);
 });
 
-test('catalog metadata renders as text and opening the list only raises more-info', async context => {
+test('catalog metadata renders as text', async context => {
   const environment = createEnvironment(context);
   const setup = createHass();
   catalogSource(setup, { '<img src=x>': [{ title: '<b>Milk</b>' }] });
@@ -819,11 +1053,6 @@ test('catalog metadata renders as text and opening the list only raises more-inf
   assert.equal(catalog.shadowRoot.querySelector('.catalog-title').textContent, '<script>test</script>');
   assert.equal(catalog.shadowRoot.querySelector('.catalog-category-title img'), null);
   assert.equal(catalog.shadowRoot.querySelector('script'), null);
-  const events = [];
-  catalog.addEventListener('hass-more-info', event => events.push(event.detail));
-  catalog.shadowRoot.querySelector('.catalog-open-list').click();
-  assert.equal(events.length, 1);
-  assert.equal(events[0].entityId, 'todo.shopping');
   assert.equal(setup.services.length, 0);
 });
 
@@ -844,10 +1073,10 @@ test('catalog icons and colors cannot inject elements into product tiles', async
 test('catalog visual editor changes only selected options and preserves advanced defaults', context => {
   const environment = createEnvironment(context);
   const setup = createHass();
-  const Catalog = environment.window.customElements.get('shopping-list-catalog-card');
+  const Catalog = environment.window.customElements.get('shopping-list-catalog');
   const editor = Catalog.getConfigElement();
   const initial = {
-    type: 'custom:shopping-list-catalog-card', catalog_entity: 'sensor.catalog', todo_list: 'todo.shopping',
+    type: 'custom:shopping-list-card', mode: 'catalog', catalog_entity: 'sensor.catalog', todo_list: 'todo.shopping',
     catalog_attribute: 'products', item_options: { haptic: true, hold_action: { action: 'none' }, on_color: 'teal' },
     grid_options: { columns: 12 },
   };
@@ -888,14 +1117,368 @@ test('catalog visual editor changes only selected options and preserves advanced
   assert.equal(setup.services.length, 0);
 });
 
-test('catalog picker suggestions use real entities instead of guessing catalog IDs', context => {
+test('one card picker entry exposes both modes without registering the old catalog type', context => {
   const environment = createEnvironment(context);
   const setup = createHass();
   setup.hass.states['sensor.actual_products'] = { state: '1', attributes: { Dairy: [{ title: 'Milk' }] } };
-  const Catalog = environment.window.customElements.get('shopping-list-catalog-card');
+  const Catalog = environment.window.customElements.get('shopping-list-catalog');
   const suggestion = Catalog.getStubConfig(setup.hass);
+  assert.equal(suggestion.type, 'custom:shopping-list-card');
+  assert.equal(suggestion.mode, 'catalog');
   assert.equal(suggestion.catalog_entity, 'sensor.actual_products');
   assert.equal(suggestion.todo_list, 'todo.shopping');
   assert.equal(Catalog.getStubConfig({ states: {} }).catalog_entity, '');
-  assert.equal(environment.window.customCards.filter(card => card.type === 'shopping-list-catalog-card').length, 1);
+  const Card = environment.window.customElements.get('shopping-list-card');
+  assert.equal(Card.getStubConfig(setup.hass).mode, 'single');
+  assert.equal(Card.getStubConfig(setup.hass).todo_list, 'todo.shopping');
+  assert.deepEqual(Array.from(environment.window.customCards, card => card.type), ['shopping-list-card']);
+  assert.equal(environment.window.customElements.get('shopping-list-catalog-card'), undefined);
+});
+
+test('catalog category restrictions and display options clear inaccessible filters', async context => {
+  const environment = createEnvironment(context);
+  const setup = createHass();
+  catalogSource(setup, {
+    Fruits: [{ title: 'Apple' }],
+    Dairy: [{ title: 'Milk' }],
+    Grains: [{ title: 'Rice' }],
+  });
+  const catalog = mountCatalog(environment, setup.hass);
+  await settle();
+  catalog.shadowRoot.querySelectorAll('.catalog-tab')[1].click();
+  const search = catalog.shadowRoot.querySelector('input[type="search"]');
+  search.value = 'apple';
+  search.dispatchEvent(new environment.window.Event('input'));
+  catalog.setConfig({
+    catalog_entity: 'sensor.catalog', todo_list: 'todo.shopping',
+    categories: ['Dairy', 'Grains'], show_category_tabs: false, show_search: false, show_title: false,
+  });
+  await settle();
+  assert.deepEqual(visibleProducts(catalog).map(card => card._config.title), ['Milk', 'Rice']);
+  assert.equal(catalog.shadowRoot.querySelectorAll('shopping-list-card').length, 2);
+  assert.equal(catalog.shadowRoot.querySelector('.catalog-tabs').hidden, true);
+  assert.equal(catalog.shadowRoot.querySelector('.catalog-search').hidden, true);
+  assert.equal(catalog.shadowRoot.querySelector('.catalog-title').hidden, true);
+  assert.equal(search.value, '');
+  assert.equal(catalog.shadowRoot.querySelector('.catalog-content').getAttribute('role'), 'region');
+  assert.equal(catalog.shadowRoot.querySelector('.catalog-content').hasAttribute('aria-labelledby'), false);
+  assert.equal(setup.services.length, 0);
+});
+
+test('catalog can show all categories without tabs and never exposes excluded categories', async context => {
+  const environment = createEnvironment(context);
+  const setup = createHass();
+  catalogSource(setup, { Fruits: [{ title: 'Apple' }], Dairy: [{ title: 'Milk' }] });
+  const catalog = mountCatalog(environment, setup.hass, { show_category_tabs: false });
+  await settle();
+  assert.equal(visibleProducts(catalog).length, 2);
+  catalog.setConfig({ catalog_entity: 'sensor.catalog', todo_list: 'todo.shopping', categories: ['Missing'] });
+  assert.equal(visibleProducts(catalog).length, 0);
+  assert.equal(catalog.shadowRoot.querySelectorAll('shopping-list-card').length, 0);
+  catalogSource(setup, { Fruits: [{ title: 'Apple' }], Missing: [{ title: 'Bread' }] });
+  catalog.hass = { ...setup.hass };
+  await settle();
+  assert.deepEqual(visibleProducts(catalog).map(card => card._config.title), ['Bread']);
+  assert.equal(setup.services.length, 0);
+});
+
+test('catalog editor saves category restrictions and independent visibility options', context => {
+  const environment = createEnvironment(context);
+  const setup = createHass();
+  catalogSource(setup, { Fruits: [{ title: 'Apple' }], Dairy: [{ title: 'Milk' }] });
+  const editor = environment.document.createElement('shopping-list-catalog-editor');
+  editor.setConfig({ catalog_entity: 'sensor.catalog', todo_list: 'todo.shopping', item_options: { haptic: true } });
+  editor.hass = setup.hass;
+  const changes = [];
+  editor.addEventListener('config-changed', event => {
+    changes.push(JSON.parse(JSON.stringify(event.detail.config)));
+    editor.setConfig(event.detail.config);
+  });
+  const root = editor.shadowRoot;
+  const all = root.querySelector('.catalog-all-categories');
+  assert.equal(all.checked, true);
+  all.checked = false;
+  all.dispatchEvent(new environment.window.Event('change'));
+  assert.deepEqual(changes.at(-1).categories, ['Fruits', 'Dairy']);
+  const fruits = [...root.querySelectorAll('.catalog-category-option input')].find(input => input.value === 'Fruits');
+  fruits.checked = false;
+  fruits.dispatchEvent(new environment.window.Event('change'));
+  assert.deepEqual(changes.at(-1).categories, ['Dairy']);
+  for (const option of ['show_category_tabs', 'show_search', 'show_title', 'show_list_button', 'show_add_button']) {
+    const control = root.getElementById(option);
+    control.checked = false;
+    control.dispatchEvent(new environment.window.Event('change'));
+    assert.equal(changes.at(-1)[option], false);
+  }
+  assert.deepEqual(changes.at(-1).item_options, { haptic: true });
+  editor.hass = { ...setup.hass, states: {} };
+  assert.equal(root.querySelector('.catalog-category-option input').value, 'Dairy');
+  assert.equal(root.querySelector('.catalog-category-option input').checked, true);
+  all.checked = true;
+  all.dispatchEvent(new environment.window.Event('change'));
+  assert.equal('categories' in changes.at(-1), false);
+  assert.equal(root.querySelector('.catalog-category-options').hidden, true);
+  assert.equal(setup.services.length, 0);
+});
+
+test('the list button opens the native full list independently of catalog filters', async context => {
+  const environment = createEnvironment(context);
+  const setup = createHass([item('Milk'), item('Not in the catalog')]);
+  catalogSource(setup, { Dairy: [{ title: 'Milk' }], Fruits: [{ title: 'Apple' }] });
+  const created = [];
+  environment.window.loadCardHelpers = async () => ({ createCardElement(config) {
+    const card = environment.document.createElement('hui-todo-list-card');
+    card.setConfig = () => {};
+    created.push({ card, config });
+    return card;
+  } });
+  const catalog = mountCatalog(environment, setup.hass, { categories: ['Fruits'], show_title: false, show_category_tabs: false });
+  let moreInfo = 0;
+  catalog.addEventListener('hass-more-info', () => { moreInfo++; });
+  await settle();
+  const button = catalog.shadowRoot.querySelector('.catalog-open-list');
+  button.click();
+  await settle();
+  assert.equal(created.length, 1);
+  assert.deepEqual(JSON.parse(JSON.stringify(created[0].config)), { type: 'todo-list', entity: 'todo.shopping' });
+  assert.equal(created[0].card.hass, setup.hass);
+  assert.equal(catalog.shadowRoot.querySelector('.catalog-list-panel').hidden, false);
+  assert.equal(button.getAttribute('aria-expanded'), 'true');
+  assert.equal(created[0].card.isConnected, true);
+  assert.equal(moreInfo, 0);
+  assert.equal(setup.services.length, 0);
+  const updatedHass = { ...setup.hass };
+  catalog.hass = updatedHass;
+  assert.equal(created[0].card.hass, updatedHass);
+  catalog.shadowRoot.querySelector('.catalog-close-list').click();
+  assert.equal(catalog.shadowRoot.querySelector('.catalog-list-panel').hidden, true);
+  assert.equal(created[0].card.isConnected, false);
+  assert.equal(catalog.shadowRoot.activeElement, button);
+});
+
+test('late native-list loading is discarded after close, list switch, or disconnect', async context => {
+  const environment = createEnvironment(context);
+  const setup = createHass();
+  catalogSource(setup, { Products: [{ title: 'Milk' }] });
+  const catalog = mountCatalog(environment, setup.hass);
+  await settle();
+  for (const action of ['close', 'switch', 'disconnect']) {
+    let resolveHelpers;
+    let creations = 0;
+    environment.window.loadCardHelpers = () => new Promise(resolve => { resolveHelpers = resolve; });
+    catalog.shadowRoot.querySelector('.catalog-open-list').click();
+    if (action === 'close') catalog.shadowRoot.querySelector('.catalog-close-list').click();
+    else if (action === 'switch') catalog.setConfig({ catalog_entity: 'sensor.catalog', todo_list: 'todo.other' });
+    else catalog.remove();
+    resolveHelpers({ createCardElement() { creations++; return environment.document.createElement('hui-todo-list-card'); } });
+    await settle();
+    assert.equal(creations, 0);
+    assert.equal(catalog.shadowRoot.querySelector('.catalog-list-content').children.length, 0);
+  }
+});
+
+test('native list loading failures are visible and retry never writes to the list', async context => {
+  const environment = createEnvironment(context);
+  const setup = createHass();
+  catalogSource(setup, { Products: [{ title: 'Milk' }] });
+  environment.window.loadCardHelpers = async () => { throw new Error('Load failed <b>test</b>'); };
+  const catalog = mountCatalog(environment, setup.hass);
+  await settle();
+  catalog.shadowRoot.querySelector('.catalog-open-list').click();
+  await settle();
+  const container = catalog.shadowRoot.querySelector('.catalog-list-content');
+  assert.match(container.textContent, /Load failed <b>test<\/b>/);
+  assert.equal(container.querySelectorAll('b').length, 0);
+  environment.window.loadCardHelpers = async () => ({ createCardElement: () => {
+    const card = environment.document.createElement('hui-todo-list-card');
+    card.setConfig = () => {};
+    return card;
+  } });
+  container.querySelector('button').click();
+  await settle();
+  assert.equal(container.querySelectorAll('hui-todo-list-card').length, 1);
+  assert.equal(setup.services.length, 0);
+});
+
+test('native list lazy-load rebuilds are handled without recreating the catalog', async context => {
+  const environment = createEnvironment(context);
+  const setup = createHass();
+  catalogSource(setup, { Products: [{ title: 'Milk' }] });
+  let calls = 0;
+  environment.window.loadCardHelpers = async () => ({ createCardElement() {
+    const card = environment.document.createElement(++calls === 1 ? 'hui-error-card' : 'hui-todo-list-card');
+    card.setConfig = () => {};
+    return card;
+  } });
+  const catalog = mountCatalog(environment, setup.hass);
+  await settle();
+  const tile = catalog.shadowRoot.querySelector('shopping-list-card');
+  catalog.shadowRoot.querySelector('.catalog-open-list').click();
+  await settle();
+  catalog.shadowRoot.querySelector('hui-error-card').dispatchEvent(new environment.window.Event('ll-rebuild', { bubbles: true, composed: true }));
+  await settle();
+  assert.equal(calls, 2);
+  assert.equal(catalog.shadowRoot.querySelectorAll('hui-todo-list-card').length, 1);
+  assert.equal(catalog.shadowRoot.querySelector('shopping-list-card'), tile);
+});
+
+test('native list waits for custom-element upgrade and cancels its loading timer', async context => {
+  const environment = createEnvironment(context);
+  const setup = createHass();
+  catalogSource(setup, { Products: [{ title: 'Milk' }] });
+  environment.window.loadCardHelpers = async () => ({ createCardElement: () => environment.document.createElement('hui-todo-list-card') });
+  const catalog = mountCatalog(environment, setup.hass);
+  await settle();
+  catalog.shadowRoot.querySelector('.catalog-open-list').click();
+  await settle();
+  assert.match(catalog.shadowRoot.querySelector('.catalog-list-content').textContent, /Loading shopping list/);
+  assert.ok([...environment.timers.values()].some(timer => timer.delay === 10000));
+  catalog.shadowRoot.querySelector('.catalog-close-list').click();
+  assert.equal([...environment.timers.values()].some(timer => timer.delay === 10000), false);
+  catalog.shadowRoot.querySelector('.catalog-open-list').click();
+  await settle();
+  environment.window.customElements.define('hui-todo-list-card', class extends environment.window.HTMLElement {
+    setConfig(config) { this.config = config; }
+  });
+  await settle();
+  const native = catalog.shadowRoot.querySelector('hui-todo-list-card');
+  assert.equal(native.config.entity, 'todo.shopping');
+  assert.equal(native.hass, setup.hass);
+  assert.equal([...environment.timers.values()].some(timer => timer.delay === 10000), false);
+});
+
+test('native list reports a lazy-load timeout instead of leaving a blank section', async context => {
+  const environment = createEnvironment(context);
+  const setup = createHass();
+  catalogSource(setup, { Products: [{ title: 'Milk' }] });
+  environment.window.loadCardHelpers = async () => ({ createCardElement: () => environment.document.createElement('hui-todo-list-card') });
+  const catalog = mountCatalog(environment, setup.hass);
+  await settle();
+  catalog.shadowRoot.querySelector('.catalog-open-list').click();
+  await settle();
+  [...environment.timers.values()].find(timer => timer.delay === 10000).callback();
+  await settle();
+  assert.match(catalog.shadowRoot.querySelector('.catalog-list-content').textContent, /timed out/);
+  assert.equal(catalog.shadowRoot.querySelectorAll('.catalog-list-content button').length, 1);
+});
+
+function quickAdd(environment, catalog, name) {
+  const root = catalog.shadowRoot;
+  const form = root.querySelector('.catalog-add-form');
+  if (form.hidden) root.querySelector('.catalog-add-toggle').click();
+  const input = root.querySelector('.catalog-add-input');
+  input.value = name;
+  input.dispatchEvent(new environment.window.Event('input'));
+  form.dispatchEvent(new environment.window.Event('submit', { bubbles: true, cancelable: true }));
+}
+
+test('quick-add writes a missing item to the existing list without changing the catalog', async context => {
+  const environment = createEnvironment(context);
+  const setup = createHass([], { service(domain, service, data) {
+    assert.equal(domain, 'todo');
+    assert.equal(service, 'add_item');
+    setup.push([item(data.item)]);
+  } });
+  catalogSource(setup, { Products: [{ title: 'Milk' }] });
+  const source = JSON.stringify(setup.hass.states['sensor.catalog']);
+  const first = mountCatalog(environment, setup.hass);
+  const second = mountCatalog(environment, setup.hass);
+  await settle();
+  quickAdd(environment, first, '  Dishwasher tablets  ');
+  await settle();
+  assert.equal(setup.services.length, 1);
+  assert.deepEqual(JSON.parse(JSON.stringify(setup.services[0].data)), { entity_id: 'todo.shopping', item: 'Dishwasher tablets' });
+  assert.equal(second._snapshot.items[0].summary, 'Dishwasher tablets');
+  assert.equal(first.shadowRoot.querySelector('.catalog-add-input').value, '');
+  assert.match(first.shadowRoot.querySelector('.catalog-add-message').textContent, /Added Dishwasher tablets/);
+  assert.equal(first.shadowRoot.querySelector('.catalog-add-form').getAttribute('aria-busy'), 'false');
+  assert.equal(JSON.stringify(setup.hass.states['sensor.catalog']), source);
+  assert.equal(first.shadowRoot.querySelectorAll('shopping-list-card').length, 1);
+  quickAdd(environment, first, ' ');
+  await settle();
+  assert.equal(setup.services.length, 1);
+});
+
+test('quick-add ignores repeated submits and shares its pending guard with product tiles', async context => {
+  const environment = createEnvironment(context);
+  let finish;
+  const setup = createHass([], { service: () => new Promise(resolve => { finish = resolve; }) });
+  catalogSource(setup, { Products: [{ title: 'Milk' }] });
+  const first = mountCatalog(environment, setup.hass);
+  const second = mountCatalog(environment, setup.hass);
+  await settle();
+  quickAdd(environment, first, 'Milk');
+  await settle();
+  setup.push([item('Bread')]);
+  quickAdd(environment, first, 'Milk');
+  quickAdd(environment, second, 'Milk');
+  second.shadowRoot.querySelector('shopping-list-card .card-container').click();
+  await settle();
+  assert.equal(setup.services.length, 1);
+  assert.equal(first.shadowRoot.querySelector('.catalog-add-input').disabled, true);
+  assert.equal(second.shadowRoot.querySelector('.catalog-add-submit').disabled, true);
+  setup.push([item('Bread'), item('Milk')]);
+  finish();
+  await settle();
+  assert.equal(first.shadowRoot.querySelector('.catalog-add-input').value, '');
+  assert.equal(first.shadowRoot.querySelector('.catalog-add-input').disabled, false);
+});
+
+test('quick-add preserves drafts and escapes rejected-write errors without replaying writes', async context => {
+  const environment = createEnvironment(context);
+  const setup = createHass([], { service: () => { throw new Error('Denied <img src=x>'); } });
+  catalogSource(setup, { Products: [{ title: 'Milk' }] });
+  const catalog = mountCatalog(environment, setup.hass);
+  await settle();
+  quickAdd(environment, catalog, 'Bread');
+  await settle();
+  assert.equal(catalog.shadowRoot.querySelector('.catalog-add-input').value, 'Bread');
+  assert.match(catalog.shadowRoot.querySelector('.catalog-add-message').textContent, /Denied <img src=x>/);
+  assert.equal(catalog.shadowRoot.querySelectorAll('.catalog-add-message img').length, 0);
+  assert.equal(catalog.shadowRoot.querySelector('.catalog-add-message').dataset.error, 'true');
+  await catalog._store.refresh();
+  assert.equal(setup.services.length, 1);
+});
+
+test('quick-add rejects offline and read-only requests and does not duplicate existing quantities', async context => {
+  const environment = createEnvironment(context);
+  const setup = createHass([item('MILK (3)')]);
+  catalogSource(setup, { Products: [{ title: 'Milk' }] });
+  const catalog = mountCatalog(environment, setup.hass);
+  await settle();
+  quickAdd(environment, catalog, 'Milk');
+  await settle();
+  assert.match(catalog.shadowRoot.querySelector('.catalog-add-message').textContent, /already on the list/);
+  catalog.hass = { ...setup.hass, connected: false };
+  quickAdd(environment, catalog, 'Bread');
+  await settle();
+  assert.equal(catalog.shadowRoot.querySelector('.catalog-add-submit').disabled, true);
+  assert.equal(catalog.shadowRoot.querySelector('.catalog-add-input').value, 'Bread');
+  catalog.hass = { ...setup.hass, states: { ...setup.hass.states, 'todo.shopping': { state: '1', attributes: { supported_features: 0 } } } };
+  await settle();
+  quickAdd(environment, catalog, 'Bread');
+  assert.equal(catalog.shadowRoot.querySelector('.catalog-add-toggle').disabled, true);
+  assert.equal(setup.services.length, 0);
+});
+
+test('late quick-add results cannot clear a draft entered for another list', async context => {
+  const environment = createEnvironment(context);
+  let finish;
+  const setup = createHass([], { service: () => new Promise(resolve => { finish = resolve; }) });
+  catalogSource(setup, { Products: [{ title: 'Milk' }] });
+  const catalog = mountCatalog(environment, setup.hass);
+  await settle();
+  quickAdd(environment, catalog, 'Bread');
+  await settle();
+  catalog.setConfig({ catalog_entity: 'sensor.catalog', todo_list: 'todo.other' });
+  await settle();
+  catalog.shadowRoot.querySelector('.catalog-add-toggle').click();
+  catalog.shadowRoot.querySelector('.catalog-add-input').value = 'Rice';
+  setup.state.items = [item('Bread')];
+  finish();
+  await settle();
+  assert.equal(catalog.shadowRoot.querySelector('.catalog-add-input').value, 'Rice');
+  assert.equal(catalog.shadowRoot.querySelector('.catalog-add-message').textContent, '');
+  assert.equal(setup.services[0].data.entity_id, 'todo.shopping');
+  assert.equal(setup.services.length, 1);
 });

@@ -4,7 +4,7 @@ Render your entire shopping catalog as a categorized grid of shopping-list-cards
 
 ## Native Catalog Alternative
 
-The same JSON and sensor can also drive `custom:shopping-list-catalog-card` directly. Use [catalog-card.yaml](catalog-card.yaml) instead of the generated grid to get built-in categories, search, and an **On list** filter without `layout-card` or `auto-entities`. The existing to-do list is unchanged, and the old grid can remain on another dashboard.
+The same JSON and sensor can also drive `custom:shopping-list-card` with `mode: catalog` directly. In the visual editor, choose **Card mode > Catalog**. Use [catalog-card.yaml](catalog-card.yaml) instead of the generated grid to get built-in categories, search, and an **On list** filter without `layout-card` or `auto-entities`. The existing to-do list is unchanged, and the old grid can remain on another dashboard.
 
 Both explicit `types` and flat entries such as multiple `Chicken` rows with different `subtitle` values are supported. Compatible flat rows in one category become a single product with a variant dropdown; no JSON rewrite is needed.
 
