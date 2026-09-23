@@ -1135,6 +1135,244 @@ test('one card picker entry exposes both modes without registering the old catal
   assert.equal(environment.window.customElements.get('shopping-list-catalog-card'), undefined);
 });
 
+test('entity picker recommends catalog mode for the selected JSON catalog sensor', async context => {
+  const environment = createEnvironment(context);
+  const setup = createHass();
+  setup.hass.states['sensor.other_products'] = { state: '1', attributes: { Dairy: [{ title: 'Milk' }] } };
+  setup.hass.states['sensor.selected_products'] = {
+    state: '1',
+    attributes: {
+      friendly_name: 'Shopping products',
+      Fruits: [{ title: 'Apple' }, { title: 'Apple', subtitle: 'Pink Lady' }],
+    },
+  };
+  const entry = environment.window.customCards.find(card => card.type === 'shopping-list-card');
+  const suggestion = entry.getEntitySuggestion(setup.hass, 'sensor.selected_products');
+  assert.ok(suggestion);
+  assert.deepEqual(JSON.parse(JSON.stringify(suggestion.config)), {
+    type: 'custom:shopping-list-card', mode: 'catalog',
+    catalog_entity: 'sensor.selected_products', todo_list: 'todo.shopping',
+  });
+  const card = environment.document.createElement('shopping-list-card');
+  card.setConfig(suggestion.config);
+  card.hass = setup.hass;
+  environment.document.body.append(card);
+  await settle();
+  const catalog = card.querySelector('shopping-list-catalog');
+  assert.ok(catalog);
+  const product = catalog.shadowRoot.querySelector('shopping-list-card');
+  assert.equal(product._config.title, 'Apple');
+  assert.ok(product.querySelector('.types-chevron'));
+  const editor = environment.window.customElements.get('shopping-list-card').getConfigElement();
+  editor.setConfig(suggestion.config);
+  editor.hass = setup.hass;
+  assert.equal(editor.shadowRoot.querySelector('.card-mode input[value="catalog"]').checked, true);
+  const settings = editor.shadowRoot.querySelector('shopping-list-catalog-editor');
+  assert.equal(settings.shadowRoot.getElementById('catalog_entity').value, 'sensor.selected_products');
+  assert.equal(settings.shadowRoot.getElementById('todo_list').value, 'todo.shopping');
+  assert.equal(setup.services.length, 0);
+  assert.deepEqual(environment.errors, []);
+});
+
+test('entity picker detects catalogs in object and JSON-string attributes', context => {
+  const environment = createEnvironment(context);
+  const setup = createHass();
+  const entry = environment.window.customCards.find(card => card.type === 'shopping-list-card');
+  const products = { Fruits: [{ title: 'Apple', types: ['Gala'] }], Dairy: [] };
+  for (const value of [products, JSON.stringify(products)]) {
+    setup.hass.states['sensor.catalog'] = {
+      state: '2',
+      attributes: {
+        friendly_name: 'Catalog', invalid_json: '{broken',
+        diagnostics: [{ temperature: 21 }], products: value,
+      },
+    };
+    const before = JSON.stringify(setup.hass.states);
+    const suggestion = entry.getEntitySuggestion(setup.hass, 'sensor.catalog');
+    assert.ok(suggestion);
+    assert.deepEqual(JSON.parse(JSON.stringify(suggestion.config)), {
+      type: 'custom:shopping-list-card', mode: 'catalog',
+      catalog_entity: 'sensor.catalog', todo_list: 'todo.shopping', catalog_attribute: 'products',
+    });
+    const card = environment.document.createElement('shopping-list-card');
+    card.setConfig(suggestion.config);
+    card.hass = setup.hass;
+    const catalog = card.querySelector('shopping-list-catalog');
+    assert.equal(catalog.shadowRoot.querySelector('shopping-list-card')._config.title, 'Apple');
+    assert.equal(JSON.stringify(setup.hass.states), before);
+  }
+  assert.equal(setup.services.length, 0);
+  assert.deepEqual(environment.errors, []);
+});
+
+test('entity picker declines unrelated, invalid, unavailable, and empty sensors', context => {
+  const environment = createEnvironment(context);
+  const setup = createHass();
+  const entry = environment.window.customCards.find(card => card.type === 'shopping-list-card');
+  const valid = { Fruits: [{ title: 'Apple' }] };
+  const attributes = [
+    { unit_of_measurement: 'C' },
+    { forecast: [{ temperature: 21 }], options: ['Apple', 'Milk'] },
+    { Fruits: [] },
+    { Fruits: [{ title: ' ' }] },
+    { Fruits: [{ title: 'Apple' }, { subtitle: 'Missing title' }] },
+    { Fruits: [{ title: 'Apple', types: 42 }] },
+    { products: '{broken' },
+    { products: JSON.stringify([{ title: 'Apple' }]) },
+    { products: { Fruits: [{ title: 'Apple' }], Invalid: 42 } },
+  ];
+  for (const value of attributes) {
+    setup.hass.states['sensor.other'] = { state: '1', attributes: value };
+    assert.equal(entry.getEntitySuggestion(setup.hass, 'sensor.other'), null);
+  }
+  for (const state of ['unknown', 'unavailable']) {
+    setup.hass.states['sensor.catalog'] = { state, attributes: valid };
+    assert.equal(entry.getEntitySuggestion(setup.hass, 'sensor.catalog'), null);
+  }
+  setup.hass.states['binary_sensor.catalog'] = { state: 'on', attributes: valid };
+  for (const entityId of ['sensor.missing', 'binary_sensor.catalog', null, undefined, 42]) {
+    assert.equal(entry.getEntitySuggestion(setup.hass, entityId), null);
+  }
+  assert.equal(entry.getEntitySuggestion(undefined, 'sensor.catalog'), null);
+  assert.equal(entry.getEntitySuggestion({ states: { 'sensor.catalog': { state: '1', attributes: valid } } }, 'sensor.catalog'), null);
+  assert.equal(setup.services.length, 0);
+});
+
+test('entity picker preserves the selected to-do list and single-mode default', context => {
+  const environment = createEnvironment(context);
+  const setup = createHass();
+  setup.hass.states['todo.second_list'] = { state: '0', attributes: {} };
+  const entry = environment.window.customCards.find(card => card.type === 'shopping-list-card');
+  const suggestion = entry.getEntitySuggestion(setup.hass, 'todo.second_list');
+  assert.deepEqual(JSON.parse(JSON.stringify(suggestion)), {
+    config: { type: 'custom:shopping-list-card', title: 'New item', todo_list: 'todo.second_list' },
+  });
+  const card = environment.document.createElement('shopping-list-card');
+  card.setConfig(suggestion.config);
+  assert.equal(card.querySelector('shopping-list-catalog'), null);
+  assert.equal(environment.window.customElements.get('shopping-list-card').getStubConfig(setup.hass).mode, 'single');
+  assert.equal(setup.services.length, 0);
+});
+
+test('catalog fixed columns retain the chosen count at every container breakpoint', async context => {
+  const environment = createEnvironment(context);
+  const setup = createHass();
+  catalogSource(setup, { Fruits: [{ title: 'Apple' }, { title: 'Pear' }] });
+  const catalog = mountCatalog(environment, setup.hass, { columns: 4, fixed_columns: true });
+  await settle();
+  for (const size of ['', 'medium-', 'mobile-', 'narrow-']) {
+    assert.equal(catalog.style.getPropertyValue(`--catalog-${size}columns`), '4');
+  }
+  const product = catalog.shadowRoot.querySelector('shopping-list-card');
+  catalog.setConfig({ ...catalog._config, fixed_columns: false });
+  assert.equal(catalog.style.getPropertyValue('--catalog-columns'), '4');
+  assert.equal(catalog.style.getPropertyValue('--catalog-medium-columns'), '3');
+  assert.equal(catalog.style.getPropertyValue('--catalog-mobile-columns'), '2');
+  assert.equal(catalog.style.getPropertyValue('--catalog-narrow-columns'), '1');
+  assert.equal(catalog.shadowRoot.querySelector('shopping-list-card'), product);
+  assert.equal(setup.subscriptions.filter(subscription => subscription.active).length, 1);
+  assert.equal(setup.services.length, 0);
+});
+
+test('catalog can hide the top item counter without changing category counts', async context => {
+  const environment = createEnvironment(context);
+  const setup = createHass();
+  catalogSource(setup, { Fruits: [{ title: 'Apple' }, { title: 'Pear' }] });
+  const catalog = mountCatalog(environment, setup.hass, { show_item_count: false });
+  await settle();
+  const counter = catalog.shadowRoot.querySelector('.catalog-counter');
+  assert.equal(counter.hidden, true);
+  assert.equal(catalog.shadowRoot.querySelector('.catalog-category-count').textContent, '2');
+  const search = catalog.shadowRoot.querySelector('input[type="search"]');
+  search.value = 'apple';
+  search.dispatchEvent(new environment.window.Event('input'));
+  assert.equal(counter.hidden, true);
+  assert.equal(counter.textContent, '1 / 2');
+  catalog.setConfig({
+    ...catalog._config, show_title: false, show_list_button: false, show_add_button: false,
+  });
+  assert.equal(catalog.shadowRoot.querySelector('.catalog-header').hidden, true);
+  catalog.setConfig({ ...catalog._config, show_item_count: true });
+  assert.equal(counter.hidden, false);
+  assert.equal(counter.textContent, '1 / 2');
+  assert.equal(catalog.shadowRoot.querySelector('.catalog-header').hidden, false);
+  catalog.setConfig({ ...catalog._config, show_item_count: undefined });
+  assert.equal(counter.hidden, false);
+  assert.equal(setup.services.length, 0);
+});
+
+test('catalog layout options reject non-booleans without changing the current view', async context => {
+  const environment = createEnvironment(context);
+  const setup = createHass();
+  catalogSource(setup, { Fruits: [{ title: 'Apple' }] });
+  const catalog = mountCatalog(environment, setup.hass);
+  await settle();
+  const product = catalog.shadowRoot.querySelector('shopping-list-card');
+  assert.equal(catalog.style.getPropertyValue('--catalog-mobile-columns'), '2');
+  assert.equal(catalog.shadowRoot.querySelector('.catalog-counter').hidden, false);
+  for (const option of ['fixed_columns', 'show_item_count']) {
+    for (const value of ['true', 'false', 1, 0, null]) {
+      assert.throws(() => catalog.setConfig({ ...catalog._config, [option]: value }), new RegExp(`${option} must be true or false`));
+    }
+  }
+  assert.equal(catalog.shadowRoot.querySelector('shopping-list-card'), product);
+  assert.equal(catalog.style.getPropertyValue('--catalog-mobile-columns'), '2');
+  assert.equal(catalog.shadowRoot.querySelector('.catalog-counter').hidden, false);
+  assert.equal(setup.services.length, 0);
+});
+
+test('catalog editor saves fixed columns and item count without losing other settings', context => {
+  const environment = createEnvironment(context);
+  const setup = createHass();
+  catalogSource(setup, { Fruits: [{ title: 'Apple' }] });
+  const editor = environment.window.customElements.get('shopping-list-card').getConfigElement();
+  const initial = {
+    type: 'custom:shopping-list-card', mode: 'catalog',
+    catalog_entity: 'sensor.catalog', todo_list: 'todo.shopping', columns: 4,
+    categories: ['Fruits'], item_options: { quantity_max: 5 }, show_search: false,
+  };
+  editor.setConfig(initial);
+  editor.hass = setup.hass;
+  const changes = [];
+  editor.addEventListener('config-changed', event => {
+    changes.push(JSON.parse(JSON.stringify(event.detail.config)));
+    editor.setConfig(event.detail.config);
+  });
+  const settings = editor.shadowRoot.querySelector('shopping-list-catalog-editor');
+  const root = settings.shadowRoot;
+  const fixed = root.getElementById('fixed_columns');
+  const counter = root.getElementById('show_item_count');
+  const columns = root.getElementById('columns');
+  assert.equal(fixed.checked, false);
+  assert.equal(counter.checked, true);
+  assert.equal(columns.getAttribute('label'), 'Maximum columns');
+  fixed.checked = true;
+  fixed.dispatchEvent(new environment.window.Event('change'));
+  assert.equal(changes.at(-1).fixed_columns, true);
+  assert.equal(columns.getAttribute('label'), 'Columns');
+  counter.checked = false;
+  counter.dispatchEvent(new environment.window.Event('change'));
+  assert.equal(changes.at(-1).show_item_count, false);
+  columns.value = '3';
+  columns.dispatchEvent(new environment.window.Event('input'));
+  assert.equal(changes.at(-1).columns, 3);
+  assert.equal(changes.at(-1).fixed_columns, true);
+  assert.equal(changes.at(-1).show_item_count, false);
+  assert.deepEqual(changes.at(-1).categories, initial.categories);
+  assert.deepEqual(changes.at(-1).item_options, initial.item_options);
+  assert.equal(changes.at(-1).show_search, false);
+  assert.equal(editor.shadowRoot.querySelector('shopping-list-catalog-editor'), settings);
+  fixed.checked = false;
+  fixed.dispatchEvent(new environment.window.Event('change'));
+  counter.checked = true;
+  counter.dispatchEvent(new environment.window.Event('change'));
+  assert.equal('fixed_columns' in changes.at(-1), false);
+  assert.equal('show_item_count' in changes.at(-1), false);
+  assert.equal(changes.at(-1).columns, 3);
+  assert.equal(columns.getAttribute('label'), 'Maximum columns');
+  assert.equal(setup.services.length, 0);
+});
+
 test('catalog category restrictions and display options clear inaccessible filters', async context => {
   const environment = createEnvironment(context);
   const setup = createHass();

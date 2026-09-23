@@ -49,6 +49,7 @@ class ShoppingListCatalogEditor extends HTMLElement {
               <${field} id="title" label="Title" placeholder="Shopping"></${field}>
               <${field} id="columns" label="Maximum columns" type="number" min="1" max="6"></${field}>
             </div>
+            <label class="catalog-toggle"><ha-switch id="fixed_columns"></ha-switch><span>Fixed columns</span></label>
           </div>
         </ha-expansion-panel>
         <ha-expansion-panel header="Display" outlined>
@@ -61,6 +62,7 @@ class ShoppingListCatalogEditor extends HTMLElement {
             <label class="catalog-toggle"><ha-switch id="show_category_tabs"></ha-switch><span>Category tabs</span></label>
             <label class="catalog-toggle"><ha-switch id="show_search"></ha-switch><span>Search</span></label>
             <label class="catalog-toggle"><ha-switch id="show_title"></ha-switch><span>Title</span></label>
+            <label class="catalog-toggle"><ha-switch id="show_item_count"></ha-switch><span>Item count</span></label>
             <label class="catalog-toggle"><ha-switch id="show_list_button"></ha-switch><span>Shopping list button</span></label>
             <label class="catalog-toggle"><ha-switch id="show_add_button"></ha-switch><span>Add item button</span></label>
           </div>
@@ -131,7 +133,9 @@ class ShoppingListCatalogEditor extends HTMLElement {
     }
     this.shadowRoot.getElementById('enable_quantity').checked = options.enable_quantity !== false;
     this.shadowRoot.getElementById('keep_at_zero').checked = options.remove_zero === false;
-    for (const option of ['show_category_tabs', 'show_search', 'show_title', 'show_list_button', 'show_add_button']) {
+    this.shadowRoot.getElementById('fixed_columns').checked = config.fixed_columns === true;
+    this.shadowRoot.getElementById('columns').setAttribute('label', config.fixed_columns ? 'Columns' : 'Maximum columns');
+    for (const option of ['show_category_tabs', 'show_search', 'show_title', 'show_item_count', 'show_list_button', 'show_add_button']) {
       this.shadowRoot.getElementById(option).checked = config[option] !== false;
     }
     this._updateCategories();
@@ -186,7 +190,8 @@ class ShoppingListCatalogEditor extends HTMLElement {
     if (['columns', 'quantity_step', 'quantity_max'].includes(field)) {
       next = value === '' ? undefined : Number(value);
       if (next !== undefined && (!Number.isInteger(next) || next < 1 || (field === 'columns' && next > 6))) return;
-    } else if (['show_category_tabs', 'show_search', 'show_title', 'show_list_button', 'show_add_button', 'enable_quantity'].includes(field)) next = value ? undefined : false;
+    } else if (['show_category_tabs', 'show_search', 'show_title', 'show_item_count', 'show_list_button', 'show_add_button', 'enable_quantity'].includes(field)) next = value ? undefined : false;
+    else if (field === 'fixed_columns') next = value ? true : undefined;
     else if (field === 'keep_at_zero') next = value ? false : undefined;
     else if (field === 'layout') {
       if (value !== 'vertical' && value !== 'horizontal') return;
@@ -196,6 +201,7 @@ class ShoppingListCatalogEditor extends HTMLElement {
     else target[key] = next;
     if (config.item_options && !Object.keys(config.item_options).length) delete config.item_options;
     this._emitConfig(config);
+    if (field === 'fixed_columns') this._updateValues();
   }
 
   _emitConfig(config) {

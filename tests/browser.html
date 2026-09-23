@@ -76,6 +76,7 @@
     });
     if (editorMode) {
       class TestField extends HTMLElement {
+        static get observedAttributes() { return ['label']; }
         constructor() {
           super();
           this.attachShadow({ mode: 'open' });
@@ -92,7 +93,7 @@
             this.dispatchEvent(new CustomEvent(type, { detail: { value: this.value }, bubbles: true, composed: true }));
           });
         }
-        connectedCallback() { this.shadowRoot.querySelector('span').textContent = this.getAttribute('label') || ''; }
+        attributeChangedCallback() { this.shadowRoot.querySelector('span').textContent = this.getAttribute('label') || ''; }
         get value() { return this._input.value; }
         set value(value) { if (this._input.value !== String(value ?? '')) this._input.value = value ?? ''; }
         set options(options) {

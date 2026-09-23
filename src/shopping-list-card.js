@@ -14,6 +14,7 @@
 
 import { buildName, keepZero, matchItem, planItemAction } from './item-model.js';
 import { getTodoStore } from './todo-store.js';
+import { readCatalog } from './catalog-model.js';
 import { CARD_DEFAULTS } from './card-defaults.js';
 import { CARD_STYLES } from './card-styles.js';
 import './editor.js';
@@ -962,8 +963,26 @@ if (!window.customCards.some(c => c.type === 'shopping-list-card')) {
     preview: true,
     description: 'Single-product tiles or a shared shopping catalog.',
     getEntitySuggestion: (hass, entityId) => {
-      if (typeof entityId !== 'string' || entityId.split('.')[0] !== 'todo') return null;
-      return { config: { type: 'custom:shopping-list-card', title: 'New item', todo_list: entityId } };
+      if (typeof entityId !== 'string') return null;
+      const domain = entityId.split('.')[0];
+      if (domain === 'todo') {
+        return { config: { type: 'custom:shopping-list-card', title: 'New item', todo_list: entityId } };
+      }
+      const state = hass?.states?.[entityId];
+      if (domain !== 'sensor' || !state) return null;
+      const todoList = ShoppingListCard.getStubConfig(hass).todo_list;
+      if (!todoList) return null;
+      for (const attribute of [undefined, ...Object.keys(state.attributes || {})]) {
+        const config = {
+          type: 'custom:shopping-list-card', mode: 'catalog',
+          catalog_entity: entityId, todo_list: todoList,
+          ...(attribute === undefined ? {} : { catalog_attribute: attribute }),
+        };
+        try {
+          if (readCatalog(hass, config).some(group => group.products.length)) return { config };
+        } catch {}
+      }
+      return null;
     },
   });
 }

@@ -355,6 +355,125 @@ class TodoStore {
   }
 }
 
+const itemFields = [
+  'title', 'subtitle', 'types', 'types_sort', 'image', 'image_base', 'list_prefix',
+  'layout', 'show_name', 'enable_quantity', 'quantity_step', 'quantity_max',
+  'remove_zero', 'on_icon', 'off_icon', 'on_color', 'off_color',
+  'colorize_background', 'hold_action', 'haptic',
+];
+
+function itemOptions(options) {
+  return Object.fromEntries(itemFields.filter(field => Object.hasOwn(options, field)).map(field => [field, options[field]]));
+}
+
+function typeNames(types) {
+  const entries = typeof types === 'string' ? types.split(/[,\n]/) : Array.isArray(types) ? types : [];
+  return entries.map(entry => typeof entry === 'string' ? entry.trim() : String(entry?.name ?? '').trim()).filter(Boolean);
+}
+
+function groupSubtitleProducts(products, entries, defaults) {
+  const groups = new Map();
+  products.forEach((product, index) => {
+    const entry = entries[index];
+    if (Object.hasOwn(entry, 'types') || Object.hasOwn(defaults, 'types') || entry.id != null
+      || (product.config.subtitle && product.config.subtitle !== product.config.subtitle.trim())) {
+      return;
+    }
+    const signature = JSON.stringify(itemFields.filter(field => field !== 'subtitle' && field !== 'image')
+      .map(field => [field, product.config[field]]));
+    let group = groups.get(signature);
+    if (!group) {
+      group = [];
+      groups.set(signature, group);
+    }
+    group.push(product);
+  });
+  const replacements = new Map();
+  const merged = new Set();
+  for (const group of groups.values()) {
+    if (group.length < 2 || !group.some(product => product.config.subtitle)) continue;
+    const header = group.find(product => !product.config.subtitle) || group[0];
+    const seen = new Set();
+    const types = [];
+    for (const product of group) {
+      const name = product.config.subtitle;
+      if (!name || seen.has(name.toLowerCase())) continue;
+      seen.add(name.toLowerCase());
+      types.push(product.config.image ? { name, image: product.config.image } : name);
+    }
+    replacements.set(group[0], {
+      ...header,
+      config: { ...header.config, types },
+      search: group.map(product => product.search).join(' '),
+      names: [...new Set(group.flatMap(product => product.names))],
+    });
+    for (const product of group.slice(1)) merged.add(product);
+  }
+  return products.flatMap(product => merged.has(product) ? [] : [replacements.get(product) || product]);
+}
+
+function searchText(value) {
+  return String(value).normalize('NFKD').replace(/\p{Mark}/gu, '').toLocaleLowerCase();
+}
+
+function readCatalog(hass, config) {
+  const entity = hass.states?.[config.catalog_entity];
+  if (!entity) throw new Error(`Catalog entity not found: ${config.catalog_entity}`);
+  if (entity.state === 'unavailable' || entity.state === 'unknown') throw new Error('The product catalog is unavailable.');
+  let data = config.catalog_attribute ? entity.attributes?.[config.catalog_attribute] : entity.attributes;
+  if (typeof data === 'string') {
+    try { data = JSON.parse(data); }
+    catch { throw new Error('The catalog attribute does not contain valid JSON.'); }
+  }
+  if (!data || typeof data !== 'object' || Array.isArray(data)) {
+    throw new Error('The catalog must contain categories with product arrays.');
+  }
+  const defaults = { layout: 'vertical', enable_quantity: true, ...itemOptions(config.item_options || {}) };
+  const groups = [];
+  for (const [category, entries] of Object.entries(data)) {
+    if (config.categories && !config.categories.includes(category)) continue;
+    if (!Array.isArray(entries)) {
+      if (config.catalog_attribute) throw new Error(`Category "${category}" must be an array.`);
+      continue;
+    }
+    if (!category.trim()) throw new Error('Catalog categories must have a name.');
+    const identities = new Map();
+    const products = entries.map((entry, index) => {
+      if (!entry || typeof entry !== 'object' || Array.isArray(entry)
+        || typeof entry.title !== 'string' || !entry.title.trim()) {
+        throw new Error(`Product ${index + 1} in "${category}" needs a title.`);
+      }
+      const options = {
+        ...defaults, ...itemOptions(entry), type: 'custom:shopping-list-card', todo_list: config.todo_list,
+      };
+      for (const field of ['subtitle', 'image', 'image_base', 'list_prefix', 'on_icon', 'off_icon', 'on_color', 'off_color']) {
+        if (options[field] != null && typeof options[field] !== 'string') {
+          throw new Error(`Product "${entry.title}" has an invalid ${field}.`);
+        }
+      }
+      if (options.types != null && typeof options.types !== 'string' && !Array.isArray(options.types)) {
+        throw new Error(`Product "${entry.title}" has invalid variants.`);
+      }
+      const identity = typeof entry.id === 'string' && entry.id ? entry.id : buildName(options, options.subtitle);
+      const occurrence = identities.get(identity) || 0;
+      identities.set(identity, occurrence + 1);
+      const names = typeNames(options.types);
+      return {
+        key: JSON.stringify([category, identity, occurrence]),
+        config: options,
+        search: searchText([category, options.title, options.subtitle || '', ...names].join(' ')),
+        names: [...new Set([buildName(options, options.subtitle), ...names.map(name => buildName(options, name))])],
+      };
+    });
+    groups.push({ name: category, products: groupSubtitleProducts(products, entries, defaults) });
+  }
+  return groups;
+}
+
+function productOnList(product, items) {
+  return product.names.some(name => matchItem(items, name, product.config).isOn);
+}
+
 const CARD_DEFAULTS = {
   DEFAULT_ON_ICON: 'mdi:check',
   DEFAULT_OFF_ICON: 'mdi:plus',
@@ -727,125 +846,6 @@ if (!customElements.get('shopping-list-variants-editor')) {
   customElements.define('shopping-list-variants-editor', ShoppingListVariantsEditor);
 }
 
-const itemFields = [
-  'title', 'subtitle', 'types', 'types_sort', 'image', 'image_base', 'list_prefix',
-  'layout', 'show_name', 'enable_quantity', 'quantity_step', 'quantity_max',
-  'remove_zero', 'on_icon', 'off_icon', 'on_color', 'off_color',
-  'colorize_background', 'hold_action', 'haptic',
-];
-
-function itemOptions(options) {
-  return Object.fromEntries(itemFields.filter(field => Object.hasOwn(options, field)).map(field => [field, options[field]]));
-}
-
-function typeNames(types) {
-  const entries = typeof types === 'string' ? types.split(/[,\n]/) : Array.isArray(types) ? types : [];
-  return entries.map(entry => typeof entry === 'string' ? entry.trim() : String(entry?.name ?? '').trim()).filter(Boolean);
-}
-
-function groupSubtitleProducts(products, entries, defaults) {
-  const groups = new Map();
-  products.forEach((product, index) => {
-    const entry = entries[index];
-    if (Object.hasOwn(entry, 'types') || Object.hasOwn(defaults, 'types') || entry.id != null
-      || (product.config.subtitle && product.config.subtitle !== product.config.subtitle.trim())) {
-      return;
-    }
-    const signature = JSON.stringify(itemFields.filter(field => field !== 'subtitle' && field !== 'image')
-      .map(field => [field, product.config[field]]));
-    let group = groups.get(signature);
-    if (!group) {
-      group = [];
-      groups.set(signature, group);
-    }
-    group.push(product);
-  });
-  const replacements = new Map();
-  const merged = new Set();
-  for (const group of groups.values()) {
-    if (group.length < 2 || !group.some(product => product.config.subtitle)) continue;
-    const header = group.find(product => !product.config.subtitle) || group[0];
-    const seen = new Set();
-    const types = [];
-    for (const product of group) {
-      const name = product.config.subtitle;
-      if (!name || seen.has(name.toLowerCase())) continue;
-      seen.add(name.toLowerCase());
-      types.push(product.config.image ? { name, image: product.config.image } : name);
-    }
-    replacements.set(group[0], {
-      ...header,
-      config: { ...header.config, types },
-      search: group.map(product => product.search).join(' '),
-      names: [...new Set(group.flatMap(product => product.names))],
-    });
-    for (const product of group.slice(1)) merged.add(product);
-  }
-  return products.flatMap(product => merged.has(product) ? [] : [replacements.get(product) || product]);
-}
-
-function searchText(value) {
-  return String(value).normalize('NFKD').replace(/\p{Mark}/gu, '').toLocaleLowerCase();
-}
-
-function readCatalog(hass, config) {
-  const entity = hass.states?.[config.catalog_entity];
-  if (!entity) throw new Error(`Catalog entity not found: ${config.catalog_entity}`);
-  if (entity.state === 'unavailable' || entity.state === 'unknown') throw new Error('The product catalog is unavailable.');
-  let data = config.catalog_attribute ? entity.attributes?.[config.catalog_attribute] : entity.attributes;
-  if (typeof data === 'string') {
-    try { data = JSON.parse(data); }
-    catch { throw new Error('The catalog attribute does not contain valid JSON.'); }
-  }
-  if (!data || typeof data !== 'object' || Array.isArray(data)) {
-    throw new Error('The catalog must contain categories with product arrays.');
-  }
-  const defaults = { layout: 'vertical', enable_quantity: true, ...itemOptions(config.item_options || {}) };
-  const groups = [];
-  for (const [category, entries] of Object.entries(data)) {
-    if (config.categories && !config.categories.includes(category)) continue;
-    if (!Array.isArray(entries)) {
-      if (config.catalog_attribute) throw new Error(`Category "${category}" must be an array.`);
-      continue;
-    }
-    if (!category.trim()) throw new Error('Catalog categories must have a name.');
-    const identities = new Map();
-    const products = entries.map((entry, index) => {
-      if (!entry || typeof entry !== 'object' || Array.isArray(entry)
-        || typeof entry.title !== 'string' || !entry.title.trim()) {
-        throw new Error(`Product ${index + 1} in "${category}" needs a title.`);
-      }
-      const options = {
-        ...defaults, ...itemOptions(entry), type: 'custom:shopping-list-card', todo_list: config.todo_list,
-      };
-      for (const field of ['subtitle', 'image', 'image_base', 'list_prefix', 'on_icon', 'off_icon', 'on_color', 'off_color']) {
-        if (options[field] != null && typeof options[field] !== 'string') {
-          throw new Error(`Product "${entry.title}" has an invalid ${field}.`);
-        }
-      }
-      if (options.types != null && typeof options.types !== 'string' && !Array.isArray(options.types)) {
-        throw new Error(`Product "${entry.title}" has invalid variants.`);
-      }
-      const identity = typeof entry.id === 'string' && entry.id ? entry.id : buildName(options, options.subtitle);
-      const occurrence = identities.get(identity) || 0;
-      identities.set(identity, occurrence + 1);
-      const names = typeNames(options.types);
-      return {
-        key: JSON.stringify([category, identity, occurrence]),
-        config: options,
-        search: searchText([category, options.title, options.subtitle || '', ...names].join(' ')),
-        names: [...new Set([buildName(options, options.subtitle), ...names.map(name => buildName(options, name))])],
-      };
-    });
-    groups.push({ name: category, products: groupSubtitleProducts(products, entries, defaults) });
-  }
-  return groups;
-}
-
-function productOnList(product, items) {
-  return product.names.some(name => matchItem(items, name, product.config).isOn);
-}
-
 class ShoppingListCatalogEditor extends HTMLElement {
   constructor() {
     super();
@@ -895,6 +895,7 @@ class ShoppingListCatalogEditor extends HTMLElement {
               <${field} id="title" label="Title" placeholder="Shopping"></${field}>
               <${field} id="columns" label="Maximum columns" type="number" min="1" max="6"></${field}>
             </div>
+            <label class="catalog-toggle"><ha-switch id="fixed_columns"></ha-switch><span>Fixed columns</span></label>
           </div>
         </ha-expansion-panel>
         <ha-expansion-panel header="Display" outlined>
@@ -907,6 +908,7 @@ class ShoppingListCatalogEditor extends HTMLElement {
             <label class="catalog-toggle"><ha-switch id="show_category_tabs"></ha-switch><span>Category tabs</span></label>
             <label class="catalog-toggle"><ha-switch id="show_search"></ha-switch><span>Search</span></label>
             <label class="catalog-toggle"><ha-switch id="show_title"></ha-switch><span>Title</span></label>
+            <label class="catalog-toggle"><ha-switch id="show_item_count"></ha-switch><span>Item count</span></label>
             <label class="catalog-toggle"><ha-switch id="show_list_button"></ha-switch><span>Shopping list button</span></label>
             <label class="catalog-toggle"><ha-switch id="show_add_button"></ha-switch><span>Add item button</span></label>
           </div>
@@ -977,7 +979,9 @@ class ShoppingListCatalogEditor extends HTMLElement {
     }
     this.shadowRoot.getElementById('enable_quantity').checked = options.enable_quantity !== false;
     this.shadowRoot.getElementById('keep_at_zero').checked = options.remove_zero === false;
-    for (const option of ['show_category_tabs', 'show_search', 'show_title', 'show_list_button', 'show_add_button']) {
+    this.shadowRoot.getElementById('fixed_columns').checked = config.fixed_columns === true;
+    this.shadowRoot.getElementById('columns').setAttribute('label', config.fixed_columns ? 'Columns' : 'Maximum columns');
+    for (const option of ['show_category_tabs', 'show_search', 'show_title', 'show_item_count', 'show_list_button', 'show_add_button']) {
       this.shadowRoot.getElementById(option).checked = config[option] !== false;
     }
     this._updateCategories();
@@ -1032,7 +1036,8 @@ class ShoppingListCatalogEditor extends HTMLElement {
     if (['columns', 'quantity_step', 'quantity_max'].includes(field)) {
       next = value === '' ? undefined : Number(value);
       if (next !== undefined && (!Number.isInteger(next) || next < 1 || (field === 'columns' && next > 6))) return;
-    } else if (['show_category_tabs', 'show_search', 'show_title', 'show_list_button', 'show_add_button', 'enable_quantity'].includes(field)) next = value ? undefined : false;
+    } else if (['show_category_tabs', 'show_search', 'show_title', 'show_item_count', 'show_list_button', 'show_add_button', 'enable_quantity'].includes(field)) next = value ? undefined : false;
+    else if (field === 'fixed_columns') next = value ? true : undefined;
     else if (field === 'keep_at_zero') next = value ? false : undefined;
     else if (field === 'layout') {
       if (value !== 'vertical' && value !== 'horizontal') return;
@@ -1042,6 +1047,7 @@ class ShoppingListCatalogEditor extends HTMLElement {
     else target[key] = next;
     if (config.item_options && !Object.keys(config.item_options).length) delete config.item_options;
     this._emitConfig(config);
+    if (field === 'fixed_columns') this._updateValues();
   }
 
   _emitConfig(config) {
@@ -1730,7 +1736,7 @@ class ShoppingListCatalogCard extends HTMLElement {
         .catalog-empty { padding: 24px 0; margin: 0; color: var(--secondary-text-color); font-size: 14px; }
         @container (max-width: 900px) { .catalog-grid { grid-template-columns: repeat(var(--catalog-medium-columns, 3), minmax(0, 1fr)); } }
         @container (max-width: 560px) { .catalog-grid { grid-template-columns: repeat(var(--catalog-mobile-columns, 2), minmax(0, 1fr)); } }
-        @container (max-width: 300px) { .catalog-grid { grid-template-columns: minmax(0, 1fr); } .catalog-counter { display: none; } }
+        @container (max-width: 300px) { .catalog-grid { grid-template-columns: repeat(var(--catalog-narrow-columns, 1), minmax(0, 1fr)); } .catalog-counter { display: none; } }
       </style>
       <div class="catalog-header">
         <h2 class="catalog-title"></h2>
@@ -1824,7 +1830,7 @@ class ShoppingListCatalogCard extends HTMLElement {
       || config.categories.some(category => typeof category !== 'string' || !category.trim()))) {
       throw new Error('Categories must be a list of category names.');
     }
-    for (const option of ['show_category_tabs', 'show_search', 'show_title', 'show_list_button', 'show_add_button']) {
+    for (const option of ['fixed_columns', 'show_category_tabs', 'show_search', 'show_title', 'show_item_count', 'show_list_button', 'show_add_button']) {
       if (config[option] !== undefined && typeof config[option] !== 'boolean') {
         throw new Error(`${option} must be true or false.`);
       }
@@ -1841,10 +1847,14 @@ class ShoppingListCatalogCard extends HTMLElement {
     this._config = { ...config };
     this._needsSource = true;
     this.style.setProperty('--catalog-columns', String(columns));
-    this.style.setProperty('--catalog-medium-columns', String(Math.min(columns, 3)));
-    this.style.setProperty('--catalog-mobile-columns', String(Math.min(columns, 2)));
+    this.style.setProperty('--catalog-medium-columns', String(config.fixed_columns ? columns : Math.min(columns, 3)));
+    this.style.setProperty('--catalog-mobile-columns', String(config.fixed_columns ? columns : Math.min(columns, 2)));
+    this.style.setProperty('--catalog-narrow-columns', String(config.fixed_columns ? columns : 1));
     this.shadowRoot.querySelector('.catalog-title').textContent = config.title || 'Shopping';
     this.shadowRoot.querySelector('.catalog-title').hidden = config.show_title === false;
+    this.shadowRoot.querySelector('.catalog-counter').hidden = config.show_item_count === false;
+    this.shadowRoot.querySelector('.catalog-header').hidden = [config.show_title, config.show_item_count,
+      config.show_list_button, config.show_add_button].every(value => value === false);
     this._tabs.hidden = config.show_category_tabs === false;
     this.shadowRoot.querySelector('.catalog-search').hidden = config.show_search === false;
     if (config.show_search === false) {
@@ -3205,8 +3215,26 @@ if (!window.customCards.some(c => c.type === 'shopping-list-card')) {
     preview: true,
     description: 'Single-product tiles or a shared shopping catalog.',
     getEntitySuggestion: (hass, entityId) => {
-      if (typeof entityId !== 'string' || entityId.split('.')[0] !== 'todo') return null;
-      return { config: { type: 'custom:shopping-list-card', title: 'New item', todo_list: entityId } };
+      if (typeof entityId !== 'string') return null;
+      const domain = entityId.split('.')[0];
+      if (domain === 'todo') {
+        return { config: { type: 'custom:shopping-list-card', title: 'New item', todo_list: entityId } };
+      }
+      const state = hass?.states?.[entityId];
+      if (domain !== 'sensor' || !state) return null;
+      const todoList = ShoppingListCard.getStubConfig(hass).todo_list;
+      if (!todoList) return null;
+      for (const attribute of [undefined, ...Object.keys(state.attributes || {})]) {
+        const config = {
+          type: 'custom:shopping-list-card', mode: 'catalog',
+          catalog_entity: entityId, todo_list: todoList,
+          ...(attribute === undefined ? {} : { catalog_attribute: attribute }),
+        };
+        try {
+          if (readCatalog(hass, config).some(group => group.products.length)) return { config };
+        } catch {}
+      }
+      return null;
     },
   });
 }

@@ -70,7 +70,7 @@ class ShoppingListCatalogCard extends HTMLElement {
         .catalog-empty { padding: 24px 0; margin: 0; color: var(--secondary-text-color); font-size: 14px; }
         @container (max-width: 900px) { .catalog-grid { grid-template-columns: repeat(var(--catalog-medium-columns, 3), minmax(0, 1fr)); } }
         @container (max-width: 560px) { .catalog-grid { grid-template-columns: repeat(var(--catalog-mobile-columns, 2), minmax(0, 1fr)); } }
-        @container (max-width: 300px) { .catalog-grid { grid-template-columns: minmax(0, 1fr); } .catalog-counter { display: none; } }
+        @container (max-width: 300px) { .catalog-grid { grid-template-columns: repeat(var(--catalog-narrow-columns, 1), minmax(0, 1fr)); } .catalog-counter { display: none; } }
       </style>
       <div class="catalog-header">
         <h2 class="catalog-title"></h2>
@@ -164,7 +164,7 @@ class ShoppingListCatalogCard extends HTMLElement {
       || config.categories.some(category => typeof category !== 'string' || !category.trim()))) {
       throw new Error('Categories must be a list of category names.');
     }
-    for (const option of ['show_category_tabs', 'show_search', 'show_title', 'show_list_button', 'show_add_button']) {
+    for (const option of ['fixed_columns', 'show_category_tabs', 'show_search', 'show_title', 'show_item_count', 'show_list_button', 'show_add_button']) {
       if (config[option] !== undefined && typeof config[option] !== 'boolean') {
         throw new Error(`${option} must be true or false.`);
       }
@@ -181,10 +181,14 @@ class ShoppingListCatalogCard extends HTMLElement {
     this._config = { ...config };
     this._needsSource = true;
     this.style.setProperty('--catalog-columns', String(columns));
-    this.style.setProperty('--catalog-medium-columns', String(Math.min(columns, 3)));
-    this.style.setProperty('--catalog-mobile-columns', String(Math.min(columns, 2)));
+    this.style.setProperty('--catalog-medium-columns', String(config.fixed_columns ? columns : Math.min(columns, 3)));
+    this.style.setProperty('--catalog-mobile-columns', String(config.fixed_columns ? columns : Math.min(columns, 2)));
+    this.style.setProperty('--catalog-narrow-columns', String(config.fixed_columns ? columns : 1));
     this.shadowRoot.querySelector('.catalog-title').textContent = config.title || 'Shopping';
     this.shadowRoot.querySelector('.catalog-title').hidden = config.show_title === false;
+    this.shadowRoot.querySelector('.catalog-counter').hidden = config.show_item_count === false;
+    this.shadowRoot.querySelector('.catalog-header').hidden = [config.show_title, config.show_item_count,
+      config.show_list_button, config.show_add_button].every(value => value === false);
     this._tabs.hidden = config.show_category_tabs === false;
     this.shadowRoot.querySelector('.catalog-search').hidden = config.show_search === false;
     if (config.show_search === false) {
