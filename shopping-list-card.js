@@ -557,11 +557,13 @@ const CARD_STYLES = `
       /* Types cards grow with their content; never inherit the fixed 120px
          height from the normal vertical-layout tile. */
       .card-container.types-mode.vertical-layout { height: auto; }
-      .types-header { display: flex; align-items: center; gap: 10px; padding: 10px 12px; cursor: pointer; transition: background-color .2s; }
+      .types-header { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; padding: 10px 12px; cursor: pointer; transition: background-color .2s; }
       .types-header:hover { background: var(--secondary-background-color); }
       .types-header:focus-visible { outline: none; box-shadow: 0 0 0 2px var(--primary-color) inset; }
       .types-header.is-updating { opacity: .6; pointer-events: none; }
-      .types-chevron { flex-shrink: 0; color: var(--secondary-text-color); transition: transform .25s ease, background-color .2s; cursor: pointer; border-radius: 50%; padding: 2px; }
+      .types-header .header-quantity { flex-wrap: wrap; min-width: 0; max-width: 100%; margin-inline-start: auto; }
+      .types-header .header-quantity .quantity-btn { flex-shrink: 0; }
+      .types-chevron { flex-shrink: 0; margin-inline-start: auto; color: var(--secondary-text-color); transition: transform .25s ease, background-color .2s; cursor: pointer; border-radius: 50%; padding: 2px; }
       .types-chevron:hover { background: var(--divider-color); }
       .types-chevron:focus-visible { outline: none; box-shadow: 0 0 0 2px var(--primary-color); }
       .card-container.types-mode.expanded .types-chevron { transform: rotate(180deg); }
@@ -583,6 +585,11 @@ const CARD_STYLES = `
          keeps it centered while ellipsizing before it reaches the button. */
       .types-header.vertical-header .secondary { padding: 0 28px; box-sizing: border-box; }
       .types-header.vertical-header .types-chevron { position: absolute; bottom: 8px; right: 10px; --mdc-icon-size: 22px; opacity: .85; }
+      .types-header.vertical-header.has-header-quantity { display: grid; grid-template-columns: minmax(0, 1fr) 28px; gap: 8px; height: auto; min-height: 152px; padding: 18px 8px 8px; }
+      .types-header.vertical-header.has-header-quantity .vertical-top-block { position: static; grid-column: 1 / -1; min-height: 48px; }
+      .types-header.vertical-header.has-header-quantity .info-container { position: static; grid-column: 1 / -1; }
+      .types-header.vertical-header .header-quantity { justify-content: center; margin-inline-start: 0; }
+      .types-header.vertical-header.has-header-quantity .types-chevron { position: static; align-self: end; }
       .type-row { display: flex; align-items: center; gap: 10px; min-height: 44px; box-sizing: border-box; padding: 7px 12px 7px 14px; cursor: pointer; border-top: 1px solid var(--divider-color); transition: background-color .2s; outline: none; }
       .type-row:hover { background: var(--secondary-background-color); }
       .type-row:focus-visible { box-shadow: 0 0 0 2px var(--primary-color) inset; }
@@ -2309,7 +2316,7 @@ class ShoppingListCard extends HTMLElement {
     this._suppressClick = false;
     this._clickResetTimer = null;
     this.addEventListener('click', event => {
-      if (!this._suppressClick) return;
+      if (!this._suppressClick || event.target.closest('.types-chevron')) return;
       this._suppressClick = false;
       clearTimeout(this._clickResetTimer);
       this._clickResetTimer = null;
@@ -2621,7 +2628,7 @@ class ShoppingListCard extends HTMLElement {
     card.classList.toggle('is-unavailable', unavailable);
     card.setAttribute('aria-busy', String(busy));
     for (const control of [card, ...card.querySelectorAll('[role="button"]')]) {
-      control.setAttribute('aria-disabled', String(busy || unavailable));
+      control.setAttribute('aria-disabled', String(!control.classList.contains('types-chevron') && (busy || unavailable)));
     }
   }
 
@@ -2863,6 +2870,12 @@ class ShoppingListCard extends HTMLElement {
     const enableQty = !!this._config.enable_quantity;
     const decBtn = `<div class="quantity-btn" role="button" tabindex="0" aria-label="Decrease quantity" data-action="decrement"><ha-icon icon="mdi:minus"></ha-icon></div>`;
     const incBtn = `<div class="quantity-btn" role="button" tabindex="0" aria-label="Increase quantity" data-action="increment"><ha-icon icon="mdi:plus"></ha-icon></div>`;
+    const headerQuantity = bare.isOn && enableQty
+      ? `<div class="quantity-controls header-quantity">
+           ${(this._keepZero() || bare.qty > 1) ? decBtn : ''}
+           <span class="quantity" aria-label="Quantity: ${bare.qty}">${bare.qty}</span>
+           ${incBtn}
+         </div>` : '';
 
     const onSolid = escapeHtml(this._solidFor(onColorN));
     const rowsHtml = states.map((s, i) => {
@@ -2903,6 +2916,7 @@ class ShoppingListCard extends HTMLElement {
            <div class="primary">${safeTitle}</div>
            ${secondary ? `<div class="secondary">${escapeHtml(secondary)}</div>` : ''}
          </div>
+         ${headerQuantity}
          <ha-icon class="types-chevron" icon="mdi:chevron-down" role="button" tabindex="0"
                   aria-expanded="false" aria-controls="slc-types-list" aria-label="Toggle types"></ha-icon>`
       : `${parentIcon}
@@ -2910,13 +2924,14 @@ class ShoppingListCard extends HTMLElement {
            <div class="primary">${safeTitle}</div>
            ${secondary ? `<div class="secondary">${escapeHtml(secondary)}</div>` : ''}
          </div>
+         ${headerQuantity}
          <ha-icon class="types-chevron" icon="mdi:chevron-down" role="button" tabindex="0"
                   aria-expanded="false" aria-controls="slc-types-list" aria-label="Toggle types"></ha-icon>`;
 
     this._clearHolds();
     this.content.innerHTML = `
       <div class="card-container types-mode ${isVertical ? 'vertical-layout' : ''} ${anyOn ? 'is-on' : 'is-off'}" ${cardBgStyle}>
-        <div class="types-header ${isVertical ? 'vertical-header' : ''}" role="button" tabindex="0"
+        <div class="types-header ${isVertical ? 'vertical-header' : ''} ${headerQuantity ? 'has-header-quantity' : ''}" role="button" tabindex="0"
              aria-pressed="${headerOn ? 'true' : 'false'}" aria-label="${headerLabel}">
           ${headerInner}
         </div>

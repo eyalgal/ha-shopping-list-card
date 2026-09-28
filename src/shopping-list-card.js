@@ -57,7 +57,7 @@ class ShoppingListCard extends HTMLElement {
     this._suppressClick = false;
     this._clickResetTimer = null;
     this.addEventListener('click', event => {
-      if (!this._suppressClick) return;
+      if (!this._suppressClick || event.target.closest('.types-chevron')) return;
       this._suppressClick = false;
       clearTimeout(this._clickResetTimer);
       this._clickResetTimer = null;
@@ -369,7 +369,7 @@ class ShoppingListCard extends HTMLElement {
     card.classList.toggle('is-unavailable', unavailable);
     card.setAttribute('aria-busy', String(busy));
     for (const control of [card, ...card.querySelectorAll('[role="button"]')]) {
-      control.setAttribute('aria-disabled', String(busy || unavailable));
+      control.setAttribute('aria-disabled', String(!control.classList.contains('types-chevron') && (busy || unavailable)));
     }
   }
 
@@ -611,6 +611,12 @@ class ShoppingListCard extends HTMLElement {
     const enableQty = !!this._config.enable_quantity;
     const decBtn = `<div class="quantity-btn" role="button" tabindex="0" aria-label="Decrease quantity" data-action="decrement"><ha-icon icon="mdi:minus"></ha-icon></div>`;
     const incBtn = `<div class="quantity-btn" role="button" tabindex="0" aria-label="Increase quantity" data-action="increment"><ha-icon icon="mdi:plus"></ha-icon></div>`;
+    const headerQuantity = bare.isOn && enableQty
+      ? `<div class="quantity-controls header-quantity">
+           ${(this._keepZero() || bare.qty > 1) ? decBtn : ''}
+           <span class="quantity" aria-label="Quantity: ${bare.qty}">${bare.qty}</span>
+           ${incBtn}
+         </div>` : '';
 
     const onSolid = escapeHtml(this._solidFor(onColorN));
     const rowsHtml = states.map((s, i) => {
@@ -651,6 +657,7 @@ class ShoppingListCard extends HTMLElement {
            <div class="primary">${safeTitle}</div>
            ${secondary ? `<div class="secondary">${escapeHtml(secondary)}</div>` : ''}
          </div>
+         ${headerQuantity}
          <ha-icon class="types-chevron" icon="mdi:chevron-down" role="button" tabindex="0"
                   aria-expanded="false" aria-controls="slc-types-list" aria-label="Toggle types"></ha-icon>`
       : `${parentIcon}
@@ -658,13 +665,14 @@ class ShoppingListCard extends HTMLElement {
            <div class="primary">${safeTitle}</div>
            ${secondary ? `<div class="secondary">${escapeHtml(secondary)}</div>` : ''}
          </div>
+         ${headerQuantity}
          <ha-icon class="types-chevron" icon="mdi:chevron-down" role="button" tabindex="0"
                   aria-expanded="false" aria-controls="slc-types-list" aria-label="Toggle types"></ha-icon>`;
 
     this._clearHolds();
     this.content.innerHTML = `
       <div class="card-container types-mode ${isVertical ? 'vertical-layout' : ''} ${anyOn ? 'is-on' : 'is-off'}" ${cardBgStyle}>
-        <div class="types-header ${isVertical ? 'vertical-header' : ''}" role="button" tabindex="0"
+        <div class="types-header ${isVertical ? 'vertical-header' : ''} ${headerQuantity ? 'has-header-quantity' : ''}" role="button" tabindex="0"
              aria-pressed="${headerOn ? 'true' : 'false'}" aria-label="${headerLabel}">
           ${headerInner}
         </div>

@@ -328,7 +328,11 @@ todo_list: todo.shopping_list
 
 When you want one tile to cover several variants of the same item, list them under `types`. The card renders as a single tile with a chevron. Tapping the **chevron** expands an inline list of the variants; tapping a variant adds it as `"<title> - <type>"`, so it shows up on your to-do list as e.g. `Apple - Pink Lady`. Tapping again removes it, and `enable_quantity` adds per-variant `+` / `-` controls.
 
-Tapping the **header body** (anywhere but the chevron) adds or removes the header item, exactly like a normal single-item card. By default that is the bare title (`Apple`); if you also set a `subtitle`, the header item is `"<title> - <subtitle>"` (e.g. `Apple - Pink Lady`), so you can keep a default variant available with a single tap while the chevron exposes the rest.
+Tapping the **header body** (outside the chevron and quantity buttons) adds or removes the header item, exactly like a normal single-item card. By default that is the bare title (`Apple`); if you also set a `subtitle`, the header item is `"<title> - <subtitle>"` (e.g. `Apple - Pink Lady`), so you can keep a default variant available with a single tap while the chevron exposes the rest.
+
+With `enable_quantity: true`, the selected header item has its own quantity controls in both layouts, even when the variants are collapsed. For a Milk card with a Lactose-free variant, tap the header to add plain `Milk`, then its `+` button to get `Milk (2)`. Lactose-free keeps its separate quantity. Catalog mode enables quantities by default.
+
+The chevron opens or closes the variants independently of item actions, including while an update is pending or the list is disconnected. A long press does not disable collapse. The list stays expanded until you close it; changing a quantity does not automatically collapse it.
 
 **Holding** clears items in bulk (respecting `hold_action: none`):
 

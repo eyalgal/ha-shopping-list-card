@@ -658,6 +658,211 @@ test('right clicks, chevron holds, and scrolling never start removal', async con
   assert.equal(setup.services.length, 0);
 });
 
+for (const layout of ['horizontal', 'vertical']) {
+  test(`variant header adjusts plain Milk quantity independently in ${layout} layout`, async context => {
+    const environment = createEnvironment(context);
+    const lactoseFree = item('Milk - Lactose-free', 'lactose-free');
+    const setup = createHass([item('Milk', 'plain-milk'), lactoseFree], {
+      service(domain, service, data) {
+        assert.equal(domain, 'todo');
+        assert.equal(service, 'update_item');
+        assert.equal(data.item, 'plain-milk');
+        setup.push([item(data.rename, 'plain-milk'), lactoseFree]);
+      },
+    });
+    const card = mount(environment, setup.hass, { layout, enable_quantity: true, types: ['Lactose-free'] });
+    await settle();
+    const increment = card.querySelector('.types-header .quantity-btn[data-action="increment"]');
+    assert.ok(increment, 'The main Milk item needs its own quantity control.');
+    increment.click();
+    await settle();
+    assert.equal(setup.services.length, 1);
+    assert.equal(setup.services[0].data.rename, 'Milk (2)');
+    assert.deepEqual(setup.state.items, [item('Milk (2)', 'plain-milk'), lactoseFree]);
+    assert.equal(card.querySelector('.types-header .quantity').textContent, '2');
+    assert.equal(card.querySelector('.types-list .quantity').textContent, '1');
+    assert.equal(card._expanded, false);
+    card.querySelector('.types-header .quantity-btn[data-action="decrement"]').dispatchEvent(
+      new environment.window.KeyboardEvent('keydown', { key: 'Enter', bubbles: true }),
+    );
+    await settle();
+    assert.equal(setup.services.length, 2);
+    assert.equal(setup.services[1].data.rename, 'Milk');
+    assert.equal(card.querySelector('.types-header .quantity').textContent, '1');
+    assert.equal(card.querySelector('.types-header .quantity-btn[data-action="decrement"]'), null);
+    assert.deepEqual(environment.errors, []);
+  });
+}
+
+test('a catalog Milk card adds and increments the plain item without changing its variant', async context => {
+  const environment = createEnvironment(context);
+  const lactoseFree = item('Milk - Lactose-free (3)', 'lactose-free');
+  const setup = createHass([lactoseFree], {
+    service(domain, service, data) {
+      assert.equal(domain, 'todo');
+      if (service === 'add_item') setup.push([lactoseFree, item(data.item, 'plain-milk')]);
+      else {
+        assert.equal(service, 'update_item');
+        assert.equal(data.item, 'plain-milk');
+        setup.push([lactoseFree, item(data.rename, 'plain-milk')]);
+      }
+    },
+  });
+  catalogSource(setup, { Dairy: [{ title: 'Milk' }, { title: 'Milk', subtitle: 'Lactose-free' }] });
+  const catalog = mountCatalog(environment, setup.hass, { item_options: { layout: 'horizontal' } });
+  await settle();
+  const milk = catalog.shadowRoot.querySelector('shopping-list-card');
+  assert.equal(milk._config.subtitle, undefined);
+  assert.equal(milk.querySelector('.header-quantity'), null);
+  milk.querySelector('.types-header').click();
+  await settle();
+  assert.equal(setup.services[0].service, 'add_item');
+  assert.equal(setup.services[0].data.item, 'Milk');
+  assert.equal(milk.querySelector('.header-quantity .quantity').textContent, '1');
+  milk.querySelector('.header-quantity [data-action="increment"]').click();
+  await settle();
+  assert.equal(setup.services.length, 2);
+  assert.equal(setup.services[1].data.rename, 'Milk (2)');
+  assert.deepEqual(setup.state.items, [lactoseFree, item('Milk (2)', 'plain-milk')]);
+  assert.equal(milk.querySelector('.types-list .quantity').textContent, '3');
+  assert.equal(milk._expanded, false);
+  assert.deepEqual(environment.errors, []);
+});
+
+test('variant header quantities honor the default subtitle, prefix, step, maximum, and kept zero', async context => {
+  const environment = createEnvironment(context);
+  const plain = item('Dairy - Milk (7)', 'plain');
+  const setup = createHass([plain, item('Dairy - Milk - Lactose-free (1)', 'lactose-free')], {
+    service(domain, service, data) {
+      assert.equal(domain, 'todo');
+      assert.equal(service, 'update_item');
+      assert.equal(data.item, 'lactose-free');
+      setup.push([plain, item(data.rename, 'lactose-free')]);
+    },
+  });
+  const card = mount(environment, setup.hass, {
+    subtitle: 'Lactose-free', list_prefix: 'Dairy', types: ['Lactose-free'],
+    enable_quantity: true, quantity_step: 2, quantity_max: 3, remove_zero: false,
+  });
+  await settle();
+  card.querySelector('.header-quantity [data-action="increment"]').click();
+  await settle();
+  assert.equal(card.querySelector('.header-quantity .quantity').textContent, '3');
+  assert.equal(card.querySelector('.types-list .quantity').textContent, '3');
+  card.querySelector('.header-quantity [data-action="increment"]').click();
+  await settle();
+  assert.equal(setup.services.length, 1);
+  for (const quantity of [1, 0]) {
+    card.querySelector('.header-quantity [data-action="decrement"]').click();
+    await settle();
+    assert.equal(setup.services.at(-1).data.rename, `Dairy - Milk - Lactose-free (${quantity})`);
+  }
+  assert.equal(card.querySelector('.header-quantity'), null);
+  assert.equal(card.querySelector('.types-header').getAttribute('aria-pressed'), 'false');
+  card.querySelector('.types-header').click();
+  await settle();
+  assert.equal(card.querySelector('.header-quantity .quantity').textContent, '1');
+  assert.equal(setup.services.length, 4);
+  assert.deepEqual(setup.state.items[0], plain);
+  assert.deepEqual(environment.errors, []);
+});
+
+test('variant header quantities keep pending protection and preserve values after a failed update', async context => {
+  const environment = createEnvironment(context);
+  let finishService;
+  const initial = [item('Milk', 'plain-milk'), item('Milk - Lactose-free', 'lactose-free')];
+  const setup = createHass(initial, {
+    async service() {
+      await new Promise(resolve => { finishService = resolve; });
+      throw new Error('Quantity update rejected');
+    },
+  });
+  const card = mount(environment, setup.hass, { enable_quantity: true, types: ['Lactose-free'] });
+  await settle();
+  card.querySelector('.types-chevron').click();
+  card.querySelector('.header-quantity [data-action="increment"]').click();
+  await settle();
+  try {
+    assert.equal(card.querySelector('.types-header').getAttribute('aria-disabled'), 'true');
+    card.querySelector('.header-quantity [data-action="increment"]').click();
+    assert.equal(setup.services.length, 1);
+    card.querySelector('.types-chevron').click();
+    assert.equal(card._expanded, false);
+  } finally {
+    finishService();
+    await settle();
+  }
+  assert.deepEqual(setup.state.items, initial);
+  assert.equal(card.querySelector('.header-quantity .quantity').textContent, '1');
+  assert.match(card.querySelector('.list-status').textContent, /Quantity update rejected/);
+  assert.equal(card.querySelector('.types-chevron').getAttribute('aria-disabled'), 'false');
+  assert.equal(card._expanded, false);
+  assert.equal(setup.services.length, 1);
+});
+
+test('variant chevrons remain enabled during pending writes and disconnection', async context => {
+  const environment = createEnvironment(context);
+  let finishService;
+  const setup = createHass([], {
+    service: () => new Promise(resolve => { finishService = resolve; }),
+  });
+  const card = mount(environment, setup.hass, { types: ['Lactose-free'] });
+  await settle();
+  card.querySelector('.types-chevron').click();
+  card.querySelector('.type-row').click();
+  await settle();
+  try {
+    const chevron = card.querySelector('.types-chevron');
+    assert.equal(card.querySelector('.types-header').getAttribute('aria-disabled'), 'true');
+    assert.equal(chevron.getAttribute('aria-disabled'), 'false');
+    chevron.click();
+    assert.equal(card._expanded, false);
+    setup.push([item('Bread')]);
+    assert.equal(card._expanded, false);
+    assert.equal(card.querySelector('.types-list').inert, true);
+  } finally {
+    setup.push([item('Bread'), item('Milk - Lactose-free')]);
+    finishService();
+    await settle();
+  }
+  assert.equal(card._expanded, false);
+  card.hass = { ...setup.hass, connected: false };
+  const chevron = card.querySelector('.types-chevron');
+  assert.equal(card.querySelector('.types-header').getAttribute('aria-disabled'), 'true');
+  assert.equal(chevron.getAttribute('aria-disabled'), 'false');
+  chevron.dispatchEvent(new environment.window.KeyboardEvent('keydown', { key: ' ', bubbles: true }));
+  assert.equal(card._expanded, true);
+  chevron.click();
+  assert.equal(card._expanded, false);
+  assert.equal(setup.services.length, 1);
+  assert.deepEqual(environment.errors, []);
+});
+
+test('a post-hold click guard never swallows the variant collapse control', async context => {
+  const environment = createEnvironment(context);
+  const setup = createHass([item('Milk')]);
+  const card = mount(environment, setup.hass, {
+    types: ['Lactose-free'], hold_action: { action: 'more-info' },
+  });
+  await settle();
+  card.querySelector('.types-chevron').click();
+  const header = card.querySelector('.types-header');
+  const events = [];
+  card.addEventListener('hass-more-info', event => events.push(event));
+  header.dispatchEvent(new environment.window.PointerEvent('pointerdown', { bubbles: true, button: 0, isPrimary: true }));
+  const hold = [...environment.timers.values()].find(timer => timer.delay === 500);
+  assert.ok(hold);
+  hold.callback();
+  header.dispatchEvent(new environment.window.PointerEvent('pointercancel', { bubbles: true }));
+  assert.equal(events.length, 1);
+  card.querySelector('.types-chevron').click();
+  assert.equal(card._expanded, false);
+  assert.equal(card.querySelector('.types-list').inert, true);
+  header.click();
+  await settle();
+  assert.equal(setup.services.length, 0);
+});
+
 test('collapsed variant rows are removed from keyboard interaction', async context => {
   const environment = createEnvironment(context);
   const card = mount(environment, createHass().hass, { types: ['Whole'] });
