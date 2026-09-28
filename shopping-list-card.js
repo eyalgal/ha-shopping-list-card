@@ -552,18 +552,21 @@ const CARD_STYLES = `
       .quantity-btn-placeholder { width: 24px; height: 24px; flex-shrink: 0; }
 
       /* Types (variants) mode */
-      .card-container.types-mode { display: block; padding: 0; cursor: default; }
+      .card-container.types-mode { display: block; padding: 0; cursor: default; container: shopping-variants / inline-size; }
       .card-container.types-mode:hover { background: transparent; }
       /* Types cards grow with their content; never inherit the fixed 120px
          height from the normal vertical-layout tile. */
       .card-container.types-mode.vertical-layout { height: auto; }
-      .types-header { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; padding: 10px 12px; cursor: pointer; transition: background-color .2s; }
+      .types-header { display: grid; grid-template-columns: 36px minmax(0, 1fr) auto 24px; align-items: center; gap: 8px; height: 56px; position: relative; box-sizing: border-box; padding: 10px 12px; cursor: pointer; transition: background-color .2s; }
+      .types-header > .info-container { grid-column: 2; grid-row: 1; }
       .types-header:hover { background: var(--secondary-background-color); }
       .types-header:focus-visible { outline: none; box-shadow: 0 0 0 2px var(--primary-color) inset; }
       .types-header.is-updating { opacity: .6; pointer-events: none; }
-      .types-header .header-quantity { flex-wrap: wrap; min-width: 0; max-width: 100%; margin-inline-start: auto; }
+      .types-header .header-quantity { grid-column: 3; grid-row: 1; width: 80px; flex-wrap: nowrap; }
       .types-header .header-quantity .quantity-btn { flex-shrink: 0; }
-      .types-chevron { flex-shrink: 0; margin-inline-start: auto; color: var(--secondary-text-color); transition: transform .25s ease, background-color .2s; cursor: pointer; border-radius: 50%; padding: 2px; }
+      .types-header .header-quantity .quantity { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+      .header-quantity-badge { display: none; top: 6px; left: 38px; right: auto; width: auto; min-width: 18px; max-width: 44px; padding-inline: 2px; overflow: hidden; }
+      .types-chevron { grid-column: 4; grid-row: 1; flex-shrink: 0; box-sizing: border-box; width: 24px; height: 24px; color: var(--secondary-text-color); transition: transform .25s ease, background-color .2s; cursor: pointer; border-radius: 50%; padding: 2px; }
       .types-chevron:hover { background: var(--divider-color); }
       .types-chevron:focus-visible { outline: none; box-shadow: 0 0 0 2px var(--primary-color); }
       .card-container.types-mode.expanded .types-chevron { transform: rotate(180deg); }
@@ -585,15 +588,15 @@ const CARD_STYLES = `
          keeps it centered while ellipsizing before it reaches the button. */
       .types-header.vertical-header .secondary { padding: 0 28px; box-sizing: border-box; }
       .types-header.vertical-header .types-chevron { position: absolute; bottom: 8px; right: 10px; --mdc-icon-size: 22px; opacity: .85; }
-      .types-header.vertical-header.has-header-quantity { display: grid; grid-template-columns: minmax(0, 1fr) 28px; gap: 8px; height: auto; min-height: 152px; padding: 18px 8px 8px; }
-      .types-header.vertical-header.has-header-quantity .vertical-top-block { position: static; grid-column: 1 / -1; min-height: 48px; }
-      .types-header.vertical-header.has-header-quantity .info-container { position: static; grid-column: 1 / -1; }
-      .types-header.vertical-header .header-quantity { justify-content: center; margin-inline-start: 0; }
-      .types-header.vertical-header.has-header-quantity .types-chevron { position: static; align-self: end; }
-      .type-row { display: flex; align-items: center; gap: 10px; min-height: 44px; box-sizing: border-box; padding: 7px 12px 7px 14px; cursor: pointer; border-top: 1px solid var(--divider-color); transition: background-color .2s; outline: none; }
-      .type-row:hover { background: var(--secondary-background-color); }
-      .type-row:focus-visible { box-shadow: 0 0 0 2px var(--primary-color) inset; }
-      .type-row.is-updating { opacity: .6; pointer-events: none; }
+      .types-header.vertical-header .header-quantity { position: absolute; top: 30px; left: 16px; right: 16px; width: auto; justify-content: space-between; }
+      .types-header.vertical-header .header-quantity .quantity { display: none; }
+      .types-header.vertical-header .header-quantity-badge { display: flex; top: 14px; left: calc(50% + 10px); }
+      .types-header.vertical-header.has-header-quantity .variant-count-badge { display: none; }
+      .type-row, .base-item-row { display: flex; align-items: center; gap: 10px; min-height: 44px; box-sizing: border-box; padding: 7px 12px 7px 14px; cursor: pointer; border-top: 1px solid var(--divider-color); transition: background-color .2s; outline: none; }
+      .base-item-row { display: none; }
+      .type-row:hover, .base-item-row:hover { background: var(--secondary-background-color); }
+      .type-row:focus-visible, .base-item-row:focus-visible { box-shadow: 0 0 0 2px var(--primary-color) inset; }
+      .type-row.is-updating, .base-item-row.is-updating { opacity: .6; pointer-events: none; }
       .type-thumb { width: 28px; height: 28px; flex-shrink: 0; }
       .type-thumb img { width: 100%; height: 100%; object-fit: cover; border-radius: 50%; }
       .type-thumb ha-icon { --mdc-icon-size: 28px; color: var(--secondary-text-color); }
@@ -604,6 +607,29 @@ const CARD_STYLES = `
       .type-indicator { width: 28px; height: 28px; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
       .type-indicator ha-icon { --mdc-icon-size: 20px; }
       .type-indicator.type-add ha-icon { color: var(--secondary-text-color); opacity: .45; }
+         @container shopping-variants (max-width: 219px) {
+            .types-header:not(.vertical-header) { grid-template-columns: 36px minmax(0, 1fr) 24px; }
+            .types-header:not(.vertical-header) .types-chevron { grid-column: 3; }
+            .types-header .header-quantity { display: none; }
+            .header-quantity-badge { display: flex; }
+            .base-item-row { display: flex; }
+            .type-row, .base-item-row { flex-wrap: wrap; gap: 6px; padding: 8px; }
+            .type-name { flex-basis: 70px; white-space: normal; overflow-wrap: anywhere; }
+            .type-qty { margin-inline-start: auto; max-width: 100%; }
+            .type-qty .quantity { min-width: 0; }
+         }
+         @container shopping-variants (max-width: 139px) {
+            .types-header:not(.vertical-header) { grid-template-columns: minmax(0, 1fr) 24px; gap: 4px; padding-inline: 6px; }
+            .types-header:not(.vertical-header) > .icon-wrapper,
+            .types-header:not(.vertical-header) > .image-wrapper { display: none; }
+            .types-header:not(.vertical-header) > .info-container { grid-column: 1; }
+            .types-header:not(.vertical-header) .types-chevron { grid-column: 2; }
+            .types-header:not(.vertical-header).has-header-quantity { grid-template-columns: minmax(0, 1fr) 20px 24px; }
+            .types-header:not(.vertical-header).has-header-quantity .types-chevron { grid-column: 3; }
+            .types-header:not(.vertical-header) .header-quantity-badge { position: static; grid-column: 2; grid-row: 1; box-sizing: border-box; width: 20px; min-width: 0; height: 20px; padding: 0; }
+            .type-row, .base-item-row { padding: 6px 4px; gap: 6px 4px; }
+            .type-qty { flex-basis: 100%; justify-content: space-between; }
+         }
 `;
 
 class ShoppingListVariantsEditor extends HTMLElement {
@@ -2805,6 +2831,7 @@ class ShoppingListCard extends HTMLElement {
     // it is the plain title.
     const baseSubtitle = this._config.subtitle || null;
     const bare = this._typeState(baseSubtitle);
+    const enableQty = !!this._config.enable_quantity;
 
     // Memoize on header + per-row states. Expansion is a pure CSS toggle applied
     // outside render, so it is intentionally excluded from the key.
@@ -2828,7 +2855,10 @@ class ShoppingListCard extends HTMLElement {
 
     // Optional badge showing how many variants are currently on the list.
     const countBadge = activeCount > 0
-      ? `<span class="quantity-badge">${activeCount}</span>` : '';
+      ? `<span class="quantity-badge variant-count-badge">${activeCount}</span>` : '';
+    const quantityLabel = escapeHtml(`${this._buildNameFor(baseSubtitle)}, quantity ${bare.qty}`);
+    const headerBadge = bare.isOn && enableQty
+      ? `<span class="quantity-badge header-quantity-badge" aria-label="${quantityLabel}" title="${quantityLabel}">${bare.qty}</span>` : '';
 
     let parentIcon;
     if (isVertical) {
@@ -2867,44 +2897,48 @@ class ShoppingListCard extends HTMLElement {
       cardBgStyle = `style="background-color: ${escapeHtml(this._rgbaFor(onColorN, 0.1))};"`;
     }
 
-    const enableQty = !!this._config.enable_quantity;
     const decBtn = `<div class="quantity-btn" role="button" tabindex="0" aria-label="Decrease quantity" data-action="decrement"><ha-icon icon="mdi:minus"></ha-icon></div>`;
     const incBtn = `<div class="quantity-btn" role="button" tabindex="0" aria-label="Increase quantity" data-action="increment"><ha-icon icon="mdi:plus"></ha-icon></div>`;
     const headerQuantity = bare.isOn && enableQty
       ? `<div class="quantity-controls header-quantity">
-           ${(this._keepZero() || bare.qty > 1) ? decBtn : ''}
-           <span class="quantity" aria-label="Quantity: ${bare.qty}">${bare.qty}</span>
+           ${(this._keepZero() || bare.qty > 1) ? decBtn : '<div class="quantity-btn-placeholder" aria-hidden="true"></div>'}
+           <span class="quantity" aria-label="Quantity: ${bare.qty}" title="${bare.qty}">${bare.qty}</span>
            ${incBtn}
          </div>` : '';
 
     const onSolid = escapeHtml(this._solidFor(onColorN));
-    const rowsHtml = states.map((s, i) => {
-      const thumb = s.image
-        ? `<div class="type-thumb"><img src="${escapeHtml(s.image)}" alt=""><ha-icon class="type-image-fallback" icon="${escapeHtml(s.icon || offIcon)}"></ha-icon></div>`
-        : s.icon ? `<div class="type-thumb"><ha-icon icon="${escapeHtml(s.icon)}"></ha-icon></div>` : '';
+    const renderRow = (state, index) => {
+      const thumb = state.image
+        ? `<div class="type-thumb"><img src="${escapeHtml(state.image)}" alt=""><ha-icon class="type-image-fallback" icon="${escapeHtml(state.icon || offIcon)}"></ha-icon></div>`
+        : state.icon ? `<div class="type-thumb"><ha-icon icon="${escapeHtml(state.icon)}"></ha-icon></div>` : '';
       let rightHtml;
-      if (s.isOn && enableQty) {
+      if (state.isOn && enableQty) {
         rightHtml = `<div class="type-qty">
-            ${(this._keepZero() || s.qty > 1) ? decBtn : ''}
-            <span class="quantity" aria-label="Quantity: ${s.qty}">${s.qty}</span>
+            ${(this._keepZero() || state.qty > 1) ? decBtn : ''}
+            <span class="quantity" aria-label="Quantity: ${state.qty}">${state.qty}</span>
             ${incBtn}
           </div>`;
-      } else if (s.isOn) {
+      } else if (state.isOn) {
         // Active without quantity: a flat check indicator (not a toggle button).
         rightHtml = `<div class="type-indicator" style="color:${onSolid};"><ha-icon icon="mdi:check"></ha-icon></div>`;
       } else {
         // Inactive: a muted add affordance. Tapping the row adds the variant.
         rightHtml = `<div class="type-indicator type-add"><ha-icon icon="mdi:plus"></ha-icon></div>`;
       }
-      const rowStyle = s.isOn ? ` style="background:${escapeHtml(this._rgbaFor(onColorN, 0.12))};"` : '';
-      return `<div class="type-row ${s.isOn ? 'is-on' : 'is-off'}" data-type-index="${i}"${rowStyle}
-                   role="button" tabindex="0" aria-pressed="${s.isOn ? 'true' : 'false'}"
-                   aria-label="${escapeHtml(s.label)}">
+      const rowStyle = state.isOn ? ` style="background:${escapeHtml(this._rgbaFor(onColorN, 0.12))};"` : '';
+      return `<div class="${index === null ? 'base-item-row' : 'type-row'} ${state.isOn ? 'is-on' : 'is-off'}"${index === null ? '' : ` data-type-index="${index}"`}${rowStyle}
+                   role="button" tabindex="0" aria-pressed="${state.isOn ? 'true' : 'false'}"
+                   aria-label="${escapeHtml(state.label)}">
                 ${thumb}
-                <div class="type-name">${escapeHtml(s.label)}</div>
+                <div class="type-name">${escapeHtml(state.label)}</div>
                 ${rightHtml}
               </div>`;
-    }).join('');
+    };
+    const baseIsVariant = states.some(state => this._buildNameFor(state.subtitle).toLowerCase()
+      === this._buildNameFor(baseSubtitle).toLowerCase());
+    const baseRow = enableQty && !baseIsVariant
+      ? renderRow({ ...bare, label: [this._config.title, baseSubtitle].filter(Boolean).join(' - ') }, null) : '';
+    const rowsHtml = baseRow + states.map(renderRow).join('');
 
     const headerLabel = escapeHtml([this._config.title, secondary].filter(Boolean).join(', '));
 
@@ -2934,6 +2968,7 @@ class ShoppingListCard extends HTMLElement {
         <div class="types-header ${isVertical ? 'vertical-header' : ''} ${headerQuantity ? 'has-header-quantity' : ''}" role="button" tabindex="0"
              aria-pressed="${headerOn ? 'true' : 'false'}" aria-label="${headerLabel}">
           ${headerInner}
+           ${headerBadge}
         </div>
         <div class="types-list" id="slc-types-list" role="group">${rowsHtml}</div>
       </div>
@@ -2993,16 +3028,17 @@ class ShoppingListCard extends HTMLElement {
       this._attachHold(header, () => this._removeAllTypes());
     }
 
-    card.querySelectorAll('.type-row').forEach(row => {
+    card.querySelectorAll('.type-row, .base-item-row').forEach(row => {
+      const baseItem = row.classList.contains('base-item-row');
       const idx = +row.dataset.typeIndex;
-      const tap = (ev) => this._handleTypeTap(ev, idx);
+      const tap = (ev) => baseItem ? this._toggleSubtitle(ev, this._config.subtitle || null) : this._handleTypeTap(ev, idx);
       row.addEventListener('click', tap);
       row.addEventListener('keydown', (ev) => {
         if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); tap(ev); }
       });
       // Holding a row removes that specific variant entirely, regardless of
       // its quantity.
-      this._attachHold(row, () => this._removeType(idx));
+      this._attachHold(row, () => baseItem ? this._runItemActions([this._config.subtitle || null], 'remove') : this._removeType(idx));
     });
   }
 

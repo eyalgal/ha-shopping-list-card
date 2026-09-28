@@ -674,13 +674,15 @@ for (const layout of ['horizontal', 'vertical']) {
     await settle();
     const increment = card.querySelector('.types-header .quantity-btn[data-action="increment"]');
     assert.ok(increment, 'The main Milk item needs its own quantity control.');
+    assert.ok(card.querySelector('.header-quantity .quantity-btn-placeholder'));
     increment.click();
     await settle();
     assert.equal(setup.services.length, 1);
     assert.equal(setup.services[0].data.rename, 'Milk (2)');
     assert.deepEqual(setup.state.items, [item('Milk (2)', 'plain-milk'), lactoseFree]);
     assert.equal(card.querySelector('.types-header .quantity').textContent, '2');
-    assert.equal(card.querySelector('.types-list .quantity').textContent, '1');
+    assert.equal(card.querySelector('.header-quantity .quantity-btn-placeholder'), null);
+    assert.equal(card.querySelector('.type-row .quantity').textContent, '1');
     assert.equal(card._expanded, false);
     card.querySelector('.types-header .quantity-btn[data-action="decrement"]').dispatchEvent(
       new environment.window.KeyboardEvent('keydown', { key: 'Enter', bubbles: true }),
@@ -693,6 +695,107 @@ for (const layout of ['horizontal', 'vertical']) {
     assert.deepEqual(environment.errors, []);
   });
 }
+
+test('compact variant cards expose the main item separately without changing variant indexes', async context => {
+  const environment = createEnvironment(context);
+  const lactoseFree = item('Milk - Lactose-free (3)', 'lactose-free');
+  const setup = createHass([item('Milk (2)', 'plain-milk'), lactoseFree], {
+    service(domain, service, data) {
+      assert.equal(domain, 'todo');
+      assert.equal(service, 'update_item');
+      assert.equal(data.item, 'plain-milk');
+      setup.push([item(data.rename, 'plain-milk'), lactoseFree]);
+    },
+  });
+  const card = mount(environment, setup.hass, { enable_quantity: true, types: ['Lactose-free'] });
+  await settle();
+  const mainRow = card.querySelector('.base-item-row');
+  assert.ok(mainRow, 'Narrow cards need a main-item row when header controls are hidden.');
+  assert.equal(mainRow.querySelector('.type-name').textContent, 'Milk');
+  assert.equal(card.querySelectorAll('.type-row').length, 1);
+  assert.equal(card.querySelector('.type-row').dataset.typeIndex, '0');
+  assert.equal(card.querySelector('.header-quantity-badge').textContent, '2');
+  card.querySelector('.types-chevron').click();
+  mainRow.querySelector('[data-action="increment"]').click();
+  await settle();
+  assert.deepEqual(setup.state.items, [item('Milk (3)', 'plain-milk'), lactoseFree]);
+  assert.equal(card.querySelector('.header-quantity-badge').textContent, '3');
+  assert.equal(card.querySelector('.base-item-row .quantity').textContent, '3');
+  assert.equal(card.querySelector('.type-row .quantity').textContent, '3');
+  assert.equal(card._expanded, true);
+  assert.equal(setup.services.length, 1);
+  assert.deepEqual(environment.errors, []);
+});
+
+test('compact variant cards do not duplicate a configured default variant', async context => {
+  const environment = createEnvironment(context);
+  const card = mount(environment, createHass([item('Milk - Lactose-free (2)')]).hass, {
+    subtitle: 'Lactose-free', enable_quantity: true, types: ['Lactose-free', 'Whole'],
+  });
+  await settle();
+  assert.equal(card.querySelector('.base-item-row'), null);
+  assert.equal(card.querySelectorAll('.type-row').length, 2);
+  const badge = card.querySelector('.header-quantity-badge');
+  assert.ok(badge);
+  assert.equal(badge.textContent, '2');
+  assert.match(badge.getAttribute('aria-label'), /Milk - Lactose-free.*2/);
+});
+
+test('compact main-item rows add, adjust, and hold-remove only their own item', async context => {
+  const environment = createEnvironment(context);
+  const lactoseFree = item('Dairy - Milk - Lactose-free (3)', 'lactose-free');
+  const setup = createHass([lactoseFree], {
+    service(domain, service, data) {
+      assert.equal(domain, 'todo');
+      if (service === 'add_item') setup.push([lactoseFree, item(data.item, 'whole')]);
+      else {
+        assert.equal(data.item, 'whole');
+        setup.push(service === 'remove_item' ? [lactoseFree] : [lactoseFree, item(data.rename, 'whole')]);
+      }
+    },
+  });
+  const card = mount(environment, setup.hass, {
+    subtitle: 'Whole', list_prefix: 'Dairy', enable_quantity: true,
+    quantity_step: 2, quantity_max: 3, remove_zero: false, types: ['Lactose-free'],
+  });
+  await settle();
+  card.querySelector('.types-chevron').click();
+  assert.equal(card.querySelector('.base-item-row .type-name').textContent, 'Milk - Whole');
+  card.querySelector('.base-item-row').click();
+  await settle();
+  assert.equal(setup.services[0].data.item, 'Dairy - Milk - Whole (1)');
+  card.querySelector('.base-item-row [data-action="increment"]').dispatchEvent(
+    new environment.window.KeyboardEvent('keydown', { key: 'Enter', bubbles: true }),
+  );
+  await settle();
+  assert.equal(setup.services[1].data.rename, 'Dairy - Milk - Whole (3)');
+  assert.equal(card.querySelector('.header-quantity-badge').textContent, '3');
+  card.querySelector('.base-item-row').dispatchEvent(new environment.window.PointerEvent('pointerdown', {
+    bubbles: true, button: 0, isPrimary: true,
+  }));
+  const hold = [...environment.timers.values()].find(timer => timer.delay === 500);
+  assert.ok(hold);
+  hold.callback();
+  await settle();
+  assert.equal(setup.services[2].service, 'remove_item');
+  assert.deepEqual(setup.state.items, [lactoseFree]);
+  assert.equal(card.querySelector('.header-quantity-badge'), null);
+  assert.equal(card.querySelector('.base-item-row').getAttribute('aria-pressed'), 'false');
+  assert.equal(card._expanded, true);
+  assert.deepEqual(environment.errors, []);
+});
+
+test('variant cards without quantities do not add compact quantity UI', async context => {
+  const environment = createEnvironment(context);
+  const card = mount(environment, createHass([item('Milk')]).hass, {
+    enable_quantity: false, types: ['Lactose-free'],
+  });
+  await settle();
+  assert.equal(card.querySelector('.base-item-row'), null);
+  assert.equal(card.querySelector('.header-quantity-badge'), null);
+  assert.equal(card.querySelector('.header-quantity'), null);
+  assert.equal(card.querySelectorAll('.type-row').length, 1);
+});
 
 test('a catalog Milk card adds and increments the plain item without changing its variant', async context => {
   const environment = createEnvironment(context);
@@ -724,7 +827,7 @@ test('a catalog Milk card adds and increments the plain item without changing it
   assert.equal(setup.services.length, 2);
   assert.equal(setup.services[1].data.rename, 'Milk (2)');
   assert.deepEqual(setup.state.items, [lactoseFree, item('Milk (2)', 'plain-milk')]);
-  assert.equal(milk.querySelector('.types-list .quantity').textContent, '3');
+  assert.equal(milk.querySelector('.type-row .quantity').textContent, '3');
   assert.equal(milk._expanded, false);
   assert.deepEqual(environment.errors, []);
 });
@@ -748,7 +851,7 @@ test('variant header quantities honor the default subtitle, prefix, step, maximu
   card.querySelector('.header-quantity [data-action="increment"]').click();
   await settle();
   assert.equal(card.querySelector('.header-quantity .quantity').textContent, '3');
-  assert.equal(card.querySelector('.types-list .quantity').textContent, '3');
+  assert.equal(card.querySelector('.type-row .quantity').textContent, '3');
   card.querySelector('.header-quantity [data-action="increment"]').click();
   await settle();
   assert.equal(setup.services.length, 1);

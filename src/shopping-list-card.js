@@ -546,6 +546,7 @@ class ShoppingListCard extends HTMLElement {
     // it is the plain title.
     const baseSubtitle = this._config.subtitle || null;
     const bare = this._typeState(baseSubtitle);
+    const enableQty = !!this._config.enable_quantity;
 
     // Memoize on header + per-row states. Expansion is a pure CSS toggle applied
     // outside render, so it is intentionally excluded from the key.
@@ -569,7 +570,10 @@ class ShoppingListCard extends HTMLElement {
 
     // Optional badge showing how many variants are currently on the list.
     const countBadge = activeCount > 0
-      ? `<span class="quantity-badge">${activeCount}</span>` : '';
+      ? `<span class="quantity-badge variant-count-badge">${activeCount}</span>` : '';
+    const quantityLabel = escapeHtml(`${this._buildNameFor(baseSubtitle)}, quantity ${bare.qty}`);
+    const headerBadge = bare.isOn && enableQty
+      ? `<span class="quantity-badge header-quantity-badge" aria-label="${quantityLabel}" title="${quantityLabel}">${bare.qty}</span>` : '';
 
     let parentIcon;
     if (isVertical) {
@@ -608,44 +612,48 @@ class ShoppingListCard extends HTMLElement {
       cardBgStyle = `style="background-color: ${escapeHtml(this._rgbaFor(onColorN, 0.1))};"`;
     }
 
-    const enableQty = !!this._config.enable_quantity;
     const decBtn = `<div class="quantity-btn" role="button" tabindex="0" aria-label="Decrease quantity" data-action="decrement"><ha-icon icon="mdi:minus"></ha-icon></div>`;
     const incBtn = `<div class="quantity-btn" role="button" tabindex="0" aria-label="Increase quantity" data-action="increment"><ha-icon icon="mdi:plus"></ha-icon></div>`;
     const headerQuantity = bare.isOn && enableQty
       ? `<div class="quantity-controls header-quantity">
-           ${(this._keepZero() || bare.qty > 1) ? decBtn : ''}
-           <span class="quantity" aria-label="Quantity: ${bare.qty}">${bare.qty}</span>
+           ${(this._keepZero() || bare.qty > 1) ? decBtn : '<div class="quantity-btn-placeholder" aria-hidden="true"></div>'}
+           <span class="quantity" aria-label="Quantity: ${bare.qty}" title="${bare.qty}">${bare.qty}</span>
            ${incBtn}
          </div>` : '';
 
     const onSolid = escapeHtml(this._solidFor(onColorN));
-    const rowsHtml = states.map((s, i) => {
-      const thumb = s.image
-        ? `<div class="type-thumb"><img src="${escapeHtml(s.image)}" alt=""><ha-icon class="type-image-fallback" icon="${escapeHtml(s.icon || offIcon)}"></ha-icon></div>`
-        : s.icon ? `<div class="type-thumb"><ha-icon icon="${escapeHtml(s.icon)}"></ha-icon></div>` : '';
+    const renderRow = (state, index) => {
+      const thumb = state.image
+        ? `<div class="type-thumb"><img src="${escapeHtml(state.image)}" alt=""><ha-icon class="type-image-fallback" icon="${escapeHtml(state.icon || offIcon)}"></ha-icon></div>`
+        : state.icon ? `<div class="type-thumb"><ha-icon icon="${escapeHtml(state.icon)}"></ha-icon></div>` : '';
       let rightHtml;
-      if (s.isOn && enableQty) {
+      if (state.isOn && enableQty) {
         rightHtml = `<div class="type-qty">
-            ${(this._keepZero() || s.qty > 1) ? decBtn : ''}
-            <span class="quantity" aria-label="Quantity: ${s.qty}">${s.qty}</span>
+            ${(this._keepZero() || state.qty > 1) ? decBtn : ''}
+            <span class="quantity" aria-label="Quantity: ${state.qty}">${state.qty}</span>
             ${incBtn}
           </div>`;
-      } else if (s.isOn) {
+      } else if (state.isOn) {
         // Active without quantity: a flat check indicator (not a toggle button).
         rightHtml = `<div class="type-indicator" style="color:${onSolid};"><ha-icon icon="mdi:check"></ha-icon></div>`;
       } else {
         // Inactive: a muted add affordance. Tapping the row adds the variant.
         rightHtml = `<div class="type-indicator type-add"><ha-icon icon="mdi:plus"></ha-icon></div>`;
       }
-      const rowStyle = s.isOn ? ` style="background:${escapeHtml(this._rgbaFor(onColorN, 0.12))};"` : '';
-      return `<div class="type-row ${s.isOn ? 'is-on' : 'is-off'}" data-type-index="${i}"${rowStyle}
-                   role="button" tabindex="0" aria-pressed="${s.isOn ? 'true' : 'false'}"
-                   aria-label="${escapeHtml(s.label)}">
+      const rowStyle = state.isOn ? ` style="background:${escapeHtml(this._rgbaFor(onColorN, 0.12))};"` : '';
+      return `<div class="${index === null ? 'base-item-row' : 'type-row'} ${state.isOn ? 'is-on' : 'is-off'}"${index === null ? '' : ` data-type-index="${index}"`}${rowStyle}
+                   role="button" tabindex="0" aria-pressed="${state.isOn ? 'true' : 'false'}"
+                   aria-label="${escapeHtml(state.label)}">
                 ${thumb}
-                <div class="type-name">${escapeHtml(s.label)}</div>
+                <div class="type-name">${escapeHtml(state.label)}</div>
                 ${rightHtml}
               </div>`;
-    }).join('');
+    };
+    const baseIsVariant = states.some(state => this._buildNameFor(state.subtitle).toLowerCase()
+      === this._buildNameFor(baseSubtitle).toLowerCase());
+    const baseRow = enableQty && !baseIsVariant
+      ? renderRow({ ...bare, label: [this._config.title, baseSubtitle].filter(Boolean).join(' - ') }, null) : '';
+    const rowsHtml = baseRow + states.map(renderRow).join('');
 
     const headerLabel = escapeHtml([this._config.title, secondary].filter(Boolean).join(', '));
 
@@ -675,6 +683,7 @@ class ShoppingListCard extends HTMLElement {
         <div class="types-header ${isVertical ? 'vertical-header' : ''} ${headerQuantity ? 'has-header-quantity' : ''}" role="button" tabindex="0"
              aria-pressed="${headerOn ? 'true' : 'false'}" aria-label="${headerLabel}">
           ${headerInner}
+           ${headerBadge}
         </div>
         <div class="types-list" id="slc-types-list" role="group">${rowsHtml}</div>
       </div>
@@ -734,16 +743,17 @@ class ShoppingListCard extends HTMLElement {
       this._attachHold(header, () => this._removeAllTypes());
     }
 
-    card.querySelectorAll('.type-row').forEach(row => {
+    card.querySelectorAll('.type-row, .base-item-row').forEach(row => {
+      const baseItem = row.classList.contains('base-item-row');
       const idx = +row.dataset.typeIndex;
-      const tap = (ev) => this._handleTypeTap(ev, idx);
+      const tap = (ev) => baseItem ? this._toggleSubtitle(ev, this._config.subtitle || null) : this._handleTypeTap(ev, idx);
       row.addEventListener('click', tap);
       row.addEventListener('keydown', (ev) => {
         if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); tap(ev); }
       });
       // Holding a row removes that specific variant entirely, regardless of
       // its quantity.
-      this._attachHold(row, () => this._removeType(idx));
+      this._attachHold(row, () => baseItem ? this._runItemActions([this._config.subtitle || null], 'remove') : this._removeType(idx));
     });
   }
 

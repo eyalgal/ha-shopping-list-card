@@ -330,7 +330,9 @@ When you want one tile to cover several variants of the same item, list them und
 
 Tapping the **header body** (outside the chevron and quantity buttons) adds or removes the header item, exactly like a normal single-item card. By default that is the bare title (`Apple`); if you also set a `subtitle`, the header item is `"<title> - <subtitle>"` (e.g. `Apple - Pink Lady`), so you can keep a default variant available with a single tap while the chevron exposes the rest.
 
-With `enable_quantity: true`, the selected header item has its own quantity controls in both layouts, even when the variants are collapsed. For a Milk card with a Lactose-free variant, tap the header to add plain `Milk`, then its `+` button to get `Milk (2)`. Lactose-free keeps its separate quantity. Catalog mode enables quantities by default.
+With `enable_quantity: true`, the selected header item has its own quantity controls in both layouts. At regular widths, tap the header to add plain `Milk`, then its `+` button to get `Milk (2)`. The chevron stays at the right, and quantities do not increase the collapsed card's height. Lactose-free keeps its separate quantity. Catalog mode enables quantities by default.
+
+On tiles narrower than 220px, the header shows a quantity badge instead of quantity buttons. Expand the card to adjust the main item in its own first row, such as **Milk**, followed by **Lactose-free**. If the header already targets a configured variant, use that variant's existing row instead; it is not duplicated. Product names shorten to fit, and the chevron stays accessible rather than wrapping onto another line.
 
 The chevron opens or closes the variants independently of item actions, including while an update is pending or the list is disconnected. A long press does not disable collapse. The list stays expanded until you close it; changing a quantity does not automatically collapse it.
 
