@@ -2,7 +2,7 @@
 
 Use **Catalog** mode in Shopping List Card to browse products from one shared JSON-backed sensor. Categories, search, variants, quantities, the full shopping list, and quick-add are built in. No generated tile template, `auto-entities`, or `layout-card` is needed.
 
-Catalog mode requires Shopping List Card **2.2.0 or later**. For a test build, follow the installation instructions on the [release page](https://github.com/eyalgal/ha-shopping-list-card/releases).
+Use Shopping List Card **3.0.0** for Catalog mode. The earlier 2.2.0 test builds also supported it; upgrading from the latest test build does not require changing your JSON or card configuration. Follow the pre-release installation instructions on the [release page](https://github.com/eyalgal/ha-shopping-list-card/releases).
 
 This folder keeps its original URL, but the instructions and dashboard example now use Catalog mode. The existing JSON format is still supported; you do not need to convert your catalog.
 

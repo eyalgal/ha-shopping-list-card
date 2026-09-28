@@ -67,7 +67,7 @@ Add **Shopping List Card** from the dashboard card picker, then choose **Single*
 - **Single:** select your to-do list, enter the product title, and optionally add variants under **Content > Variants**. Set layout, images, quantities, and hold behavior in the editor. This mode needs no catalog sensor. In YAML, use `mode: single` or omit `mode`.
 - **Catalog:** select a catalog sensor and your to-do list, then choose categories, display controls, and product defaults. Use `mode: catalog`. Products and variants live in the sensor's source data, not in the card configuration.
 
-Catalog mode is available in **2.2.0 and later**. See the [release page][release] for test-build installation instructions when using a pre-release.
+Catalog mode is part of **3.0.0** and was previously available in the 2.2.0 test builds. See the [release page][release] for pre-release installation instructions. Updating from the latest 2.2.0 test build does not require changing your card configuration or JSON catalog.
 
 The separate `custom:shopping-list-catalog-card` type has been removed. Replace it with `type: custom:shopping-list-card` and add `mode: catalog`; the remaining catalog settings stay the same. There is no alias for the removed type.
 
