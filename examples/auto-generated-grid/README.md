@@ -24,7 +24,7 @@ Keep your JSON, sensor, image directory, and to-do entity. Skip sensor setup and
 ## Set Up a New Source
 
 1. Install Shopping List Card through HACS. Create a to-do list through **Settings > Devices & Services > Add Integration > Local To-do**, or use an existing integration that exposes a `todo` entity. Note its actual entity ID.
-2. Put your catalog JSON at `/config/shopping_items.json`. Use [shopping_items.json](shopping_items.json) as a starting point, or create a category-to-products map as shown below. With Home Assistant Container, this path is inside the container's configuration mount, not an arbitrary host path.
+2. Put your catalog JSON at `/config/shopping_items.json`. Download **Starter JSON** from the Catalog card editor, use [shopping_items.json](shopping_items.json) as a starting point, or create a category-to-products map as shown below. Do not overwrite an existing catalog with the starter example. With Home Assistant Container, this path is inside the container's configuration mount, not an arbitrary host path.
 3. Back up your Home Assistant configuration, then merge the `command_line` sensor from [sensor.yaml](sensor.yaml) into `configuration.yaml`. If `command_line:` already exists, append the sensor entry to that list instead of adding a duplicate key. Keep `json_attributes` in sync with your JSON category names. Command Line is a YAML-configured integration; [its documentation](https://www.home-assistant.io/integrations/command_line/) covers includes and configuration details.
 4. Check the configuration before applying it. If Command Line is already loaded, run `command_line.reload` from **Developer Tools > Actions**. For its first setup, restart Home Assistant after the configuration check succeeds.
 5. Open **Developer Tools > States** and find the new sensor, normally `sensor.shopping_list_items`. Confirm that its attributes contain product arrays such as `Fruits`. The timestamp state is not a product count; the card reads the attributes. Use the actual entity ID if Home Assistant assigned a different one.
@@ -35,7 +35,7 @@ The sample sensor reads the file every 300 seconds. For an immediate refresh aft
 
 1. Edit the dashboard and choose **Add card > Shopping List Card**.
 2. Set **Card mode** to **Catalog**.
-3. Select your **Catalog sensor** and **To-do list**. Leave **Catalog attribute** empty for the sensor in this example.
+3. Select your **Catalog sensor** and **To-do list**. The editor detects wrapped catalog attributes automatically; **Catalog attribute** stays empty for the sensor in this example. Check the source-validation status before saving.
 4. Set the title and maximum columns. Under **Product defaults**, set the image base path if you use local product images.
 5. Under **Display**, choose all categories or a subset and turn individual controls on or off. Save the card.
 
@@ -56,9 +56,12 @@ Replace both entity IDs with your own. This is **one card**, not a complete dash
 
 If your sensor puts the whole category map inside one attribute, such as `products`, set `catalog_attribute: products`. It can contain an object or a JSON string. With no `catalog_attribute`, every array-valued sensor attribute is a category; non-array metadata is ignored.
 
+The editor reports category/product counts and source problems such as invalid JSON, a missing attribute, or a product without a title. If it finds a valid alternative attribute, use the offered source button to apply it. **Starter JSON** only downloads an example file to your browser; it does not write to Home Assistant. **Setup guide** links back to these instructions.
+
 ## Use the Catalog
 
 - Tap a product to add it to the list; tap again to remove it. This removes the to-do item, rather than marking it completed.
+- After an accidental removal, use **Undo** above the catalog to restore the last confirmed batch and its quantities. It covers this card's removals, not edits made through the native full list or other apps. See [Undo limits](../../README.md#undo-removal).
 - Open a product's chevron to choose variants. Tap a variant to add or remove that exact item. The header is also actionable: it uses the bare title, or the title plus subtitle when one is set.
 - Use `+` and `-` to adjust quantities. Catalog mode enables these by default. The default hold action removes an item; holding a grouped header clears its configured variants too. Change this under product options if you prefer more-info or no hold action.
 - Use category tabs, search, and **On list** to filter catalog tiles. On list does not include uncatalogued items.

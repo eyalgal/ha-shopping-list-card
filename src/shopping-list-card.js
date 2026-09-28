@@ -14,11 +14,12 @@
 
 import { buildName, keepZero, matchItem, planItemAction } from './item-model.js';
 import { getTodoStore } from './todo-store.js';
-import { readCatalog } from './catalog-model.js';
+import { findCatalogSource } from './catalog-model.js';
 import { CARD_DEFAULTS } from './card-defaults.js';
 import { CARD_STYLES } from './card-styles.js';
 import './editor.js';
 import './catalog-card.js';
+import './undo-control.js';
 
 const CARD_VERSION = '3.0.0';
 
@@ -57,7 +58,7 @@ class ShoppingListCard extends HTMLElement {
     this._suppressClick = false;
     this._clickResetTimer = null;
     this.addEventListener('click', event => {
-      if (!this._suppressClick || event.target.closest('.types-chevron')) return;
+      if (!this._suppressClick || event.composedPath().some(target => target.matches?.('.types-chevron, shopping-list-undo'))) return;
       this._suppressClick = false;
       clearTimeout(this._clickResetTimer);
       this._clickResetTimer = null;
@@ -145,6 +146,7 @@ class ShoppingListCard extends HTMLElement {
     this._items = null;
     this.content = null;
     this._statusElement = null;
+    this._undoControl = null;
     this._lastRenderKey = null;
     this._lastStatusKey = null;
     this._expanded = false;
@@ -334,13 +336,18 @@ class ShoppingListCard extends HTMLElement {
 
   _ensureShell() {
     if (this.content) return;
-    this.innerHTML = `<ha-card><div class="list-status" role="status" aria-live="polite"></div><div class="card-content"></div></ha-card>`;
+    this.innerHTML = `<ha-card><div class="list-status" role="status" aria-live="polite"></div><div class="card-content"></div><shopping-list-undo hidden></shopping-list-undo></ha-card>`;
     this.content = this.querySelector('div.card-content');
     this._statusElement = this.querySelector('.list-status');
+    this._undoControl = this.querySelector('shopping-list-undo');
     this._attachStyles();
   }
 
   _renderStatus() {
+    const inCatalog = this.getRootNode().host?.localName === 'shopping-list-catalog';
+    const keys = this._config ? [this._buildFullName(), ...this._getTypes().map(type => this._buildNameFor(type.name))]
+      .map(name => name.toLowerCase()) : [];
+    this._undoControl?.update(inCatalog ? null : this._store, inCatalog ? null : this._syncState, keys);
     const status = this._syncState?.status || 'loading';
     const message = this._actionError || this._syncState?.error || (status === 'loading' ? 'Loading list...' : '');
     const severity = this._actionError || status === 'error' ? 'error' : status === 'loading' ? 'info' : 'warning';
@@ -363,7 +370,7 @@ class ShoppingListCard extends HTMLElement {
     const card = this.content?.querySelector('.card-container');
     if (!card) return;
     const names = [this._buildFullName(), ...this._getTypes().map(type => this._buildNameFor(type.name))];
-    const busy = this._isUpdating || names.some(name => this._store?.pending.has(name.toLowerCase()));
+    const busy = this._isUpdating || this._syncState?.undo?.busy || names.some(name => this._store?.pending.has(name.toLowerCase()));
     const unavailable = !this._store?.ready;
     card.classList.toggle('is-updating', busy);
     card.classList.toggle('is-unavailable', unavailable);
@@ -986,21 +993,11 @@ if (!window.customCards.some(c => c.type === 'shopping-list-card')) {
       if (domain === 'todo') {
         return { config: { type: 'custom:shopping-list-card', title: 'New item', todo_list: entityId } };
       }
-      const state = hass?.states?.[entityId];
-      if (domain !== 'sensor' || !state) return null;
+      if (domain !== 'sensor') return null;
       const todoList = ShoppingListCard.getStubConfig(hass).todo_list;
       if (!todoList) return null;
-      for (const attribute of [undefined, ...Object.keys(state.attributes || {})]) {
-        const config = {
-          type: 'custom:shopping-list-card', mode: 'catalog',
-          catalog_entity: entityId, todo_list: todoList,
-          ...(attribute === undefined ? {} : { catalog_attribute: attribute }),
-        };
-        try {
-          if (readCatalog(hass, config).some(group => group.products.length)) return { config };
-        } catch {}
-      }
-      return null;
+      const catalog = findCatalogSource(hass, entityId);
+      return catalog ? { config: { type: 'custom:shopping-list-card', mode: 'catalog', ...catalog, todo_list: todoList } } : null;
     },
   });
 }

@@ -67,6 +67,7 @@ function planItemAction(config, items, subtitle, action = 'toggle') {
   }
   return {
     key, service: 'update_item', data: { item: target, rename: summary },
+    ...(keepZero(config) && quantity === 0 && state.qty > 0 ? { undoRemoval: true } : {}),
     confirmed: current => state.matchedUid
       ? findTarget(current)?.summary === summary
       : current.some(item => item.summary === summary),
@@ -128,6 +129,11 @@ class TodoStore {
     this._request = null;
     this._retryTimer = null;
     this._retryDelay = 0;
+    this._allItems = [];
+    this._undo = null;
+    this._undoBusy = false;
+    this._operationSequence = 0;
+    this._undoSequence = 0;
     this._availability = this._availabilityError();
     if (this._availability) {
       this.status = 'unavailable';
@@ -136,7 +142,14 @@ class TodoStore {
   }
 
   get snapshot() {
-    return { items: this.items, status: this.status, error: this.error, pending: new Set(this.pending) };
+    return {
+      items: this.items, status: this.status, error: this.error, pending: new Set(this.pending),
+      undo: this._undo ? {
+        id: this._undo.id, count: this._undo.records.length,
+        keys: this._undo.records.map(record => record.key),
+        summary: this._undo.records[0].item.summary, busy: this._undoBusy,
+      } : null,
+    };
   }
 
   get ready() {
@@ -212,7 +225,7 @@ class TodoStore {
       const pending = this.connection.subscribeMessage(message => {
         if (!current() || !Array.isArray(message?.items)) return;
         attempt.received = true;
-        this.items = this._activeItems(message.items);
+        this._setItems(message.items);
         this._revision++;
         this.status = 'ready';
         this.error = null;
@@ -228,6 +241,11 @@ class TodoStore {
 
   _activeItems(items) {
     return items.filter(item => item?.status === 'needs_action' && typeof item.summary === 'string');
+  }
+
+  _setItems(items) {
+    this._allItems = items.filter(item => typeof item?.summary === 'string');
+    this.items = this._activeItems(this._allItems);
   }
 
   _unsubscribe(unsubscribe) {
@@ -277,7 +295,7 @@ class TodoStore {
         if (!Array.isArray(result?.items)) throw new Error('Home Assistant returned an invalid to-do list.');
         this._confirmedWriteRevision = Math.max(this._confirmedWriteRevision, request.writeRevision);
         if (request.revision === this._revision) {
-          this.items = this._activeItems(result.items);
+          this._setItems(result.items);
           this._revision++;
           this.status = this._subscription?.received ? 'ready' : 'reconnecting';
           this.error = this.status === 'ready' ? null : 'Live updates are reconnecting...';
@@ -308,11 +326,106 @@ class TodoStore {
     return this._fetch();
   }
 
-  async execute(keys, createActions) {
+  _removalRecord(action) {
+    if (action.service !== 'remove_item' && !action.undoRemoval) return null;
+    const item = this.items.find(item => item.uid === action.data.item || item.summary === action.data.item);
+    if (!item || !action.key) return null;
+    return {
+      key: action.key, item: { ...item },
+      ...(action.service === 'update_item' ? { after: action.data.rename } : {}),
+    };
+  }
+
+  _rememberRemoval(actions, records, outcomes, sequence) {
+    const confirmed = records.filter((record, index) => record
+      && outcomes[index].status === 'fulfilled' && actions[index].confirmed(this.items)
+      && (record.after !== undefined || !this._allItems.some(item => record.item.uid
+        ? item.uid === record.item.uid : item.summary === record.item.summary)));
+    if (!confirmed.length || sequence < this._undoSequence) return;
+    this._undoSequence = sequence;
+    this._undo = { id: sequence, records: confirmed };
+  }
+
+  dismissUndo() {
+    if (this._undoBusy) return;
+    this._undo = null;
+    this._notify();
+  }
+
+  _restoreAction(record) {
+    const features = this.hass.states?.[this.entityId]?.attributes?.supported_features;
+    const supports = feature => features === undefined || (features & feature) !== 0;
+    const changed = () => new Error('The list changed since this removal. Undo will not overwrite an existing item.');
+    if (record.after !== undefined) {
+      const current = this._allItems.find(item => record.item.uid
+        ? item.uid === record.item.uid : item.summary === record.after);
+      if (!current || current.status !== 'needs_action' || current.summary !== record.after
+        || current.description !== record.item.description || current.due !== record.item.due) throw changed();
+      if (!supports(4)) throw new Error('This list no longer supports restoring item quantities.');
+      return {
+        key: record.key, record, service: 'update_item',
+        data: { item: current.uid || current.summary, rename: record.item.summary },
+        confirmed: items => items.some(item => (current.uid ? item.uid === current.uid : true)
+          && item.summary === record.item.summary),
+      };
+    }
+    if (matchItem(this.items, record.key, {}).present
+      || (record.item.uid && this._allItems.some(item => item.uid === record.item.uid))) throw changed();
+    if (!supports(1)) throw new Error('This list does not support restoring removed items.');
+    const data = { item: record.item.summary };
+    if (record.item.description != null) {
+      if (!supports(64)) throw new Error('This list no longer supports restoring item descriptions.');
+      data.description = record.item.description;
+    }
+    if (record.item.due != null) {
+      const dateOnly = /^\d{4}-\d{2}-\d{2}$/.test(record.item.due);
+      if (!supports(dateOnly ? 16 : 32)) throw new Error('This list no longer supports restoring item due dates.');
+      data[dateOnly ? 'due_date' : 'due_datetime'] = record.item.due;
+    }
+    return {
+      key: record.key, record, service: 'add_item', data,
+      confirmed: items => items.some(item => item.summary === record.item.summary),
+    };
+  }
+
+  async undoLastRemoval(expectedId = this._undo?.id) {
     if (!this.ready) throw new Error(this.error || 'Wait for the to-do list to reconnect.');
+    if (!this._undo || this._undo.id !== expectedId || this._undoBusy || this.pending.size) return false;
+    const batch = this._undo;
+    const generation = this._generation;
+    this._undoBusy = true;
+    this._notify();
+    let actions = [];
+    try {
+      if (this._request) await this._request.promise;
+      await this._fetch();
+      if (!this._current(generation)) throw new Error('The list connection changed. Refresh before trying Undo again.');
+      actions = batch.records.map(record => this._restoreAction(record));
+      return await this.execute(actions.map(action => action.key), () => actions, { isUndo: true });
+    } finally {
+      if (this._current(generation) && this._undo === batch) {
+        const restored = new Set(actions.filter(action => action.confirmed(this.items)).map(action => action.record));
+        batch.records = batch.records.filter(record => !restored.has(record));
+        if (!batch.records.length) this._undo = null;
+      }
+      this._undoBusy = false;
+      this._notify();
+      if (!this.listeners.size) this._dispose();
+    }
+  }
+
+  async execute(keys, createActions, { isUndo = false } = {}) {
+    if (!this.ready) throw new Error(this.error || 'Wait for the to-do list to reconnect.');
+    if (this._undoBusy && !isUndo) return false;
     if (keys.some(key => this.pending.has(key))) return false;
     const actions = createActions(this.items).filter(Boolean);
     if (!actions.length) return false;
+    const sequence = ++this._operationSequence;
+    const removals = isUndo ? [] : actions.map(action => this._removalRecord(action));
+    if (!isUndo && this._undo) {
+      const records = this._undo.records.filter(record => !keys.includes(record.key));
+      this._undo = records.length ? { ...this._undo, records } : null;
+    }
     const generation = this._generation;
     const hass = this.hass;
     const uniqueKeys = new Set(keys);
@@ -328,6 +441,7 @@ class TodoStore {
         await this._fetch(writeRevision);
       }
       if (!this._current(generation)) throw new Error('The list connection changed during the update.');
+      if (!isUndo) this._rememberRemoval(actions, removals, outcomes, sequence);
       if (failures.length) {
         const detail = failures[0].reason?.message || 'Home Assistant rejected the request.';
         throw new Error(`Could not update ${failures.length} item(s). ${detail}`);
@@ -346,8 +460,9 @@ class TodoStore {
   }
 
   _dispose() {
-    if (this.listeners.size || this.pending.size) return;
+    if (this.listeners.size || this.pending.size || this._undoBusy) return;
     this.closed = true;
+    this._undo = null;
     this._generation++;
     this._stopSubscription();
     this._clearRetry();
@@ -420,6 +535,9 @@ function readCatalog(hass, config) {
   const entity = hass.states?.[config.catalog_entity];
   if (!entity) throw new Error(`Catalog entity not found: ${config.catalog_entity}`);
   if (entity.state === 'unavailable' || entity.state === 'unknown') throw new Error('The product catalog is unavailable.');
+  if (config.catalog_attribute && !Object.hasOwn(entity.attributes || {}, config.catalog_attribute)) {
+    throw new Error(`Catalog attribute "${config.catalog_attribute}" was not found on ${config.catalog_entity}.`);
+  }
   let data = config.catalog_attribute ? entity.attributes?.[config.catalog_attribute] : entity.attributes;
   if (typeof data === 'string') {
     try { data = JSON.parse(data); }
@@ -472,6 +590,18 @@ function readCatalog(hass, config) {
 
 function productOnList(product, items) {
   return product.names.some(name => matchItem(items, name, product.config).isOn);
+}
+
+function findCatalogSource(hass, entityId) {
+  const state = hass?.states?.[entityId];
+  if (typeof entityId !== 'string' || !entityId.startsWith('sensor.') || !state) return null;
+  for (const attribute of [undefined, ...Object.keys(state.attributes || {})]) {
+    const config = { catalog_entity: entityId, ...(attribute === undefined ? {} : { catalog_attribute: attribute }) };
+    try {
+      if (readCatalog(hass, config).some(group => group.products.length)) return config;
+    } catch {}
+  }
+  return null;
 }
 
 const CARD_DEFAULTS = {
@@ -917,12 +1047,23 @@ class ShoppingListCatalogEditor extends HTMLElement {
         .catalog-category-choices { display: grid; gap: 8px; }
         .catalog-category-option { display: flex; align-items: center; gap: 8px; font-size: 14px; overflow-wrap: anywhere; }
         input[type="checkbox"] { width: 18px; height: 18px; flex-shrink: 0; accent-color: var(--primary-color); }
+        .catalog-source-status { display: block; font-size: 13px; overflow-wrap: anywhere; }
+        .catalog-setup-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+        .catalog-setup-actions button, .catalog-setup-actions a { display: inline-flex; align-items: center; justify-content: center; gap: 6px; min-height: 36px; padding: 4px 8px; border: 0; border-radius: 4px; background: transparent; color: var(--primary-color); font: inherit; font-size: 13px; text-decoration: none; cursor: pointer; }
+        .catalog-setup-actions button:focus-visible, .catalog-setup-actions a:focus-visible { outline: 2px solid var(--primary-color); outline-offset: 2px; }
+        .catalog-setup-actions ha-icon { --mdc-icon-size: 20px; }
       </style>
       <div class="catalog-form">
         <ha-expansion-panel header="Catalog" outlined expanded>
           <div class="catalog-panel">
             <ha-entity-picker id="catalog_entity" label="Catalog sensor" required></ha-entity-picker>
             <${field} id="catalog_attribute" label="Catalog attribute (optional)"></${field}>
+            <ha-alert class="catalog-source-status" role="status" aria-live="polite"></ha-alert>
+            <div class="catalog-setup-actions">
+              <button class="catalog-use-source" type="button" hidden></button>
+              <button class="catalog-starter" type="button" title="Download starter catalog"><ha-icon icon="mdi:download"></ha-icon>Starter JSON</button>
+              <a href="https://github.com/eyalgal/ha-shopping-list-card/blob/main/examples/auto-generated-grid/README.md" target="_blank" rel="noopener noreferrer"><ha-icon icon="mdi:open-in-new"></ha-icon>Setup guide</a>
+            </div>
             <ha-entity-picker id="todo_list" label="To-do list" required></ha-entity-picker>
             <div class="catalog-fields">
               <${field} id="title" label="Title" placeholder="Shopping"></${field}>
@@ -971,6 +1112,14 @@ class ShoppingListCatalogEditor extends HTMLElement {
     }
     const layout = this.shadowRoot.getElementById('layout');
     layout.options = [{ value: 'vertical', label: 'Vertical' }, { value: 'horizontal', label: 'Horizontal' }];
+    this.shadowRoot.querySelector('.catalog-starter').addEventListener('click', () => this._downloadStarter());
+    this.shadowRoot.querySelector('.catalog-use-source').addEventListener('click', () => {
+      if (!this._detectedSource || !this._config) return;
+      const config = { ...this._config };
+      delete config.catalog_attribute;
+      this._emitConfig({ ...config, ...this._detectedSource });
+      this._updateValues();
+    });
     for (const control of this.shadowRoot.querySelectorAll('[id]')) {
       const changed = event => {
         event.stopPropagation();
@@ -1023,8 +1172,31 @@ class ShoppingListCatalogEditor extends HTMLElement {
   _updateCategories() {
     if (!this._rendered || !this._config || !this._hass) return;
     let available = [];
-    try { available = readCatalog(this._hass, { ...this._config, categories: undefined }).map(group => group.name); }
-    catch {}
+    const sourceStatus = this.shadowRoot.querySelector('.catalog-source-status');
+    const useSource = this.shadowRoot.querySelector('.catalog-use-source');
+    this._detectedSource = findCatalogSource(this._hass, this._config.catalog_entity);
+    useSource.hidden = !this._detectedSource
+      || (this._detectedSource.catalog_attribute || '') === (this._config.catalog_attribute || '');
+    useSource.textContent = this._detectedSource?.catalog_attribute
+      ? `Use attribute: ${this._detectedSource.catalog_attribute}` : 'Use category attributes';
+    let message = 'No catalog sensor selected.';
+    let level = 'info';
+    if (this._config.catalog_entity) {
+      try {
+        const groups = readCatalog(this._hass, { ...this._config, categories: undefined });
+        available = groups.map(group => group.name);
+        const count = groups.reduce((total, group) => total + group.products.length, 0);
+        message = available.length
+          ? `${available.length} ${available.length === 1 ? 'category' : 'categories'}, ${count} ${count === 1 ? 'product' : 'products'}`
+          : 'No category arrays found in this source.';
+        level = available.length && count ? 'success' : 'warning';
+      } catch (error) {
+        message = error.message;
+        level = 'error';
+      }
+    }
+    sourceStatus.setAttribute('alert-type', level);
+    sourceStatus.textContent = message;
     this._availableCategories = available;
     const selected = this._config.categories;
     this.shadowRoot.querySelector('.catalog-all-categories').checked = selected === undefined;
@@ -1078,9 +1250,29 @@ class ShoppingListCatalogEditor extends HTMLElement {
     } else if (typeof value === 'string') next = value.trim() || undefined;
     if (next === undefined) delete target[key];
     else target[key] = next;
+    if (field === 'catalog_entity') {
+      delete config.catalog_attribute;
+      Object.assign(config, findCatalogSource(this._hass, config.catalog_entity));
+    }
     if (config.item_options && !Object.keys(config.item_options).length) delete config.item_options;
     this._emitConfig(config);
-    if (field === 'fixed_columns') this._updateValues();
+    if (['fixed_columns', 'catalog_entity', 'catalog_attribute'].includes(field)) this._updateValues();
+  }
+
+  _downloadStarter() {
+    const catalog = {
+      Fruits: [{ title: 'Apple', types: ['Gala', 'Granny Smith'] }, { title: 'Banana' }],
+      'Dairy and Eggs': [{ title: 'Milk' }, { title: 'Milk', subtitle: 'Lactose-free' }, { title: 'Eggs' }],
+    };
+    const url = URL.createObjectURL(new Blob([JSON.stringify(catalog, null, 2) + '\n'], { type: 'application/json' }));
+    const download = document.createElement('a');
+    download.href = url;
+    download.download = 'shopping_items.json';
+    download.hidden = true;
+    document.body.append(download);
+    download.click();
+    download.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 0);
   }
 
   _emitConfig(config) {
@@ -1510,7 +1702,10 @@ class ShoppingListCardEditor extends HTMLElement {
     const config = { ...this._config, type: 'custom:shopping-list-card', mode };
     if (mode === 'catalog') {
       const defaults = customElements.get('shopping-list-catalog').getStubConfig(this._hass);
-      if (!config.catalog_entity && defaults.catalog_entity) config.catalog_entity = defaults.catalog_entity;
+      if (!config.catalog_entity && defaults.catalog_entity) {
+        config.catalog_entity = defaults.catalog_entity;
+        if (!config.catalog_attribute && defaults.catalog_attribute) config.catalog_attribute = defaults.catalog_attribute;
+      }
       if (!config.todo_list && defaults.todo_list) config.todo_list = defaults.todo_list;
     }
     this.setConfig(config);
@@ -1702,6 +1897,76 @@ if (!customElements.get('shopping-list-card-editor')) {
   customElements.define('shopping-list-card-editor', ShoppingListCardEditor);
 }
 
+class ShoppingListUndo extends HTMLElement {
+  constructor() {
+    super();
+    this.attachShadow({ mode: 'open' });
+    this.shadowRoot.innerHTML = `
+      <style>
+        :host { display: block; padding: 8px; color: var(--primary-text-color); }
+        :host([hidden]) { display: none; }
+        .notice { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; font-size: 13px; }
+        .message { flex: 1 1 90px; min-width: 0; overflow-wrap: anywhere; }
+        button { display: inline-flex; align-items: center; justify-content: center; gap: 4px; min-height: 36px; padding: 4px 8px; border: 0; border-radius: 4px; background: transparent; color: var(--primary-color); font: inherit; cursor: pointer; }
+        button:focus-visible { outline: 2px solid var(--primary-color); outline-offset: 1px; }
+        button:disabled { opacity: .5; cursor: default; }
+        .dismiss { width: 36px; padding: 0; color: var(--secondary-text-color); }
+        ha-icon { --mdc-icon-size: 20px; }
+        .error { margin-top: 6px; color: var(--error-color, #db4437); font-size: 13px; overflow-wrap: anywhere; }
+        .error:empty { display: none; }
+      </style>
+      <div class="notice">
+        <span class="message" role="status" aria-live="polite"></span>
+        <button class="undo" type="button" title="Undo last removal"><ha-icon icon="mdi:undo"></ha-icon>Undo</button>
+        <button class="dismiss" type="button" title="Dismiss Undo" aria-label="Dismiss Undo"><ha-icon icon="mdi:close"></ha-icon></button>
+      </div>
+      <div class="error" role="alert"></div>
+    `;
+    this.shadowRoot.querySelector('.undo').addEventListener('click', () => { void this._restore(); });
+    this.shadowRoot.querySelector('.dismiss').addEventListener('click', () => this._store?.dismissUndo());
+  }
+
+  update(store, snapshot, keys = null) {
+    if (this._store !== store || this._undoId !== snapshot?.undo?.id) this._error = '';
+    this._store = store;
+    this._undoId = snapshot?.undo?.id;
+    this._keys = keys;
+    this._render(snapshot);
+  }
+
+  _render(snapshot) {
+    const undo = snapshot?.undo;
+    this.hidden = !undo || !!this._keys && !undo.keys.some(key => this._keys.includes(key));
+    if (this.hidden) return;
+    this.shadowRoot.querySelector('.message').textContent = undo.busy ? 'Restoring items...'
+      : undo.count === 1 ? `Removed ${undo.summary}` : `Removed ${undo.count} items`;
+    this.shadowRoot.querySelector('.undo').disabled = undo.busy || !this._store?.ready || !!snapshot.pending.size;
+    this.shadowRoot.querySelector('.dismiss').disabled = undo.busy;
+    this.shadowRoot.querySelector('.error').textContent = this._error || '';
+    this.shadowRoot.querySelector('.notice').setAttribute('aria-busy', String(undo.busy));
+  }
+
+  async _restore() {
+    const store = this._store;
+    const undoId = this._undoId;
+    if (!store || this.hidden) return;
+    this._error = '';
+    try {
+      await store.undoLastRemoval(undoId);
+    } catch (error) {
+      if (this.isConnected && this._store === store && this._undoId === undoId) {
+        this._error = error.message || 'Could not undo the removal.';
+      }
+    } finally {
+      if (this.isConnected && this._store === store) this._render(store.snapshot);
+    }
+  }
+}
+
+if (!customElements.get('shopping-list-undo')) {
+  customElements.define('shopping-list-undo', ShoppingListUndo);
+}
+
 class ShoppingListCatalogCard extends HTMLElement {
   constructor() {
     super();
@@ -1764,6 +2029,7 @@ class ShoppingListCatalogCard extends HTMLElement {
         .catalog-grid { display: grid; grid-template-columns: repeat(var(--catalog-columns, 4), minmax(0, 1fr)); gap: 8px; align-items: start; }
         .catalog-grid > shopping-list-card { display: block; min-width: 0; }
         .catalog-grid > shopping-list-card[hidden] { display: none !important; }
+        shopping-list-card shopping-list-undo { display: none !important; }
         :host([data-sync-state]:not([data-sync-state="ready"])) shopping-list-card .list-status { display: none; }
         .catalog-status:not(:empty) { margin-top: 12px; overflow-wrap: anywhere; }
         .catalog-empty { padding: 24px 0; margin: 0; color: var(--secondary-text-color); font-size: 14px; }
@@ -1796,6 +2062,7 @@ class ShoppingListCatalogCard extends HTMLElement {
       </section>
       <div class="catalog-tabs" role="tablist" aria-label="Product categories"></div>
       <div class="catalog-status" role="status" aria-live="polite"></div>
+      <shopping-list-undo hidden></shopping-list-undo>
       <div class="catalog-content" id="catalog-content" role="tabpanel"></div>
       <p class="catalog-empty" role="status" hidden></p>
     `;
@@ -2073,7 +2340,7 @@ class ShoppingListCatalogCard extends HTMLElement {
   _updateAddState() {
     if (!this._addInput) return;
     const key = this._addInput.value.trim().toLowerCase();
-    const busy = !!this._addRequest || !!this._store?.pending.has(key);
+    const busy = !!this._addRequest || !!this._snapshot?.undo?.busy || !!this._store?.pending.has(key);
     const canAdd = this._canAddItems();
     this._addInput.disabled = !!this._addRequest;
     this._addForm.setAttribute('aria-busy', String(busy));
@@ -2094,6 +2361,7 @@ class ShoppingListCatalogCard extends HTMLElement {
       this._setAddMessage('This item is still being updated.');
       return;
     }
+    if (this._snapshot?.undo?.busy) return;
     const request = { store };
     this._addRequest = request;
     this._setAddMessage('Adding item...');
@@ -2241,6 +2509,7 @@ class ShoppingListCatalogCard extends HTMLElement {
   }
 
   _renderStatus() {
+    this.shadowRoot.querySelector('shopping-list-undo').update(this._store, this._snapshot);
     const status = this._snapshot?.status || 'loading';
     this.setAttribute('data-sync-state', status);
     const message = this._sourceError || this._snapshot?.error || (status === 'loading' ? 'Loading shopping list...' : '');
@@ -2275,12 +2544,11 @@ class ShoppingListCatalogCard extends HTMLElement {
 
   static getStubConfig(hass) {
     const entities = Object.entries(hass?.states || {});
-    const catalog = entities.find(([entityId, state]) => entityId.startsWith('sensor.')
-      && Object.values(state.attributes || {}).some(value => Array.isArray(value) && value.some(entry => typeof entry?.title === 'string')));
+    const catalog = entities.map(([entityId]) => entityId).find(entityId => findCatalogSource(hass, entityId));
     return {
       type: 'custom:shopping-list-card',
       mode: 'catalog',
-      catalog_entity: catalog?.[0] || '',
+      ...(findCatalogSource(hass, catalog) || { catalog_entity: '' }),
       todo_list: entities.find(([entityId]) => entityId.startsWith('todo.'))?.[0] || '',
     };
   }
@@ -2342,7 +2610,7 @@ class ShoppingListCard extends HTMLElement {
     this._suppressClick = false;
     this._clickResetTimer = null;
     this.addEventListener('click', event => {
-      if (!this._suppressClick || event.target.closest('.types-chevron')) return;
+      if (!this._suppressClick || event.composedPath().some(target => target.matches?.('.types-chevron, shopping-list-undo'))) return;
       this._suppressClick = false;
       clearTimeout(this._clickResetTimer);
       this._clickResetTimer = null;
@@ -2430,6 +2698,7 @@ class ShoppingListCard extends HTMLElement {
     this._items = null;
     this.content = null;
     this._statusElement = null;
+    this._undoControl = null;
     this._lastRenderKey = null;
     this._lastStatusKey = null;
     this._expanded = false;
@@ -2619,13 +2888,18 @@ class ShoppingListCard extends HTMLElement {
 
   _ensureShell() {
     if (this.content) return;
-    this.innerHTML = `<ha-card><div class="list-status" role="status" aria-live="polite"></div><div class="card-content"></div></ha-card>`;
+    this.innerHTML = `<ha-card><div class="list-status" role="status" aria-live="polite"></div><div class="card-content"></div><shopping-list-undo hidden></shopping-list-undo></ha-card>`;
     this.content = this.querySelector('div.card-content');
     this._statusElement = this.querySelector('.list-status');
+    this._undoControl = this.querySelector('shopping-list-undo');
     this._attachStyles();
   }
 
   _renderStatus() {
+    const inCatalog = this.getRootNode().host?.localName === 'shopping-list-catalog';
+    const keys = this._config ? [this._buildFullName(), ...this._getTypes().map(type => this._buildNameFor(type.name))]
+      .map(name => name.toLowerCase()) : [];
+    this._undoControl?.update(inCatalog ? null : this._store, inCatalog ? null : this._syncState, keys);
     const status = this._syncState?.status || 'loading';
     const message = this._actionError || this._syncState?.error || (status === 'loading' ? 'Loading list...' : '');
     const severity = this._actionError || status === 'error' ? 'error' : status === 'loading' ? 'info' : 'warning';
@@ -2648,7 +2922,7 @@ class ShoppingListCard extends HTMLElement {
     const card = this.content?.querySelector('.card-container');
     if (!card) return;
     const names = [this._buildFullName(), ...this._getTypes().map(type => this._buildNameFor(type.name))];
-    const busy = this._isUpdating || names.some(name => this._store?.pending.has(name.toLowerCase()));
+    const busy = this._isUpdating || this._syncState?.undo?.busy || names.some(name => this._store?.pending.has(name.toLowerCase()));
     const unavailable = !this._store?.ready;
     card.classList.toggle('is-updating', busy);
     card.classList.toggle('is-unavailable', unavailable);
@@ -3271,21 +3545,11 @@ if (!window.customCards.some(c => c.type === 'shopping-list-card')) {
       if (domain === 'todo') {
         return { config: { type: 'custom:shopping-list-card', title: 'New item', todo_list: entityId } };
       }
-      const state = hass?.states?.[entityId];
-      if (domain !== 'sensor' || !state) return null;
+      if (domain !== 'sensor') return null;
       const todoList = ShoppingListCard.getStubConfig(hass).todo_list;
       if (!todoList) return null;
-      for (const attribute of [undefined, ...Object.keys(state.attributes || {})]) {
-        const config = {
-          type: 'custom:shopping-list-card', mode: 'catalog',
-          catalog_entity: entityId, todo_list: todoList,
-          ...(attribute === undefined ? {} : { catalog_attribute: attribute }),
-        };
-        try {
-          if (readCatalog(hass, config).some(group => group.products.length)) return { config };
-        } catch {}
-      }
-      return null;
+      const catalog = findCatalogSource(hass, entityId);
+      return catalog ? { config: { type: 'custom:shopping-list-card', mode: 'catalog', ...catalog, todo_list: todoList } } : null;
     },
   });
 }

@@ -36,6 +36,8 @@
     ha-icon { display: inline-flex; align-items: center; justify-content: center; font-size: var(--mdc-icon-size, 24px); width: 24px; height: 24px; }
     ha-alert { display: block; font-size: 13px; line-height: 1.5; color: #9e2424; }
     ha-alert[alert-type="info"] { color: #365a6d; }
+    ha-alert[alert-type="success"] { color: #2e7d32; }
+    ha-alert[alert-type="warning"] { color: #8a5a00; }
     @media (max-width: 600px) {
       body { padding: 12px; }
       #cards { grid-template-columns: repeat(2, minmax(0, 1fr)); }
@@ -71,7 +73,7 @@
       constructor() {
         super();
         this.attachShadow({ mode: 'open' });
-        this.shadowRoot.innerHTML = '<style>:host{display:block;font-size:13px;line-height:1.5;color:#9e2424}:host([alert-type="info"]){color:#365a6d}</style><slot></slot>';
+        this.shadowRoot.innerHTML = '<style>:host{display:block;font-size:13px;line-height:1.5;color:#9e2424}:host([alert-type="info"]){color:#365a6d}:host([alert-type="success"]){color:#2e7d32}:host([alert-type="warning"]){color:#8a5a00}</style><slot></slot>';
       }
     });
     if (editorMode) {

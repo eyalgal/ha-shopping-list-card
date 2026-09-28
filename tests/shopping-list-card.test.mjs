@@ -66,6 +66,108 @@ function mount(environment, hass, config = {}) {
   return card;
 }
 
+test('standalone cards offer shared Undo only for the affected item', async context => {
+  const environment = createEnvironment(context);
+  const setup = createHass([item('Milk')], { service(domain, service, data) {
+    setup.push(service === 'remove_item' ? [] : [item(data.item, 'restored')]);
+  } });
+  const milk = mount(environment, setup.hass);
+  const otherMilk = mount(environment, setup.hass);
+  const bread = mount(environment, setup.hass, { title: 'Bread' });
+  await settle();
+  milk.querySelector('.card-container').click();
+  await settle();
+  const undo = otherMilk.querySelector('shopping-list-undo');
+  assert.equal(undo.hidden, false);
+  assert.equal(bread.querySelector('shopping-list-undo').hidden, true);
+  assert.equal(undo.shadowRoot.querySelector('.message').textContent, 'Removed Milk');
+  undo.shadowRoot.querySelector('.undo').click();
+  await settle();
+  assert.equal(setup.services.length, 2);
+  assert.equal(setup.services[1].service, 'add_item');
+  assert.equal(setup.services[1].data.item, 'Milk');
+  assert.equal(undo.hidden, true);
+  assert.equal(milk.querySelector('.card-container').getAttribute('aria-pressed'), 'true');
+  assert.equal(setup.subscriptions.length, 1);
+  assert.deepEqual(environment.errors, []);
+});
+
+test('catalog Undo restores bulk variant removal from one notice outside the tiles', async context => {
+  const environment = createEnvironment(context);
+  const setup = createHass([item('Milk (2)', 'milk'), item('Milk - Lactose-free (3)', 'lactose-free')], {
+    service(domain, service, data) {
+      setup.push(service === 'remove_item' ? setup.state.items.filter(entry => entry.uid !== data.item)
+        : [...setup.state.items, item(data.item, `restored-${data.item}`)]);
+    },
+  });
+  catalogSource(setup, { Dairy: [{ title: 'Milk' }, { title: 'Milk', subtitle: 'Lactose-free' }] });
+  const catalog = mountCatalog(environment, setup.hass);
+  await settle();
+  const milk = catalog.shadowRoot.querySelector('shopping-list-card');
+  const onList = catalog.shadowRoot.querySelector('.catalog-on-list input');
+  onList.checked = true;
+  onList.dispatchEvent(new environment.window.Event('change'));
+  await milk._removeAllTypes();
+  const undo = catalog.shadowRoot.querySelector('shopping-list-undo');
+  assert.equal(milk.hidden, true);
+  assert.equal(undo.hidden, false);
+  assert.equal(milk.querySelector('shopping-list-undo').hidden, true);
+  assert.equal(undo.shadowRoot.querySelector('.message').textContent, 'Removed 2 items');
+  undo.shadowRoot.querySelector('.undo').click();
+  await settle();
+  assert.equal(undo.hidden, true);
+  assert.equal(milk.hidden, false);
+  assert.deepEqual(setup.state.items.map(entry => entry.summary), ['Milk (2)', 'Milk - Lactose-free (3)']);
+  assert.equal(setup.services.length, 4);
+  assert.equal(setup.subscriptions.length, 1);
+  assert.deepEqual(environment.errors, []);
+});
+
+test('Undo errors retain the notice and dismissed removals are not replayed', async context => {
+  const environment = createEnvironment(context);
+  const setup = createHass([item('Milk')], { service(domain, service) {
+    if (service === 'remove_item') setup.push([]);
+    else throw new Error('<img src=x onerror=alert(1)> denied');
+  } });
+  const card = mount(environment, setup.hass);
+  await settle();
+  card.querySelector('.card-container').click();
+  await settle();
+  const undo = card.querySelector('shopping-list-undo');
+  undo.shadowRoot.querySelector('.undo').click();
+  await settle();
+  assert.equal(undo.hidden, false);
+  assert.match(undo.shadowRoot.querySelector('.error').textContent, /denied/);
+  assert.equal(undo.shadowRoot.querySelector('.error img'), null);
+  undo.shadowRoot.querySelector('.dismiss').click();
+  assert.equal(undo.hidden, true);
+  setup.push([]);
+  await settle();
+  assert.equal(setup.services.length, 2);
+});
+
+test('Undo after a long press is not swallowed by the trailing-click guard', async context => {
+  const environment = createEnvironment(context);
+  const setup = createHass([item('Milk (2)')], { service(domain, service, data) {
+    setup.push(service === 'remove_item' ? [] : [item(data.item, 'restored')]);
+  } });
+  const card = mount(environment, setup.hass, { enable_quantity: true });
+  await settle();
+  card.querySelector('.card-container').dispatchEvent(new environment.window.PointerEvent('pointerdown', {
+    bubbles: true, button: 0, isPrimary: true,
+  }));
+  const hold = [...environment.timers.values()].find(timer => timer.delay === 500);
+  hold.callback();
+  await settle();
+  assert.equal(card._suppressClick, true);
+  const undo = card.querySelector('shopping-list-undo');
+  undo.shadowRoot.querySelector('.undo').click();
+  await settle();
+  assert.equal(setup.services.length, 2);
+  assert.equal(setup.state.items[0].summary, 'Milk (2)');
+  assert.equal(undo.hidden, true);
+});
+
 test('shopping-list-card catalog mode renders products without requiring a single-item title', async context => {
   const environment = createEnvironment(context);
   const setup = createHass([item('Milk')]);
@@ -1376,6 +1478,116 @@ test('catalog icons and colors cannot inject elements into product tiles', async
   const catalog = mountCatalog(environment, setup.hass);
   await settle();
   assert.equal(Boolean(catalog.shadowRoot.querySelector('[data-injected]')), false);
+});
+
+test('catalog setup detects a selected sensor attribute and clears it for direct categories', context => {
+  const environment = createEnvironment(context);
+  const setup = createHass();
+  setup.hass.states['sensor.wrapped'] = {
+    state: '1', attributes: { products: JSON.stringify({ Fruits: [{ title: 'Apple' }], Dairy: [{ title: 'Milk' }] }) },
+  };
+  catalogSource(setup, { Dairy: [{ title: 'Milk' }] });
+  const Catalog = environment.window.customElements.get('shopping-list-catalog');
+  assert.equal(Catalog.getStubConfig(setup.hass).catalog_attribute, 'products');
+  const editor = Catalog.getConfigElement();
+  editor.setConfig({ type: 'custom:shopping-list-card', mode: 'catalog', todo_list: 'todo.shopping', item_options: { quantity_max: 4 } });
+  editor.hass = setup.hass;
+  const changes = [];
+  editor.addEventListener('config-changed', event => changes.push(JSON.parse(JSON.stringify(event.detail.config))));
+  const picker = editor.shadowRoot.getElementById('catalog_entity');
+  picker.dispatchEvent(new environment.window.CustomEvent('value-changed', { detail: { value: 'sensor.wrapped' } }));
+  assert.equal(changes.at(-1).catalog_attribute, 'products');
+  assert.equal(editor.shadowRoot.getElementById('catalog_attribute').value, 'products');
+  assert.match(editor.shadowRoot.querySelector('.catalog-source-status').textContent, /2 categories, 2 products/);
+  picker.dispatchEvent(new environment.window.CustomEvent('value-changed', { detail: { value: 'sensor.catalog' } }));
+  assert.equal('catalog_attribute' in changes.at(-1), false);
+  assert.equal(editor.shadowRoot.getElementById('catalog_attribute').value, '');
+  assert.deepEqual(changes.at(-1).item_options, { quantity_max: 4 });
+  assert.equal(setup.services.length, 0);
+});
+
+test('switching to Catalog prefills a detected wrapped source without changing the to-do list', context => {
+  const environment = createEnvironment(context);
+  const setup = createHass();
+  setup.hass.states['sensor.wrapped'] = { state: '1', attributes: { products: { Fruits: [{ title: 'Apple' }] } } };
+  const editor = environment.window.customElements.get('shopping-list-card').getConfigElement();
+  editor.setConfig({ type: 'custom:shopping-list-card', title: 'Apple', todo_list: 'todo.other', types: ['Gala'] });
+  editor.hass = setup.hass;
+  const changes = [];
+  editor.addEventListener('config-changed', event => changes.push(event.detail.config));
+  const catalogMode = editor.shadowRoot.querySelector('.card-mode input[value="catalog"]');
+  catalogMode.checked = true;
+  catalogMode.dispatchEvent(new environment.window.Event('change'));
+  assert.equal(changes.at(-1).catalog_entity, 'sensor.wrapped');
+  assert.equal(changes.at(-1).catalog_attribute, 'products');
+  assert.equal(changes.at(-1).todo_list, 'todo.other');
+  assert.deepEqual(Array.from(changes.at(-1).types), ['Gala']);
+  const settings = editor.shadowRoot.querySelector('shopping-list-catalog-editor');
+  assert.match(settings.shadowRoot.querySelector('.catalog-source-status').textContent, /1 category, 1 product/);
+  assert.equal(setup.services.length, 0);
+});
+
+test('catalog setup validates source errors and offers detected attributes without rewriting config', context => {
+  const environment = createEnvironment(context);
+  const setup = createHass();
+  setup.hass.states['sensor.catalog'] = { state: '1', attributes: { products: { Fruits: [{ title: 'Apple' }] } } };
+  const editor = environment.window.customElements.get('shopping-list-catalog').getConfigElement();
+  editor.setConfig({ catalog_entity: 'sensor.catalog', todo_list: 'todo.shopping', catalog_attribute: 'missing' });
+  editor.hass = setup.hass;
+  const changes = [];
+  editor.addEventListener('config-changed', event => changes.push(event.detail.config));
+  const status = editor.shadowRoot.querySelector('.catalog-source-status');
+  assert.match(status.textContent, /"missing" was not found/);
+  const detected = editor.shadowRoot.querySelector('.catalog-use-source');
+  assert.equal(detected.hidden, false);
+  assert.equal(changes.length, 0);
+  detected.click();
+  assert.equal(changes[0].catalog_attribute, 'products');
+  assert.match(status.textContent, /1 category, 1 product/);
+  setup.hass.states['sensor.catalog'] = { state: '1', attributes: { products: { Fruits: [{ title: 'Apple' }, {}] } } };
+  editor.hass = { ...setup.hass };
+  assert.match(status.textContent, /Product 2 in "Fruits" needs a title/);
+  assert.equal(status.getAttribute('alert-type'), 'error');
+  assert.equal(changes.length, 1);
+  setup.hass.states['sensor.catalog'] = { state: '1', attributes: { products: { Fruits: [] } } };
+  editor.hass = setup.hass;
+  assert.equal(status.getAttribute('alert-type'), 'warning');
+  assert.match(status.textContent, /0 products/);
+  assert.equal(setup.services.length, 0);
+});
+
+test('catalog setup downloads valid starter JSON without changing configuration or lists', async context => {
+  const environment = createEnvironment(context);
+  const setup = createHass();
+  const editor = environment.window.customElements.get('shopping-list-catalog').getConfigElement();
+  const config = { todo_list: 'todo.shopping', item_options: { haptic: true } };
+  editor.setConfig(config);
+  editor.hass = setup.hass;
+  let downloaded;
+  let filename;
+  let revoked;
+  environment.window.URL.createObjectURL = blob => { downloaded = blob; return 'blob:starter'; };
+  environment.window.URL.revokeObjectURL = url => { revoked = url; };
+  environment.window.HTMLAnchorElement.prototype.click = function () {
+    assert.equal(this.isConnected, true);
+    filename = this.download;
+  };
+  const changes = [];
+  editor.addEventListener('config-changed', event => changes.push(event.detail.config));
+  editor.shadowRoot.querySelector('.catalog-starter').click();
+  assert.equal(filename, 'shopping_items.json');
+  assert.equal(downloaded.type, 'application/json');
+  const data = JSON.parse(await downloaded.text());
+  assert.deepEqual(Object.keys(data), ['Fruits', 'Dairy and Eggs']);
+  catalogSource(setup, data);
+  const catalog = mountCatalog(environment, setup.hass);
+  await settle();
+  assert.equal(catalog.shadowRoot.querySelectorAll('shopping-list-card').length, 4);
+  assert.equal(changes.length, 0);
+  assert.deepEqual(JSON.parse(JSON.stringify(editor._config)), config);
+  [...environment.timers.values()].find(timer => timer.delay === 0).callback();
+  assert.equal(revoked, 'blob:starter');
+  assert.equal(setup.services.length, 0);
 });
 
 test('catalog visual editor changes only selected options and preserves advanced defaults', context => {

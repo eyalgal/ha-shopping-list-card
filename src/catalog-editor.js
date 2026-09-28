@@ -1,4 +1,4 @@
-import { readCatalog } from './catalog-model.js';
+import { findCatalogSource, readCatalog } from './catalog-model.js';
 
 class ShoppingListCatalogEditor extends HTMLElement {
   constructor() {
@@ -38,12 +38,23 @@ class ShoppingListCatalogEditor extends HTMLElement {
         .catalog-category-choices { display: grid; gap: 8px; }
         .catalog-category-option { display: flex; align-items: center; gap: 8px; font-size: 14px; overflow-wrap: anywhere; }
         input[type="checkbox"] { width: 18px; height: 18px; flex-shrink: 0; accent-color: var(--primary-color); }
+        .catalog-source-status { display: block; font-size: 13px; overflow-wrap: anywhere; }
+        .catalog-setup-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+        .catalog-setup-actions button, .catalog-setup-actions a { display: inline-flex; align-items: center; justify-content: center; gap: 6px; min-height: 36px; padding: 4px 8px; border: 0; border-radius: 4px; background: transparent; color: var(--primary-color); font: inherit; font-size: 13px; text-decoration: none; cursor: pointer; }
+        .catalog-setup-actions button:focus-visible, .catalog-setup-actions a:focus-visible { outline: 2px solid var(--primary-color); outline-offset: 2px; }
+        .catalog-setup-actions ha-icon { --mdc-icon-size: 20px; }
       </style>
       <div class="catalog-form">
         <ha-expansion-panel header="Catalog" outlined expanded>
           <div class="catalog-panel">
             <ha-entity-picker id="catalog_entity" label="Catalog sensor" required></ha-entity-picker>
             <${field} id="catalog_attribute" label="Catalog attribute (optional)"></${field}>
+            <ha-alert class="catalog-source-status" role="status" aria-live="polite"></ha-alert>
+            <div class="catalog-setup-actions">
+              <button class="catalog-use-source" type="button" hidden></button>
+              <button class="catalog-starter" type="button" title="Download starter catalog"><ha-icon icon="mdi:download"></ha-icon>Starter JSON</button>
+              <a href="https://github.com/eyalgal/ha-shopping-list-card/blob/main/examples/auto-generated-grid/README.md" target="_blank" rel="noopener noreferrer"><ha-icon icon="mdi:open-in-new"></ha-icon>Setup guide</a>
+            </div>
             <ha-entity-picker id="todo_list" label="To-do list" required></ha-entity-picker>
             <div class="catalog-fields">
               <${field} id="title" label="Title" placeholder="Shopping"></${field}>
@@ -92,6 +103,14 @@ class ShoppingListCatalogEditor extends HTMLElement {
     }
     const layout = this.shadowRoot.getElementById('layout');
     layout.options = [{ value: 'vertical', label: 'Vertical' }, { value: 'horizontal', label: 'Horizontal' }];
+    this.shadowRoot.querySelector('.catalog-starter').addEventListener('click', () => this._downloadStarter());
+    this.shadowRoot.querySelector('.catalog-use-source').addEventListener('click', () => {
+      if (!this._detectedSource || !this._config) return;
+      const config = { ...this._config };
+      delete config.catalog_attribute;
+      this._emitConfig({ ...config, ...this._detectedSource });
+      this._updateValues();
+    });
     for (const control of this.shadowRoot.querySelectorAll('[id]')) {
       const changed = event => {
         event.stopPropagation();
@@ -144,8 +163,31 @@ class ShoppingListCatalogEditor extends HTMLElement {
   _updateCategories() {
     if (!this._rendered || !this._config || !this._hass) return;
     let available = [];
-    try { available = readCatalog(this._hass, { ...this._config, categories: undefined }).map(group => group.name); }
-    catch {}
+    const sourceStatus = this.shadowRoot.querySelector('.catalog-source-status');
+    const useSource = this.shadowRoot.querySelector('.catalog-use-source');
+    this._detectedSource = findCatalogSource(this._hass, this._config.catalog_entity);
+    useSource.hidden = !this._detectedSource
+      || (this._detectedSource.catalog_attribute || '') === (this._config.catalog_attribute || '');
+    useSource.textContent = this._detectedSource?.catalog_attribute
+      ? `Use attribute: ${this._detectedSource.catalog_attribute}` : 'Use category attributes';
+    let message = 'No catalog sensor selected.';
+    let level = 'info';
+    if (this._config.catalog_entity) {
+      try {
+        const groups = readCatalog(this._hass, { ...this._config, categories: undefined });
+        available = groups.map(group => group.name);
+        const count = groups.reduce((total, group) => total + group.products.length, 0);
+        message = available.length
+          ? `${available.length} ${available.length === 1 ? 'category' : 'categories'}, ${count} ${count === 1 ? 'product' : 'products'}`
+          : 'No category arrays found in this source.';
+        level = available.length && count ? 'success' : 'warning';
+      } catch (error) {
+        message = error.message;
+        level = 'error';
+      }
+    }
+    sourceStatus.setAttribute('alert-type', level);
+    sourceStatus.textContent = message;
     this._availableCategories = available;
     const selected = this._config.categories;
     this.shadowRoot.querySelector('.catalog-all-categories').checked = selected === undefined;
@@ -199,9 +241,29 @@ class ShoppingListCatalogEditor extends HTMLElement {
     } else if (typeof value === 'string') next = value.trim() || undefined;
     if (next === undefined) delete target[key];
     else target[key] = next;
+    if (field === 'catalog_entity') {
+      delete config.catalog_attribute;
+      Object.assign(config, findCatalogSource(this._hass, config.catalog_entity));
+    }
     if (config.item_options && !Object.keys(config.item_options).length) delete config.item_options;
     this._emitConfig(config);
-    if (field === 'fixed_columns') this._updateValues();
+    if (['fixed_columns', 'catalog_entity', 'catalog_attribute'].includes(field)) this._updateValues();
+  }
+
+  _downloadStarter() {
+    const catalog = {
+      Fruits: [{ title: 'Apple', types: ['Gala', 'Granny Smith'] }, { title: 'Banana' }],
+      'Dairy and Eggs': [{ title: 'Milk' }, { title: 'Milk', subtitle: 'Lactose-free' }, { title: 'Eggs' }],
+    };
+    const url = URL.createObjectURL(new Blob([JSON.stringify(catalog, null, 2) + '\n'], { type: 'application/json' }));
+    const download = document.createElement('a');
+    download.href = url;
+    download.download = 'shopping_items.json';
+    download.hidden = true;
+    document.body.append(download);
+    download.click();
+    download.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 0);
   }
 
   _emitConfig(config) {

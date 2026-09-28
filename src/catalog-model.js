@@ -65,6 +65,9 @@ export function readCatalog(hass, config) {
   const entity = hass.states?.[config.catalog_entity];
   if (!entity) throw new Error(`Catalog entity not found: ${config.catalog_entity}`);
   if (entity.state === 'unavailable' || entity.state === 'unknown') throw new Error('The product catalog is unavailable.');
+  if (config.catalog_attribute && !Object.hasOwn(entity.attributes || {}, config.catalog_attribute)) {
+    throw new Error(`Catalog attribute "${config.catalog_attribute}" was not found on ${config.catalog_entity}.`);
+  }
   let data = config.catalog_attribute ? entity.attributes?.[config.catalog_attribute] : entity.attributes;
   if (typeof data === 'string') {
     try { data = JSON.parse(data); }
@@ -117,4 +120,16 @@ export function readCatalog(hass, config) {
 
 export function productOnList(product, items) {
   return product.names.some(name => matchItem(items, name, product.config).isOn);
+}
+
+export function findCatalogSource(hass, entityId) {
+  const state = hass?.states?.[entityId];
+  if (typeof entityId !== 'string' || !entityId.startsWith('sensor.') || !state) return null;
+  for (const attribute of [undefined, ...Object.keys(state.attributes || {})]) {
+    const config = { catalog_entity: entityId, ...(attribute === undefined ? {} : { catalog_attribute: attribute }) };
+    try {
+      if (readCatalog(hass, config).some(group => group.products.length)) return config;
+    } catch {}
+  }
+  return null;
 }

@@ -1,7 +1,8 @@
 import { getTodoStore } from './todo-store.js';
-import { productOnList, readCatalog, searchText } from './catalog-model.js';
+import { findCatalogSource, productOnList, readCatalog, searchText } from './catalog-model.js';
 import { planListAddition } from './item-model.js';
 import './catalog-editor.js';
+import './undo-control.js';
 
 class ShoppingListCatalogCard extends HTMLElement {
   constructor() {
@@ -65,6 +66,7 @@ class ShoppingListCatalogCard extends HTMLElement {
         .catalog-grid { display: grid; grid-template-columns: repeat(var(--catalog-columns, 4), minmax(0, 1fr)); gap: 8px; align-items: start; }
         .catalog-grid > shopping-list-card { display: block; min-width: 0; }
         .catalog-grid > shopping-list-card[hidden] { display: none !important; }
+        shopping-list-card shopping-list-undo { display: none !important; }
         :host([data-sync-state]:not([data-sync-state="ready"])) shopping-list-card .list-status { display: none; }
         .catalog-status:not(:empty) { margin-top: 12px; overflow-wrap: anywhere; }
         .catalog-empty { padding: 24px 0; margin: 0; color: var(--secondary-text-color); font-size: 14px; }
@@ -97,6 +99,7 @@ class ShoppingListCatalogCard extends HTMLElement {
       </section>
       <div class="catalog-tabs" role="tablist" aria-label="Product categories"></div>
       <div class="catalog-status" role="status" aria-live="polite"></div>
+      <shopping-list-undo hidden></shopping-list-undo>
       <div class="catalog-content" id="catalog-content" role="tabpanel"></div>
       <p class="catalog-empty" role="status" hidden></p>
     `;
@@ -374,7 +377,7 @@ class ShoppingListCatalogCard extends HTMLElement {
   _updateAddState() {
     if (!this._addInput) return;
     const key = this._addInput.value.trim().toLowerCase();
-    const busy = !!this._addRequest || !!this._store?.pending.has(key);
+    const busy = !!this._addRequest || !!this._snapshot?.undo?.busy || !!this._store?.pending.has(key);
     const canAdd = this._canAddItems();
     this._addInput.disabled = !!this._addRequest;
     this._addForm.setAttribute('aria-busy', String(busy));
@@ -395,6 +398,7 @@ class ShoppingListCatalogCard extends HTMLElement {
       this._setAddMessage('This item is still being updated.');
       return;
     }
+    if (this._snapshot?.undo?.busy) return;
     const request = { store };
     this._addRequest = request;
     this._setAddMessage('Adding item...');
@@ -542,6 +546,7 @@ class ShoppingListCatalogCard extends HTMLElement {
   }
 
   _renderStatus() {
+    this.shadowRoot.querySelector('shopping-list-undo').update(this._store, this._snapshot);
     const status = this._snapshot?.status || 'loading';
     this.setAttribute('data-sync-state', status);
     const message = this._sourceError || this._snapshot?.error || (status === 'loading' ? 'Loading shopping list...' : '');
@@ -576,12 +581,11 @@ class ShoppingListCatalogCard extends HTMLElement {
 
   static getStubConfig(hass) {
     const entities = Object.entries(hass?.states || {});
-    const catalog = entities.find(([entityId, state]) => entityId.startsWith('sensor.')
-      && Object.values(state.attributes || {}).some(value => Array.isArray(value) && value.some(entry => typeof entry?.title === 'string')));
+    const catalog = entities.map(([entityId]) => entityId).find(entityId => findCatalogSource(hass, entityId));
     return {
       type: 'custom:shopping-list-card',
       mode: 'catalog',
-      catalog_entity: catalog?.[0] || '',
+      ...(findCatalogSource(hass, catalog) || { catalog_entity: '' }),
       todo_list: entities.find(([entityId]) => entityId.startsWith('todo.'))?.[0] || '',
     };
   }

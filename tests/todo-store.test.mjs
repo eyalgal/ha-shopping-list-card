@@ -220,6 +220,8 @@ test('bulk failure waits for all writes and refreshes without replaying them', a
   assert.equal(setup.services.length, 2);
   assert.equal(setup.store.pending.size, 0);
   assert.equal(setup.store.items.length, 1);
+  assert.equal(setup.store.snapshot.undo.count, 1);
+  assert.equal(setup.store.snapshot.undo.summary, 'Bread');
 });
 
 test('detached stores remain shared until every outstanding write settles', async context => {
@@ -240,4 +242,203 @@ test('detached stores remain shared until every outstanding write settles', asyn
   bread.resolve();
   await second;
   assert.equal(setup.store.closed, true);
+});
+
+test('Undo restores a confirmed removal batch with quantities and item details', async context => {
+  const originals = [
+    { ...item('Milk (2)', 'milk'), description: 'Whole milk', due: '2026-10-01' },
+    item('Milk - Lactose-free (3)', 'lactose-free'),
+  ];
+  let nextUid = 1;
+  const setup = fixture(context, { service(domain, service, data) {
+    assert.equal(domain, 'todo');
+    if (service === 'remove_item') setup.push(setup.state.items.filter(entry => entry.uid !== data.item));
+    else if (service === 'add_item') {
+      setup.push([...setup.state.items, {
+        ...item(data.item, `restored-${nextUid++}`),
+        ...(data.description === undefined ? {} : { description: data.description }),
+        ...(data.due_date === undefined ? {} : { due: data.due_date }),
+      }]);
+    } else assert.fail(`Unexpected service ${service}`);
+  } });
+  await settle();
+  setup.push(originals);
+  const config = { title: 'Milk', enable_quantity: true };
+  await setup.store.execute(['milk', 'milk - lactose-free'], items => [
+    planItemAction(config, items, null, 'remove'),
+    planItemAction(config, items, 'Lactose-free', 'remove'),
+  ]);
+  assert.deepEqual(setup.store.items, []);
+  assert.equal(setup.store.snapshot.undo.count, 2);
+  assert.equal(getTodoStore(setup.hass, 'todo.shopping').snapshot.undo.count, 2);
+  assert.equal(await setup.store.undoLastRemoval(), true);
+  assert.deepEqual(setup.services.slice(2), [
+    { domain: 'todo', service: 'add_item', data: { entity_id: 'todo.shopping', item: 'Milk (2)', description: 'Whole milk', due_date: '2026-10-01' } },
+    { domain: 'todo', service: 'add_item', data: { entity_id: 'todo.shopping', item: 'Milk - Lactose-free (3)' } },
+  ]);
+  assert.deepEqual(setup.store.items.map(entry => ({ ...entry, uid: undefined })), originals.map(entry => ({ ...entry, uid: undefined })));
+  assert.equal(setup.store.snapshot.undo, null);
+  assert.equal(setup.store.pending.size, 0);
+  assert.equal(setup.fetches.length, 1);
+});
+
+test('Undo does not overwrite an item re-added on another device', async context => {
+  const setup = fixture(context, { service(domain, service) {
+    assert.equal(service, 'remove_item');
+    setup.push([]);
+  } });
+  await settle();
+  setup.push([item('Milk (2)')]);
+  await setup.store.execute(['milk'], items => [planItemAction({ title: 'Milk' }, items, null, 'remove')]);
+  assert.equal(setup.store.snapshot.undo.count, 1);
+  setup.state.items = [item('Milk (5)', 'remote-milk')];
+  await assert.rejects(setup.store.undoLastRemoval(), /changed|already/i);
+  assert.equal(setup.services.length, 1);
+  assert.equal(setup.store.items[0].summary, 'Milk (5)');
+  assert.equal(setup.store.snapshot.undo.count, 1);
+});
+
+test('Undo restores kept-zero quantities by UID and does not undo unrelated quantity edits', async context => {
+  const setup = fixture(context, { service(domain, service, data) {
+    assert.equal(service, 'update_item');
+    setup.push([item(data.rename, 'original')]);
+  } });
+  await settle();
+  setup.push([item('Milk (3)', 'original')]);
+  const config = { title: 'Milk', enable_quantity: true, remove_zero: false };
+  await setup.store.execute(['milk'], items => [planItemAction(config, items, null)]);
+  assert.equal(setup.store.items[0].summary, 'Milk (0)');
+  assert.equal(setup.store.snapshot.undo.count, 1);
+  await setup.store.undoLastRemoval();
+  assert.equal(setup.store.items[0].summary, 'Milk (3)');
+  assert.equal(setup.services[1].data.item, 'original');
+  assert.equal(setup.store.snapshot.undo, null);
+  await setup.store.execute(['milk'], items => [planItemAction(config, items, null, 'decrement')]);
+  assert.equal(setup.store.items[0].summary, 'Milk (2)');
+  assert.equal(setup.store.snapshot.undo, null);
+});
+
+test('Undo retries only the failed part of a restore and never replays it automatically', async context => {
+  let denyBread = true;
+  const setup = fixture(context, { service(domain, service, data) {
+    if (service === 'remove_item') setup.push(setup.state.items.filter(entry => entry.uid !== data.item));
+    else {
+      if (data.item === 'Bread' && denyBread) throw new Error('Restore denied');
+      setup.push([...setup.state.items, item(data.item, `${data.item}-restored`)]);
+    }
+  } });
+  await settle();
+  setup.push([item('Milk'), item('Bread', 'bread')]);
+  await setup.store.execute(['milk', 'bread'], items => [
+    planItemAction({ title: 'Milk' }, items, null, 'remove'),
+    planItemAction({ title: 'Bread' }, items, null, 'remove'),
+  ]);
+  await assert.rejects(setup.store.undoLastRemoval(), /Restore denied/);
+  assert.deepEqual(setup.store.items.map(entry => entry.summary), ['Milk']);
+  assert.equal(setup.store.snapshot.undo.count, 1);
+  assert.equal(setup.store.snapshot.undo.summary, 'Bread');
+  setup.push([...setup.state.items]);
+  await settle();
+  assert.equal(setup.services.length, 4);
+  denyBread = false;
+  await setup.store.undoLastRemoval();
+  assert.equal(setup.services.length, 5);
+  assert.equal(setup.services[4].data.item, 'Bread');
+  assert.equal(setup.store.snapshot.undo, null);
+  assert.deepEqual(setup.store.items.map(entry => entry.summary), ['Milk', 'Bread']);
+});
+
+test('Undo serializes repeat clicks and blocks overlapping card changes during restoration', async context => {
+  const restore = deferred();
+  const setup = fixture(context, { async service(domain, service, data) {
+    if (service === 'remove_item') setup.push([]);
+    else {
+      await restore.promise;
+      setup.push([item(data.item, 'restored')]);
+    }
+  } });
+  await settle();
+  setup.push([item('Milk')]);
+  await setup.store.execute(['milk'], items => [planItemAction({ title: 'Milk' }, items, null, 'remove')]);
+  const undo = setup.store.undoLastRemoval();
+  await settle();
+  assert.equal(setup.store.snapshot.undo.busy, true);
+  assert.equal(await setup.store.undoLastRemoval(), false);
+  assert.equal(await setup.store.execute(['bread'], items => [planItemAction({ title: 'Bread' }, items, null)]), false);
+  setup.store.dismissUndo();
+  assert.equal(setup.store.snapshot.undo.count, 1);
+  assert.equal(setup.services.length, 2);
+  restore.resolve();
+  assert.equal(await undo, true);
+  assert.equal(setup.store.snapshot.undo, null);
+  assert.equal(await setup.store.undoLastRemoval(), false);
+});
+
+test('Undo refuses changed kept-zero items and unsupported metadata before writing', async context => {
+  const setup = fixture(context, { service(domain, service, data) {
+    setup.push(service === 'remove_item' ? [] : [item(data.rename, 'milk')]);
+  } });
+  await settle();
+  setup.push([item('Milk (2)')]);
+  const config = { title: 'Milk', enable_quantity: true, remove_zero: false };
+  await setup.store.execute(['milk'], items => [planItemAction(config, items, null)]);
+  setup.push([item('Milk (4)')]);
+  await assert.rejects(setup.store.undoLastRemoval(), /changed/);
+  assert.equal(setup.services.length, 1);
+  setup.store.dismissUndo();
+  const original = { ...item('Milk'), description: 'Keep this note', due: '2026-10-01T09:30:00+00:00' };
+  setup.push([original]);
+  await setup.store.execute(['milk'], items => [planItemAction(config, items, null, 'remove')]);
+  setup.hass.states['todo.shopping'].attributes = { supported_features: 1 };
+  await assert.rejects(setup.store.undoLastRemoval(), /descriptions/);
+  assert.equal(setup.services.length, 2);
+  assert.equal(setup.store.snapshot.undo.count, 1);
+  setup.hass.states['todo.shopping'].attributes.supported_features = 127;
+  const action = setup.store._restoreAction(setup.store._undo.records[0]);
+  assert.deepEqual(action.data, { item: 'Milk', description: 'Keep this note', due_datetime: original.due });
+});
+
+test('Undo is unavailable offline, can be dismissed, and disappears when the shared store closes', async context => {
+  const setup = fixture(context, { service() { setup.push([]); } });
+  await settle();
+  setup.push([item('Milk')]);
+  await setup.store.execute(['milk'], items => [planItemAction({ title: 'Milk' }, items, null, 'remove')]);
+  setup.store.updateHass({ ...setup.hass, connected: false });
+  await assert.rejects(setup.store.undoLastRemoval(), /Disconnected/);
+  assert.equal(setup.services.length, 1);
+  setup.store.updateHass(setup.hass);
+  await settle();
+  assert.equal(setup.store.snapshot.undo.count, 1);
+  setup.store.dismissUndo();
+  assert.equal(setup.store.snapshot.undo, null);
+  setup.push([item('Milk')]);
+  await setup.store.execute(['milk'], items => [planItemAction({ title: 'Milk' }, items, null, 'remove')]);
+  setup.unsubscribe();
+  assert.equal(setup.store.closed, true);
+  assert.equal(setup.store.snapshot.undo, null);
+});
+
+test('Undo does not mistake a completed item for a confirmed deletion', async context => {
+  const setup = fixture(context, { service() { setup.push([{ ...item('Milk'), status: 'completed' }]); } });
+  await settle();
+  setup.push([item('Milk')]);
+  await setup.store.execute(['milk'], items => [planItemAction({ title: 'Milk' }, items, null, 'remove')]);
+  assert.equal(setup.store.snapshot.undo, null);
+});
+
+test('Undo keeps the most recent removal when concurrent batches finish out of order', async context => {
+  const first = deferred();
+  const setup = fixture(context, { async service(domain, service, data) {
+    if (data.item === 'milk') await first.promise;
+    setup.push(setup.state.items.filter(entry => entry.uid !== data.item));
+  } });
+  await settle();
+  setup.push([item('Milk'), item('Bread', 'bread')]);
+  const milk = setup.store.execute(['milk'], items => [planItemAction({ title: 'Milk' }, items, null, 'remove')]);
+  await setup.store.execute(['bread'], items => [planItemAction({ title: 'Bread' }, items, null, 'remove')]);
+  assert.equal(setup.store.snapshot.undo.summary, 'Bread');
+  first.resolve();
+  await milk;
+  assert.equal(setup.store.snapshot.undo.summary, 'Bread');
+  assert.equal(setup.store.snapshot.undo.count, 1);
 });

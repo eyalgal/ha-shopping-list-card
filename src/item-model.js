@@ -67,6 +67,7 @@ export function planItemAction(config, items, subtitle, action = 'toggle') {
   }
   return {
     key, service: 'update_item', data: { item: target, rename: summary },
+    ...(keepZero(config) && quantity === 0 && state.qty > 0 ? { undoRemoval: true } : {}),
     confirmed: current => state.matchedUid
       ? findTarget(current)?.summary === summary
       : current.some(item => item.summary === summary),

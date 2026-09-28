@@ -418,7 +418,10 @@ class ShoppingListCardEditor extends HTMLElement {
     const config = { ...this._config, type: 'custom:shopping-list-card', mode };
     if (mode === 'catalog') {
       const defaults = customElements.get('shopping-list-catalog').getStubConfig(this._hass);
-      if (!config.catalog_entity && defaults.catalog_entity) config.catalog_entity = defaults.catalog_entity;
+      if (!config.catalog_entity && defaults.catalog_entity) {
+        config.catalog_entity = defaults.catalog_entity;
+        if (!config.catalog_attribute && defaults.catalog_attribute) config.catalog_attribute = defaults.catalog_attribute;
+      }
       if (!config.todo_list && defaults.todo_list) config.todo_list = defaults.todo_list;
     }
     this.setConfig(config);

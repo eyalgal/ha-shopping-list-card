@@ -25,6 +25,7 @@ A Home Assistant dashboard card for adding and managing items in an existing to-
 - **Catalog browsing** - category tabs, search, an On list filter, configurable category subsets, and independent title/control visibility.
 - **Full list and quick-add** - open the native to-do list to manage all items, or add a missing shopping item without editing the catalog.
 - **Tap to add / tap to remove** with case-insensitive matching against an existing to-do list.
+- **Undo removal** - restore the last confirmed single-item or bulk-variant removal, including quantities and supported item details. Kept-at-zero removals can also be undone.
 - **Real-time updates** via a shared WebSocket subscription per entity (one subscription covers every card pointing at the same list, so a grid of 50 cards does not fan out into 50 sockets).
 - **Reliable recovery** with shared reconnect retries, visible connection and action errors, and pending-write protection across tiles for the same item. Refreshing an error only reloads the list; it never repeats a write.
 - **Quantity controls** - enable `+` / `-` buttons with optional `quantity_step` and `quantity_max`.
@@ -81,11 +82,13 @@ The catalog is not another shopping list. A sensor provides the available produc
 
 1. **Choose the source.** Reuse your existing JSON-backed sensor, or follow the [JSON catalog setup guide](examples/auto-generated-grid/). The card reads sensor attributes, not a JSON file path or URL directly.
 2. **Add the card.** Edit the dashboard, add **Shopping List Card**, and select **Card mode > Catalog**.
-3. **Connect the data.** Select **Catalog sensor** and **To-do list**. Leave **Catalog attribute** empty for the example sensor; use it only when the entire category map is stored in one named attribute.
+3. **Connect the data.** Select **Catalog sensor** and **To-do list**. The editor detects a valid source and fills **Catalog attribute** when the category map is wrapped in an object or JSON-string attribute. It stays empty for direct category arrays. The validation status reports category/product counts or the source error.
 4. **Choose the view.** Set the maximum columns, or enable **Fixed columns** for an exact count. Under **Display**, choose all categories or a subset and toggle tabs, search, title, item count, and buttons. Under **Product defaults**, set layout, image base, and quantity behavior.
 5. **Save and use it.** Tap products to add or remove them, expand variants with the chevron, and use the list icon to manage the complete shopping list.
 
 You can also start by selecting the catalog sensor in Home Assistant's entity-based Add Card picker (Home Assistant 2026.6 or later). **Shopping List Card** appears under **Community** when the sensor has valid, nonempty catalog data and a to-do entity exists. The suggestion selects Catalog mode and fills in that sensor and, when needed, its catalog attribute. Check the suggested to-do list before saving. Ordinary sensors are not suggested.
+
+For a new catalog, **Starter JSON** in the Catalog editor downloads a small example with categories, products, and variants. **Setup guide** opens the sensor setup instructions. The download does not create a Home Assistant sensor, overwrite an existing file, or change the shopping list. For an existing configuration with the wrong attribute, the editor offers the detected source without silently changing your settings.
 
 The equivalent configuration for one card is:
 
@@ -193,6 +196,16 @@ The list icon expands Home Assistant's native `todo-list` card instead of the en
 The plus button opens a quick-add field. Type a missing item and submit to add it directly to `todo_list`. This does not add a product to the JSON catalog or apply a catalog category prefix. An existing active item is not added twice, and an existing kept-zero item is reactivated when the list supports updates. The form clears only after Home Assistant confirms the change; failed saves keep the text for correction, and offline writes are not queued. Pending protection is shared with the existing catalog tiles on the same connection.
 
 Adding a permanent catalog product from the card is not supported with the read-only JSON/sensor source. Continue editing the shared JSON for permanent products; the quick-add field is for the shopping list only.
+
+### Undo Removal
+
+After this card confirms a removal, **Undo** appears on the affected standalone card or once above the catalog products. It restores the last removal batch, including all successfully removed variants from a bulk hold. Setting an item to zero with `remove_zero: false` is also undoable; ordinary quantity adjustments are not.
+
+- Restore keeps the original item names, quantities, and supported descriptions/due dates. A deleted item is recreated with a new UID and may appear at the end of the list; its original position and other provider-specific metadata cannot be restored.
+- Undo refreshes the list first and refuses to overwrite items that have since changed or been re-added. It is disabled while disconnected or while this card has another write pending. This is not an atomic cross-device transaction.
+- A failed or partially successful restore is not retried automatically. Successfully restored entries are removed from the Undo batch; the remaining entries can be retried explicitly.
+- One batch is shared by cards targeting the same list and browser connection. A later removal replaces it; editing one of its items invalidates that item's Undo. Dismiss, page reload, or removing the last connected card clears the batch. It is not permanent history or synchronized across devices.
+- Only removals made through Shopping List Card are captured. Changes in the native full-list card, another dashboard control, or an external app are not recorded for Undo.
 
 ### Sharing and Persistence
 
@@ -389,6 +402,7 @@ Source ownership:
 
 - `src/shopping-list-card.js`: card rendering and interactions.
 - `src/todo-store.js`: shared subscriptions, recovery, stale-response protection, and pending writes.
+- `src/undo-control.js`: shared Undo notice, retry errors, and dismissal.
 - `src/item-model.js`: naming, quantity actions, and lossless variant updates.
 - `src/editor.js` and `src/variants-editor.js`: the visual configuration editor and variant rows.
 - `src/catalog-card.js`, `src/catalog-model.js`, and `src/catalog-editor.js`: the sensor-backed catalog view, data validation, and configuration editor.
@@ -397,6 +411,15 @@ Source ownership:
 Tests use mocked Home Assistant services and a DOM implementation; they never connect to a real shopping list. CI tests Node.js 22 and 24 and checks that the committed bundle matches the source.
 
 Serve the repository on a local HTTP server to open `tests/browser.html?catalog` for the full sample catalog, `?catalog&editor` for its settings, or `?editor` for the variants editor. These fixtures use fake list data and simulated Home Assistant controls.
+
+### Pre-release Device Checks
+
+Before stable release, test the installed pre-release on physical iOS and Android companion apps as well as a desktop browser. Browser emulation does not verify device haptics, mobile downloads, or the WebView lifecycle. Use a disposable to-do list for these checks:
+
+1. Add plain Milk and Lactose-free, change their quantities independently, and expand/collapse at the intended tile width without text or controls overlapping.
+2. Remove a product and Undo it. Hold a variant header to remove a group and Undo the batch; check the exact quantities. Try a kept-zero item too.
+3. Disconnect and reconnect, then repeat an edit and Undo. Double-tap during a slow update and verify no duplicate items appear. Reopen the app and confirm the persistent list is correct; the previous Undo notice should not return.
+4. In the card editor, select direct and wrapped JSON sensors, check malformed-source errors, and download Starter JSON. Confirm that saved settings survive switching modes.
 
 ---
 
