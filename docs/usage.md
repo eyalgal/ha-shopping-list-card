@@ -24,6 +24,8 @@ types:
 
 Here the header targets plain Milk. Set `subtitle` to target a default variant instead. When the header already matches a configured variant, both controls refer to that same list item.
 
+The header subtitle lists the selected variants with their quantities, such as `Gala (2), Granny Smith`. On vertical tiles, the badge shows the total quantity of selected variants, so that example shows `3`.
+
 At regular widths, the selected header item has its own quantity buttons. Below 220px, it shows a quantity badge; expand the card to adjust the main item in its first row. A main item that already matches a variant is not duplicated. The chevron stays on the header, and quantity changes do not increase the collapsed height.
 
 Expansion is manual and remains open through quantity updates. The chevron works while a write is pending or the list is disconnected. Both horizontal and vertical layouts are supported; use automatic dashboard row height so expanded content is not clipped.

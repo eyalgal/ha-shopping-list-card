@@ -155,6 +155,17 @@ test('Undo errors retain the icon and expired removals are not replayed', async 
   assert.equal(setup.services.length, 2);
 });
 
+test('the variant badge totals selected quantities to match the subtitle', async context => {
+  const environment = createEnvironment(context);
+  const setup = createHass([item('Apple - Gala (2)', 'gala'), item('Apple - Granny Smith', 'granny')]);
+  const card = mount(environment, setup.hass, {
+    title: 'Apple', layout: 'vertical', enable_quantity: true, types: ['Gala', 'Granny Smith', 'Pink Lady'],
+  });
+  await settle();
+  assert.equal(card.querySelector('.variant-count-badge').textContent, '3');
+  assert.equal(card.querySelector('.types-header .secondary').textContent, 'Gala (2), Granny Smith');
+});
+
 test('show_undo false hides the Undo button in Single and Catalog modes', async context => {
   const environment = createEnvironment(context);
   const setup = createHass([item('Milk'), item('Eggs', 'eggs')], { service(domain, service, data) {

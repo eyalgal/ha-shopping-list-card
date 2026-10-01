@@ -550,6 +550,7 @@ class ShoppingListCard extends HTMLElement {
     // Cache the subtitle per row index for tap handling.
     this._typeEntries = states.map(s => s.subtitle);
     const activeCount = states.filter(s => s.isOn).length;
+    const activeQuantity = states.reduce((total, s) => total + (s.isOn ? s.qty : 0), 0);
 
     // Bare-item state drives the header's add / remove action. When a `subtitle`
     // is configured, the header item is stored as "Title - subtitle"; otherwise
@@ -578,9 +579,9 @@ class ShoppingListCard extends HTMLElement {
     const safeTitle = escapeHtml(this._config.title || '');
     const isVertical = this._config.layout === 'vertical';
 
-    // Optional badge showing how many variants are currently on the list.
+    // Badge totals the quantities of selected variants, matching single-item tiles.
     const countBadge = activeCount > 0
-      ? `<span class="quantity-badge variant-count-badge">${activeCount}</span>` : '';
+      ? `<span class="quantity-badge variant-count-badge">${activeQuantity}</span>` : '';
     const quantityLabel = escapeHtml(`${this._buildNameFor(baseSubtitle)}, quantity ${bare.qty}`);
     const headerBadge = bare.isOn && enableQty
       ? `<span class="quantity-badge header-quantity-badge" aria-label="${quantityLabel}" title="${quantityLabel}">${bare.qty}</span>` : '';

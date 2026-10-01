@@ -51,7 +51,7 @@ HACS renders the README inside Home Assistant, where relative paths resolve agai
 
 ### Screenshots
 
-The README images in `docs/images/` show the built 3.0.0 card in the local browser fixture, with synthetic list data and simulated Home Assistant host controls. They are actual rendered cards, not UI mockups. Capture widths are 1080px for the catalog, 920px for Single cards, and 390px for the mobile catalog, at 2x pixel density.
+The README images in `docs/images/` show the built 3.0.0 card in the local browser fixture, with synthetic list data and simulated Home Assistant host controls. They are actual rendered cards, not UI mockups. Capture widths are 1080px for the catalog, 920px for Single cards, 390px for the mobile catalog, and 480px for the Undo close-up, at 2x pixel density. Keep demo quantities consistent across the subtitle, rows, and badges.
 
 Use an isolated browser with no live Home Assistant connection. Wait for fonts, product images, and expansion animations before measuring the crop. Verify that tiles do not overflow and that the full bottom row is visible. The mobile image uses a removal against the fixture's fake list to show the real Undo icon; it is not a physical-phone test.
 
