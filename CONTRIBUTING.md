@@ -47,6 +47,8 @@ Before a stable release, test the installed pre-release on physical iOS and Andr
 
 Keep the README focused on installation, mode selection, and screenshots. Put option tables in the [reference](docs/configuration.md), interaction details in the [usage guide](docs/usage.md), and source setup in the [JSON catalog guide](examples/auto-generated-grid/). Check relative links, anchors, and YAML examples when moving sections.
 
+HACS renders the README inside Home Assistant, where relative paths resolve against the Home Assistant server. Use absolute `raw.githubusercontent.com` URLs for README images and absolute GitHub URLs for README links.
+
 ### Screenshots
 
 The README images in `docs/images/` show the built 3.0.0 card in the local browser fixture, with synthetic list data and simulated Home Assistant host controls. They are actual rendered cards, not UI mockups. Capture widths are 1080px for the catalog, 920px for Single cards, and 390px for the mobile catalog, at 2x pixel density.

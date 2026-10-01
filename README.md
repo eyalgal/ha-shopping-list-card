@@ -5,7 +5,7 @@
 
 A Home Assistant card that turns your existing to-do list into product tiles or a browsable shopping catalog. Pick products, choose variants, and adjust quantities without typing the same names again.
 
-<img src="docs/images/catalog-hero.png" alt="Shopping catalog with Fruit, Dairy, and Pantry categories, selected products, and expanded Milk variants with independent quantities" width="960"/>
+<img src="https://raw.githubusercontent.com/eyalgal/ha-shopping-list-card/main/docs/images/catalog-hero.png" alt="Shopping catalog with Fruit, Dairy, and Pantry categories, selected products, and expanded Milk variants with independent quantities" width="960"/>
 
 Catalog mode with demo products, category tabs, quantities, and expanded variants.
 
@@ -51,7 +51,7 @@ types:
 
 Browse products from a shared JSON-backed sensor. Choose categories, search, open the full list, or quick-add an item. Columns can adapt to available width or stay fixed; title, count, and controls can be hidden independently.
 
-The editor validates the source and offers **Starter JSON** for a new catalog. Follow the [JSON catalog setup guide](examples/auto-generated-grid/) to connect the sensor. No `auto-entities`, `layout-card`, or generated grid is required.
+The editor validates the source and offers **Starter JSON** for a new catalog. Follow the [JSON catalog setup guide](https://github.com/eyalgal/ha-shopping-list-card/tree/main/examples/auto-generated-grid/) to connect the sensor. No `auto-entities`, `layout-card`, or generated grid is required.
 
 <details>
 <summary>Minimal Catalog configuration</summary>
@@ -72,13 +72,13 @@ Replace the sensor and list IDs with your own. Products live in the sensor's sou
 
 ### Product Cards
 
-<img src="docs/images/single-cards.png" alt="Single-mode Milk and Apple variant groups above vertical Bread, Coffee, Eggs, and Cheddar tiles" width="920"/>
+<img src="https://raw.githubusercontent.com/eyalgal/ha-shopping-list-card/main/docs/images/single-cards.png" alt="Single-mode Milk and Apple variant groups above vertical Bread, Coffee, Eggs, and Cheddar tiles" width="920"/>
 
 Horizontal variant groups and vertical tiles can share the same shopping list.
 
 ### Mobile Catalog and Undo
 
-<img src="docs/images/catalog-mobile-undo.png" alt="Two-column catalog at phone width, showing the Undo icon in the catalog header after removing Eggs, and separate Milk and Lactose-free quantities" width="390"/>
+<img src="https://raw.githubusercontent.com/eyalgal/ha-shopping-list-card/main/docs/images/catalog-mobile-undo.png" alt="Two-column catalog at phone width, showing the Undo icon in the catalog header after removing Eggs, and separate Milk and Lactose-free quantities" width="390"/>
 
 Compact tiles keep the main item and its variants accessible. Screenshots use demo data and sample photos; product-photo files are not bundled with the card.
 
@@ -89,8 +89,8 @@ Compact tiles keep the main item and its variants accessible. Screenshots use de
 ## Good to Know
 
 - **Catalogs are read-only sources.** Quick-add changes the shopping list, not the JSON catalog. Edit the source to add permanent products.
-- **Undo is temporary.** A 10-second icon covers this card's last removal batch in the current browser, not edits through other apps or the native list. [Undo details](docs/usage.md#undo-removal).
-- **Quantities affect removal.** Above one, use the minus button or default hold action; a normal tap does not remove the item. Kept-zero mode behaves differently. [Quantity behavior](docs/usage.md#quantities).
+- **Undo is temporary.** A 10-second icon covers this card's last removal batch in the current browser, not edits through other apps or the native list. [Undo details](https://github.com/eyalgal/ha-shopping-list-card/blob/main/docs/usage.md#undo-removal).
+- **Quantities affect removal.** Above one, use the minus button or default hold action; a normal tap does not remove the item. Kept-zero mode behaves differently. [Quantity behavior](https://github.com/eyalgal/ha-shopping-list-card/blob/main/docs/usage.md#quantities).
 - **No offline write queue.** The card waits for Home Assistant confirmation and does not automatically repeat failed changes.
 
 <a id="configuration"></a><a id="options"></a><a id="catalog-options"></a><a id="custom-images"></a><a id="item-types-variants"></a>
@@ -99,11 +99,11 @@ Compact tiles keep the main item and its variants accessible. Screenshots use de
 
 | Guide | Contents |
 |---|---|
-| [Using the card](docs/usage.md) | Variants, quantities, images, prefixes, Undo, and shared-list behavior |
-| [Configuration reference](docs/configuration.md) | Every Single/Catalog option, defaults, and layout examples |
-| [JSON catalog setup](examples/auto-generated-grid/) | Sensor setup, product data, flat variants, existing-grid migration, and troubleshooting |
-| [Complete dashboard example](examples/auto-generated-grid/dashboard.yaml) | Native Sections dashboard with one Catalog card |
-| [Contributing](CONTRIBUTING.md) | Development, browser fixtures, and pre-release device checks |
+| [Using the card](https://github.com/eyalgal/ha-shopping-list-card/blob/main/docs/usage.md) | Variants, quantities, images, prefixes, Undo, and shared-list behavior |
+| [Configuration reference](https://github.com/eyalgal/ha-shopping-list-card/blob/main/docs/configuration.md) | Every Single/Catalog option, defaults, and layout examples |
+| [JSON catalog setup](https://github.com/eyalgal/ha-shopping-list-card/tree/main/examples/auto-generated-grid/) | Sensor setup, product data, flat variants, existing-grid migration, and troubleshooting |
+| [Complete dashboard example](https://github.com/eyalgal/ha-shopping-list-card/blob/main/examples/auto-generated-grid/dashboard.yaml) | Native Sections dashboard with one Catalog card |
+| [Contributing](https://github.com/eyalgal/ha-shopping-list-card/blob/main/CONTRIBUTING.md) | Development, browser fixtures, and pre-release device checks |
 
 ## Support
 
