@@ -247,7 +247,9 @@ class TodoStore {
   }
 
   _setItems(items) {
-    this._allItems = items.filter(item => typeof item?.summary === 'string');
+    // Subscriptions send unset fields as null; todo/item/list omits them.
+    this._allItems = items.filter(item => typeof item?.summary === 'string')
+      .map(item => Object.fromEntries(Object.entries(item).filter(([, value]) => value != null)));
     this.items = this._activeItems(this._allItems);
   }
 
@@ -643,12 +645,13 @@ const CARD_DEFAULTS = {
 
 const CARD_STYLES = `
       ha-card { position: relative; box-sizing: border-box; border-radius: var(--ha-card-border-radius,12px); box-shadow: var(--ha-card-box-shadow); overflow:hidden; background: var(--ha-card-background, var(--card-background-color)); }
-      .card-undo { --undo-size: 28px; position: absolute; z-index: 2; top: 14px; right: 6px; }
+      .card-undo { --undo-size: 24px; --undo-icon-size: 20px; --undo-radius: 5px; --undo-background: rgba(128,128,128,0.2); --undo-hover-background: rgba(128,128,128,0.4); position: absolute; z-index: 2; top: 15px; right: 8px; color: var(--primary-text-color); }
+      ha-card:has(.types-mode) .card-undo { top: 16px; }
       .card-undo[hidden] { display: none; }
       ha-card.has-undo .card-container:not(.vertical-layout):not(.types-mode) { padding-right: 40px; }
       ha-card.has-undo .types-header:not(.vertical-header) { padding-right: 40px; }
       /* Vertical tiles: sit in the top corner, above the quantity buttons (which start at 30px). */
-      ha-card.has-vertical-undo .card-undo { top: 2px; right: 4px; }
+      ha-card.has-vertical-undo .card-undo { top: 6px; right: 6px; }
       .card-content { padding:0 !important; margin: -1px 0; }
       .card-container { display:flex; align-items:center; padding:10px 12px; gap:10px; cursor:pointer; transition:background-color .2s; box-sizing: border-box; outline: none; }
       .card-container:hover { background: var(--secondary-background-color) }
@@ -1932,12 +1935,12 @@ class ShoppingListUndo extends HTMLElement {
       <style>
         :host { display: inline-flex; flex-shrink: 0; width: var(--undo-size, 36px); height: var(--undo-size, 36px); }
         :host([hidden]) { display: none; }
-        .undo { display: inline-flex; align-items: center; justify-content: center; box-sizing: border-box; width: 100%; height: 100%; padding: 0; border: 0; border-radius: 50%; background: var(--card-background-color, #fff); box-shadow: 0 0 0 1px var(--divider-color, #ccc); color: var(--primary-color); cursor: pointer; }
-        .undo:hover { background: var(--secondary-background-color, #eee); }
+        .undo { display: inline-flex; align-items: center; justify-content: center; box-sizing: border-box; width: 100%; height: 100%; padding: 0; border: 0; border-radius: var(--undo-radius, 4px); background: var(--undo-background, transparent); color: inherit; font: inherit; cursor: pointer; transition: background-color .2s; }
+        .undo:hover { background: var(--undo-hover-background, var(--secondary-background-color)); }
         .undo:focus-visible { outline: 2px solid var(--primary-color); outline-offset: 1px; }
-        .undo:disabled { opacity: .5; cursor: default; }
-        .undo.has-error { color: var(--error-color, #db4437); box-shadow: 0 0 0 1px currentColor; }
-        ha-icon { --mdc-icon-size: calc(var(--undo-size, 36px) - 14px); }
+        .undo:disabled { opacity: .45; cursor: default; }
+        .undo.has-error { color: var(--error-color, #db4437); }
+        ha-icon { --mdc-icon-size: var(--undo-icon-size, 24px); }
         .live, .error { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
       </style>
       <button class="undo" type="button"><ha-icon icon="mdi:undo"></ha-icon></button>

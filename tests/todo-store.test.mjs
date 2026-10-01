@@ -443,6 +443,23 @@ test('Undo keeps the most recent removal when concurrent batches finish out of o
   assert.equal(setup.store.snapshot.undo.count, 1);
 });
 
+test('Undo treats null subscription fields and omitted list fields as the same item', async context => {
+  const withNulls = summary => ({ summary, uid: 'yogurt', status: 'needs_action', due: null, description: null, completed: null });
+  const omitNulls = items => items.map(item => Object.fromEntries(Object.entries(item).filter(([, value]) => value != null)));
+  const setup = fixture(context, {
+    fetch: () => ({ items: omitNulls(setup.state.items) }),
+    service(domain, service, data) { setup.push([withNulls(data.rename)]); },
+  });
+  await settle();
+  setup.push([withNulls('Dairy - Yogurt (1)')]);
+  const config = { title: 'Yogurt', list_prefix: 'Dairy', enable_quantity: true, remove_zero: false };
+  await setup.store.execute(['dairy - yogurt'], items => [planItemAction(config, items, null)]);
+  assert.equal(setup.store.snapshot.undo.count, 1);
+  assert.equal(await setup.store.undoLastRemoval(), true);
+  assert.equal(setup.state.items[0].summary, 'Dairy - Yogurt (1)');
+  assert.equal(setup.store.snapshot.undo, null);
+});
+
 test('Undo expires after ten seconds, restarting for a newer removal', async context => {
   context.mock.timers.enable({ apis: ['setTimeout'] });
   const setup = fixture(context, { service(domain, service, data) {

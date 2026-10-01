@@ -158,7 +158,9 @@ class TodoStore {
   }
 
   _setItems(items) {
-    this._allItems = items.filter(item => typeof item?.summary === 'string');
+    // Subscriptions send unset fields as null; todo/item/list omits them.
+    this._allItems = items.filter(item => typeof item?.summary === 'string')
+      .map(item => Object.fromEntries(Object.entries(item).filter(([, value]) => value != null)));
     this.items = this._activeItems(this._allItems);
   }
 

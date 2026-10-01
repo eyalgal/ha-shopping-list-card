@@ -1,11 +1,12 @@
 export const CARD_STYLES = `
       ha-card { position: relative; box-sizing: border-box; border-radius: var(--ha-card-border-radius,12px); box-shadow: var(--ha-card-box-shadow); overflow:hidden; background: var(--ha-card-background, var(--card-background-color)); }
-      .card-undo { --undo-size: 28px; position: absolute; z-index: 2; top: 14px; right: 6px; }
+      .card-undo { --undo-size: 24px; --undo-icon-size: 20px; --undo-radius: 5px; --undo-background: rgba(128,128,128,0.2); --undo-hover-background: rgba(128,128,128,0.4); position: absolute; z-index: 2; top: 15px; right: 8px; color: var(--primary-text-color); }
+      ha-card:has(.types-mode) .card-undo { top: 16px; }
       .card-undo[hidden] { display: none; }
       ha-card.has-undo .card-container:not(.vertical-layout):not(.types-mode) { padding-right: 40px; }
       ha-card.has-undo .types-header:not(.vertical-header) { padding-right: 40px; }
       /* Vertical tiles: sit in the top corner, above the quantity buttons (which start at 30px). */
-      ha-card.has-vertical-undo .card-undo { top: 2px; right: 4px; }
+      ha-card.has-vertical-undo .card-undo { top: 6px; right: 6px; }
       .card-content { padding:0 !important; margin: -1px 0; }
       .card-container { display:flex; align-items:center; padding:10px 12px; gap:10px; cursor:pointer; transition:background-color .2s; box-sizing: border-box; outline: none; }
       .card-container:hover { background: var(--secondary-background-color) }

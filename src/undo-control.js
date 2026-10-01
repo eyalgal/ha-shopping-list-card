@@ -6,12 +6,12 @@ class ShoppingListUndo extends HTMLElement {
       <style>
         :host { display: inline-flex; flex-shrink: 0; width: var(--undo-size, 36px); height: var(--undo-size, 36px); }
         :host([hidden]) { display: none; }
-        .undo { display: inline-flex; align-items: center; justify-content: center; box-sizing: border-box; width: 100%; height: 100%; padding: 0; border: 0; border-radius: 50%; background: var(--card-background-color, #fff); box-shadow: 0 0 0 1px var(--divider-color, #ccc); color: var(--primary-color); cursor: pointer; }
-        .undo:hover { background: var(--secondary-background-color, #eee); }
+        .undo { display: inline-flex; align-items: center; justify-content: center; box-sizing: border-box; width: 100%; height: 100%; padding: 0; border: 0; border-radius: var(--undo-radius, 4px); background: var(--undo-background, transparent); color: inherit; font: inherit; cursor: pointer; transition: background-color .2s; }
+        .undo:hover { background: var(--undo-hover-background, var(--secondary-background-color)); }
         .undo:focus-visible { outline: 2px solid var(--primary-color); outline-offset: 1px; }
-        .undo:disabled { opacity: .5; cursor: default; }
-        .undo.has-error { color: var(--error-color, #db4437); box-shadow: 0 0 0 1px currentColor; }
-        ha-icon { --mdc-icon-size: calc(var(--undo-size, 36px) - 14px); }
+        .undo:disabled { opacity: .45; cursor: default; }
+        .undo.has-error { color: var(--error-color, #db4437); }
+        ha-icon { --mdc-icon-size: var(--undo-icon-size, 24px); }
         .live, .error { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
       </style>
       <button class="undo" type="button"><ha-icon icon="mdi:undo"></ha-icon></button>
