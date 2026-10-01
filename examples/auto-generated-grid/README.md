@@ -2,7 +2,7 @@
 
 Use **Catalog** mode in Shopping List Card to browse products from one shared JSON-backed sensor. Categories, search, variants, quantities, the full shopping list, and quick-add are built in. No generated tile template, `auto-entities`, or `layout-card` is needed.
 
-Use Shopping List Card **3.0.0** for Catalog mode. Follow the pre-release installation instructions on the [release page](https://github.com/eyalgal/ha-shopping-list-card/releases).
+Catalog mode requires Shopping List Card **3.0.0** or later. Install or update it through HACS.
 
 This folder keeps its original URL, but the instructions and dashboard example now use Catalog mode. The existing JSON format is still supported; you do not need to convert your catalog.
 
@@ -63,7 +63,7 @@ The editor reports category/product counts and source problems such as invalid J
 ## Use the Catalog
 
 - Tap an unselected product to add it. At quantity one, tap to remove it. Above one, decrement first or use the default hold action. [Quantity details](../../docs/usage.md#quantities) cover kept-zero mode. Removal deletes the item rather than marking it completed.
-- After an accidental removal, use the **Undo** icon in the catalog header within 10 seconds to restore the last confirmed batch and its quantities. It covers this card's removals, not edits made through the native full list or other apps. See [Undo limits](../../docs/usage.md#undo-removal).
+- After an accidental removal, use the **Undo** button on that product's tile within 10 seconds to restore the last confirmed batch and its quantities. It covers this card's removals, not edits made through the native full list or other apps. See [Undo limits](../../docs/usage.md#undo-removal).
 - Open a product's chevron to choose variants. Each row follows the same quantity/removal rules. The header is also actionable: it uses the bare title, or the title plus subtitle when one is set.
 - Use `+` and `-` to adjust quantities. Catalog mode enables these by default. The default hold action removes an item; holding a grouped header clears its configured variants too. Change this under product options if you prefer more-info or no hold action.
 - Use category tabs, search, and **On list** to filter catalog tiles. On list does not include uncatalogued items.

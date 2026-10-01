@@ -30,9 +30,6 @@ class ShoppingListCatalogCard extends HTMLElement {
         * { box-sizing: border-box; }
         [hidden] { display: none !important; }
         .catalog-header { display: flex; align-items: center; gap: 8px; margin-bottom: 12px; }
-        .catalog-header.undo-only { position: absolute; top: 0; right: 0; z-index: 2; margin: 0; }
-        :host([data-undo-overlay]) .catalog-toolbar, :host([data-undo-overlay]) .catalog-tabs,
-        :host([data-undo-overlay]) .catalog-section:first-child .catalog-category-heading { padding-right: 44px; }
         .catalog-title { flex: 1; margin: 0; min-width: 0; font-size: 20px; line-height: 1.3; font-weight: 500; overflow-wrap: anywhere; }
         .catalog-counter { color: var(--secondary-text-color); font-size: 12px; white-space: nowrap; }
         button { font: inherit; color: inherit; cursor: pointer; }
@@ -69,7 +66,6 @@ class ShoppingListCatalogCard extends HTMLElement {
         .catalog-grid { display: grid; grid-template-columns: repeat(var(--catalog-columns, 4), minmax(0, 1fr)); gap: 8px; align-items: start; }
         .catalog-grid > shopping-list-card { display: block; min-width: 0; }
         .catalog-grid > shopping-list-card[hidden] { display: none !important; }
-        shopping-list-card shopping-list-undo { display: none !important; }
         :host([data-sync-state]:not([data-sync-state="ready"])) shopping-list-card .list-status { display: none; }
         .catalog-status:not(:empty) { margin-top: 12px; overflow-wrap: anywhere; }
         .catalog-empty { padding: 24px 0; margin: 0; color: var(--secondary-text-color); font-size: 14px; }
@@ -80,7 +76,6 @@ class ShoppingListCatalogCard extends HTMLElement {
       <div class="catalog-header">
         <h2 class="catalog-title"></h2>
         <span class="catalog-counter" aria-live="polite"></span>
-        <shopping-list-undo class="catalog-undo" hidden></shopping-list-undo>
         <button class="catalog-icon-button catalog-add-toggle" type="button" aria-label="Add item to shopping list" title="Add item to shopping list" aria-expanded="false" aria-controls="catalog-add-form"><ha-icon icon="mdi:plus"></ha-icon></button>
         <button class="catalog-icon-button catalog-open-list" type="button" aria-label="Open shopping list" title="Open shopping list" aria-expanded="false" aria-controls="catalog-list-panel"><ha-icon icon="mdi:format-list-checks"></ha-icon></button>
       </div>
@@ -170,7 +165,7 @@ class ShoppingListCatalogCard extends HTMLElement {
       || config.categories.some(category => typeof category !== 'string' || !category.trim()))) {
       throw new Error('Categories must be a list of category names.');
     }
-    for (const option of ['fixed_columns', 'show_category_tabs', 'show_search', 'show_title', 'show_item_count', 'show_list_button', 'show_add_button']) {
+    for (const option of ['fixed_columns', 'show_category_tabs', 'show_search', 'show_title', 'show_item_count', 'show_list_button', 'show_add_button', 'show_undo']) {
       if (config[option] !== undefined && typeof config[option] !== 'boolean') {
         throw new Error(`${option} must be true or false.`);
       }
@@ -193,7 +188,8 @@ class ShoppingListCatalogCard extends HTMLElement {
     this.shadowRoot.querySelector('.catalog-title').textContent = config.title || 'Shopping';
     this.shadowRoot.querySelector('.catalog-title').hidden = config.show_title === false;
     this.shadowRoot.querySelector('.catalog-counter').hidden = config.show_item_count === false;
-    this._updateHeaderVisibility();
+    this.shadowRoot.querySelector('.catalog-header').hidden = [config.show_title, config.show_item_count,
+      config.show_list_button, config.show_add_button].every(value => value === false);
     this._tabs.hidden = config.show_category_tabs === false;
     this.shadowRoot.querySelector('.catalog-search').hidden = config.show_search === false;
     if (config.show_search === false) {
@@ -514,6 +510,8 @@ class ShoppingListCatalogCard extends HTMLElement {
   _applyFilters() {
     const terms = searchText(this._query).trim().split(/\s+/).filter(Boolean);
     const items = this._snapshot?.items;
+    // Keep a just-removed product visible under On list so its Undo button stays reachable.
+    const undoKeys = new Set(this._snapshot?.undo?.keys || []);
     let visible = 0;
     for (const group of this._groups) {
       let count = 0;
@@ -521,7 +519,8 @@ class ShoppingListCatalogCard extends HTMLElement {
         const record = this._products.get(product.key);
         const matches = (this._category === null || this._category === group.name)
           && terms.every(term => product.search.includes(term))
-          && (!this._onList || productOnList(product, items));
+          && (!this._onList || productOnList(product, items)
+            || product.names.some(name => undoKeys.has(name.toLowerCase())));
         if (!matches && !record.card.hidden) record.card._clearHolds?.();
         record.card.hidden = !matches;
         record.card.inert = !matches;
@@ -548,9 +547,6 @@ class ShoppingListCatalogCard extends HTMLElement {
   }
 
   _renderStatus() {
-    const undo = this.shadowRoot.querySelector('.catalog-undo');
-    undo.update(this._store, this._snapshot);
-    this._updateHeaderVisibility();
     const status = this._snapshot?.status || 'loading';
     this.setAttribute('data-sync-state', status);
     const message = this._sourceError || this._snapshot?.error || (status === 'loading' ? 'Loading shopping list...' : '');
@@ -577,17 +573,6 @@ class ShoppingListCatalogCard extends HTMLElement {
 
   getCardSize() {
     return Math.max(3, 2 + this._groups.reduce((rows, group) => rows + 1 + Math.ceil(group.products.length / (this._config?.columns || 4)) * 2, 0));
-  }
-
-  _updateHeaderVisibility() {
-    const config = this._config || {};
-    const undoVisible = !this.shadowRoot.querySelector('.catalog-undo').hidden;
-    const empty = [config.show_title, config.show_item_count, config.show_list_button, config.show_add_button]
-      .every(value => value === false);
-    const header = this.shadowRoot.querySelector('.catalog-header');
-    header.hidden = empty && !undoVisible;
-    header.classList.toggle('undo-only', empty);
-    this.toggleAttribute('data-undo-overlay', empty && undoVisible);
   }
 
   getLayoutOptions() { return { grid_rows: 'auto', grid_columns: 12, grid_min_columns: 4 }; }

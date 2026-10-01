@@ -76,6 +76,7 @@ class ShoppingListCatalogEditor extends HTMLElement {
             <label class="catalog-toggle"><ha-switch id="show_item_count"></ha-switch><span>Item count</span></label>
             <label class="catalog-toggle"><ha-switch id="show_list_button"></ha-switch><span>Shopping list button</span></label>
             <label class="catalog-toggle"><ha-switch id="show_add_button"></ha-switch><span>Add item button</span></label>
+            <label class="catalog-toggle"><ha-switch id="show_undo"></ha-switch><span>Undo button</span></label>
           </div>
         </ha-expansion-panel>
         <ha-expansion-panel header="Product defaults" outlined>
@@ -154,7 +155,7 @@ class ShoppingListCatalogEditor extends HTMLElement {
     this.shadowRoot.getElementById('keep_at_zero').checked = options.remove_zero === false;
     this.shadowRoot.getElementById('fixed_columns').checked = config.fixed_columns === true;
     this.shadowRoot.getElementById('columns').setAttribute('label', config.fixed_columns ? 'Columns' : 'Maximum columns');
-    for (const option of ['show_category_tabs', 'show_search', 'show_title', 'show_item_count', 'show_list_button', 'show_add_button']) {
+    for (const option of ['show_category_tabs', 'show_search', 'show_title', 'show_item_count', 'show_list_button', 'show_add_button', 'show_undo']) {
       this.shadowRoot.getElementById(option).checked = config[option] !== false;
     }
     this._updateCategories();
@@ -232,7 +233,7 @@ class ShoppingListCatalogEditor extends HTMLElement {
     if (['columns', 'quantity_step', 'quantity_max'].includes(field)) {
       next = value === '' ? undefined : Number(value);
       if (next !== undefined && (!Number.isInteger(next) || next < 1 || (field === 'columns' && next > 6))) return;
-    } else if (['show_category_tabs', 'show_search', 'show_title', 'show_item_count', 'show_list_button', 'show_add_button', 'enable_quantity'].includes(field)) next = value ? undefined : false;
+    } else if (['show_category_tabs', 'show_search', 'show_title', 'show_item_count', 'show_list_button', 'show_add_button', 'show_undo', 'enable_quantity'].includes(field)) next = value ? undefined : false;
     else if (field === 'fixed_columns') next = value ? true : undefined;
     else if (field === 'keep_at_zero') next = value ? false : undefined;
     else if (field === 'layout') {

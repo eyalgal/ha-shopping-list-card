@@ -33,6 +33,7 @@ Single mode needs an existing to-do entity and a product title. It does not need
 | `colorize_background` | boolean | no | Tint the background with the selected-state color. | `true` |
 | `hold_action` | object | no | `{ action: 'default' \| 'more-info' \| 'none' }`. Default removes the item, or the header's whole variant group. | `{ action: 'default' }` |
 | `haptic` | boolean | no | Haptic feedback on supported mobile clients. | `false` |
+| `show_undo` | boolean | no | Briefly show an Undo button on the card after a removal. | `true` |
 
 ```yaml
 type: custom:shopping-list-card
@@ -73,6 +74,7 @@ Catalog mode reads products from a sensor and stores selections in the to-do int
 | `show_item_count` | No | Show the top visible/total product count. Category-tab and section counts are independent. | `true` |
 | `show_list_button` | No | Show the button that opens the full native to-do list. | `true` |
 | `show_add_button` | No | Show quick-add for a missing shopping-list item. | `true` |
+| `show_undo` | No | Show the Undo button on a product tile after a removal. Products and `item_options` can also set it. | `true` |
 | `item_options` | No | Shared Single-mode defaults, such as layout, images, quantities, colors, and hold behavior. Product settings override these, but cannot change `todo_list`. | Vertical tiles with quantities enabled |
 
 The visual editor detects valid direct or wrapped catalog data when you select a sensor. Its status shows category/product counts or a source error. It does not silently repair an existing saved configuration; use the offered source suggestion to apply a detected attribute.

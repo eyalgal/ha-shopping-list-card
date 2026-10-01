@@ -34,9 +34,9 @@ Tests use mocked Home Assistant services and never connect to a real shopping li
 
 The fixtures render the actual built card with fake list data and simulated Home Assistant controls. They are not a substitute for installed-card or physical-device testing. Use synthetic products for documentation screenshots; do not expose household lists or credentials.
 
-## Pre-release Device Checks
+## Release Device Checks
 
-Before a stable release, test the installed pre-release on physical iOS and Android companion apps and a desktop browser. Emulation does not verify haptics, saved mobile downloads, or the WebView lifecycle. Use a disposable to-do list:
+Before each release, test the installed build on physical iOS and Android companion apps and a desktop browser. Emulation does not verify haptics, saved mobile downloads, or the WebView lifecycle. Use a disposable to-do list:
 
 1. Add plain Milk and Lactose-free, change their quantities independently, and expand/collapse at the intended tile width. Check for overlapping or clipped controls.
 2. Remove a product and Undo it. Hold a variant header to remove a group, then Undo the batch and check exact quantities. Try a kept-zero item too.

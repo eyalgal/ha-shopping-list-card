@@ -344,10 +344,10 @@ class ShoppingListCard extends HTMLElement {
   }
 
   _renderStatus() {
-    const inCatalog = this.getRootNode().host?.localName === 'shopping-list-catalog';
     const keys = this._config ? [this._buildFullName(), ...this._getTypes().map(type => this._buildNameFor(type.name))]
       .map(name => name.toLowerCase()) : [];
-    this._undoControl?.update(inCatalog ? null : this._store, inCatalog ? null : this._syncState, keys);
+    const showUndo = this._config?.show_undo !== false;
+    this._undoControl?.update(showUndo ? this._store : null, showUndo ? this._syncState : null, keys);
     const haCard = this.querySelector('ha-card');
     haCard?.classList.toggle('has-undo', !!this._undoControl && !this._undoControl.hidden);
     haCard?.classList.toggle('has-vertical-undo', this._config?.layout === 'vertical');

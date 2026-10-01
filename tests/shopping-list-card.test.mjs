@@ -97,7 +97,7 @@ test('standalone cards offer shared Undo only for the affected item', async cont
   assert.deepEqual(environment.errors, []);
 });
 
-test('catalog Undo restores bulk variant removal from one notice outside the tiles', async context => {
+test('catalog Undo stays on the removed tile, which remains visible under On list', async context => {
   const environment = createEnvironment(context);
   const setup = createHass([item('Milk (2)', 'milk'), item('Milk - Lactose-free (3)', 'lactose-free')], {
     service(domain, service, data) {
@@ -113,13 +113,10 @@ test('catalog Undo restores bulk variant removal from one notice outside the til
   onList.checked = true;
   onList.dispatchEvent(new environment.window.Event('change'));
   await milk._removeAllTypes();
-  const undo = catalog.shadowRoot.querySelector('shopping-list-undo.catalog-undo');
-  assert.equal(milk.hidden, true);
+  const undo = milk.querySelector('shopping-list-undo');
+  assert.equal(milk.hidden, false);
   assert.equal(undo.hidden, false);
-  assert.equal(undo.parentElement.classList.contains('catalog-header'), true);
-  assert.equal([...catalog.shadowRoot.querySelectorAll('shopping-list-undo')]
-    .filter(control => !control.closest('shopping-list-card')).length, 1);
-  assert.equal(milk.querySelector('shopping-list-undo').hidden, true);
+  assert.equal(catalog.shadowRoot.querySelector('.catalog-header shopping-list-undo'), null);
   assert.equal(undo.shadowRoot.querySelector('.undo').getAttribute('aria-label'), 'Undo: Removed 2 items');
   undo.shadowRoot.querySelector('.undo').click();
   await settle();
@@ -158,25 +155,25 @@ test('Undo errors retain the icon and expired removals are not replayed', async 
   assert.equal(setup.services.length, 2);
 });
 
-test('catalog Undo uses the header without adding a row when header controls are hidden', async context => {
+test('show_undo false hides the Undo button in Single and Catalog modes', async context => {
   const environment = createEnvironment(context);
-  const setup = createHass([item('Milk')], { service() { setup.push([]); } });
-  catalogSource(setup, { Dairy: [{ title: 'Milk' }] });
-  const catalog = mountCatalog(environment, setup.hass, {
-    show_title: false, show_item_count: false, show_list_button: false, show_add_button: false,
-  });
+  const setup = createHass([item('Milk'), item('Eggs', 'eggs')], { service(domain, service, data) {
+    setup.push(setup.state.items.filter(entry => entry.uid !== data.item));
+  } });
+  catalogSource(setup, { Dairy: [{ title: 'Eggs' }] });
+  const card = mount(environment, setup.hass, { show_undo: false });
+  const catalog = mountCatalog(environment, setup.hass, { show_undo: false });
   await settle();
-  const header = catalog.shadowRoot.querySelector('.catalog-header');
-  assert.equal(header.hidden, true);
-  catalog.shadowRoot.querySelector('shopping-list-card').querySelector('.card-container').click();
+  card.querySelector('.card-container').click();
   await settle();
-  assert.equal(header.hidden, false);
-  assert.equal(header.classList.contains('undo-only'), true);
-  assert.equal(catalog.hasAttribute('data-undo-overlay'), true);
-  assert.equal(catalog.shadowRoot.querySelector('.catalog-undo').hidden, false);
-  catalog._store.dismissUndo();
-  assert.equal(header.hidden, true);
-  assert.equal(catalog.hasAttribute('data-undo-overlay'), false);
+  const eggs = catalog.shadowRoot.querySelector('shopping-list-card');
+  eggs.querySelector('.card-container').click();
+  await settle();
+  assert.equal(setup.state.items.length, 0);
+  assert.equal(card.querySelector('shopping-list-undo').hidden, true);
+  assert.equal(card.querySelector('ha-card').classList.contains('has-undo'), false);
+  assert.equal(eggs._config.show_undo, false);
+  assert.equal(eggs.querySelector('shopping-list-undo').hidden, true);
 });
 
 test('Undo after a long press is not swallowed by the trailing-click guard', async context => {
@@ -452,6 +449,23 @@ test('variant header hold honors more-info without deleting items', async contex
   assert.equal(setup.services.length, 0);
   assert.equal(events.length, 1);
   assert.equal(events[0].detail.entityId, 'todo.shopping');
+});
+
+test('the Single editor turns the Undo button off and back on without persisting the default', context => {
+  const environment = createEnvironment(context);
+  const editor = environment.document.createElement('shopping-list-card-editor');
+  const events = [];
+  editor.addEventListener('config-changed', event => events.push(JSON.parse(JSON.stringify(event.detail.config))));
+  editor.setConfig({ title: 'Milk', todo_list: 'todo.shopping' });
+  editor.hass = createHass().hass;
+  const toggle = editor.shadowRoot.querySelector('#show_undo');
+  assert.equal(toggle.checked, true);
+  toggle.checked = false;
+  toggle.dispatchEvent(new environment.window.Event('change'));
+  assert.equal(events.at(-1).show_undo, false);
+  toggle.checked = true;
+  toggle.dispatchEvent(new environment.window.Event('change'));
+  assert.equal('show_undo' in events.at(-1), false);
 });
 
 test('editing an unrelated field preserves object-based variant configuration', context => {
@@ -1995,7 +2009,7 @@ test('catalog editor saves category restrictions and independent visibility opti
   fruits.checked = false;
   fruits.dispatchEvent(new environment.window.Event('change'));
   assert.deepEqual(changes.at(-1).categories, ['Dairy']);
-  for (const option of ['show_category_tabs', 'show_search', 'show_title', 'show_list_button', 'show_add_button']) {
+  for (const option of ['show_category_tabs', 'show_search', 'show_title', 'show_list_button', 'show_add_button', 'show_undo']) {
     const control = root.getElementById(option);
     control.checked = false;
     control.dispatchEvent(new environment.window.Event('change'));

@@ -250,6 +250,13 @@ class ShoppingListCardEditor extends HTMLElement {
                 <span class="toggle-desc">Short vibration on tap and hold (mobile only).</span>
               </div>
             </label>
+            <label class="toggle-row">
+              <ha-switch id="show_undo"></ha-switch>
+              <div class="toggle-text">
+                <span class="toggle-title">Undo button</span>
+                <span class="toggle-desc">Briefly show an Undo button on the card after removing an item.</span>
+              </div>
+            </label>
           </div>
         </ha-expansion-panel>
       </div>
@@ -519,6 +526,7 @@ class ShoppingListCardEditor extends HTMLElement {
     layoutEl.value = layoutVal;
     layoutEl._slcValue = layoutVal;
     s.querySelector('#haptic').checked = !!c.haptic;
+    s.querySelector('#show_undo').checked = c.show_undo !== false;
     const holdVal = (c.hold_action?.action) || 'default';
     const holdEl = s.querySelector('#hold_action');
     holdEl.value = holdVal;
@@ -573,6 +581,8 @@ class ShoppingListCardEditor extends HTMLElement {
 
     const haptic = s.querySelector('#haptic').checked;
     if (haptic) n.haptic = true; else delete n.haptic;
+
+    if (s.querySelector('#show_undo').checked) delete n.show_undo; else n.show_undo = false;
 
     const layoutVal = this._selectVal('layout');
     if (layoutVal === 'vertical') n.layout = 'vertical'; else delete n.layout;

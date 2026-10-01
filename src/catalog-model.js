@@ -4,7 +4,7 @@ const itemFields = [
   'title', 'subtitle', 'types', 'types_sort', 'image', 'image_base', 'list_prefix',
   'layout', 'show_name', 'enable_quantity', 'quantity_step', 'quantity_max',
   'remove_zero', 'on_icon', 'off_icon', 'on_color', 'off_color',
-  'colorize_background', 'hold_action', 'haptic',
+  'colorize_background', 'hold_action', 'haptic', 'show_undo',
 ];
 
 function itemOptions(options) {
@@ -76,7 +76,10 @@ export function readCatalog(hass, config) {
   if (!data || typeof data !== 'object' || Array.isArray(data)) {
     throw new Error('The catalog must contain categories with product arrays.');
   }
-  const defaults = { layout: 'vertical', enable_quantity: true, ...itemOptions(config.item_options || {}) };
+  const defaults = {
+    layout: 'vertical', enable_quantity: true, ...(config.show_undo === false ? { show_undo: false } : {}),
+    ...itemOptions(config.item_options || {}),
+  };
   const groups = [];
   for (const [category, entries] of Object.entries(data)) {
     if (config.categories && !config.categories.includes(category)) continue;

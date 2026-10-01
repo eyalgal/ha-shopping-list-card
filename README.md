@@ -23,8 +23,6 @@ Catalog mode with demo products, category tabs, quantities, and expanded variant
 
 [![Open your Home Assistant instance and open a repository inside the Home Assistant Community Store.](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=eyalgal&repository=ha-shopping-list-card)
 
-> Catalog mode and Undo are part of **3.0.0**, currently a **pre-release**. See the [release instructions][release] to install the test version. The release badge above tracks the latest stable release.
-
 ## Card Modes
 
 ### Single
@@ -78,7 +76,7 @@ Horizontal variant groups and vertical tiles can share the same shopping list.
 
 ### Mobile Catalog and Undo
 
-<img src="https://raw.githubusercontent.com/eyalgal/ha-shopping-list-card/main/docs/images/catalog-mobile-undo.png" alt="Two-column catalog at phone width, showing the Undo icon in the catalog header after removing Eggs, and separate Milk and Lactose-free quantities" width="390"/>
+<img src="https://raw.githubusercontent.com/eyalgal/ha-shopping-list-card/main/docs/images/catalog-mobile-undo.png" alt="Two-column catalog at phone width, showing the Undo button on the Eggs tile after removing it, and separate Milk and Lactose-free quantities" width="390"/>
 
 Compact tiles keep the main item and its variants accessible. Screenshots use demo data and sample photos; product-photo files are not bundled with the card.
 
@@ -89,7 +87,7 @@ Compact tiles keep the main item and its variants accessible. Screenshots use de
 ## Good to Know
 
 - **Catalogs are read-only sources.** Quick-add changes the shopping list, not the JSON catalog. Edit the source to add permanent products.
-- **Undo is temporary.** A 10-second icon covers this card's last removal batch in the current browser, not edits through other apps or the native list. [Undo details](https://github.com/eyalgal/ha-shopping-list-card/blob/main/docs/usage.md#undo-removal).
+- **Undo is temporary.** A 10-second Undo button on the removed tile covers this card's last removal batch in the current browser, not edits through other apps or the native list. Turn it off with `show_undo: false`. [Undo details](https://github.com/eyalgal/ha-shopping-list-card/blob/main/docs/usage.md#undo-removal).
 - **Quantities affect removal.** Above one, use the minus button or default hold action; a normal tap does not remove the item. Kept-zero mode behaves differently. [Quantity behavior](https://github.com/eyalgal/ha-shopping-list-card/blob/main/docs/usage.md#quantities).
 - **No offline write queue.** The card waits for Home Assistant confirmation and does not automatically repeat failed changes.
 
@@ -103,7 +101,7 @@ Compact tiles keep the main item and its variants accessible. Screenshots use de
 | [Configuration reference](https://github.com/eyalgal/ha-shopping-list-card/blob/main/docs/configuration.md) | Every Single/Catalog option, defaults, and layout examples |
 | [JSON catalog setup](https://github.com/eyalgal/ha-shopping-list-card/tree/main/examples/auto-generated-grid/) | Sensor setup, product data, flat variants, existing-grid migration, and troubleshooting |
 | [Complete dashboard example](https://github.com/eyalgal/ha-shopping-list-card/blob/main/examples/auto-generated-grid/dashboard.yaml) | Native Sections dashboard with one Catalog card |
-| [Contributing](https://github.com/eyalgal/ha-shopping-list-card/blob/main/CONTRIBUTING.md) | Development, browser fixtures, and pre-release device checks |
+| [Contributing](https://github.com/eyalgal/ha-shopping-list-card/blob/main/CONTRIBUTING.md) | Development, browser fixtures, and release device checks |
 
 ## Support
 

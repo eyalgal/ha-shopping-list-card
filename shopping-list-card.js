@@ -497,7 +497,7 @@ const itemFields = [
   'title', 'subtitle', 'types', 'types_sort', 'image', 'image_base', 'list_prefix',
   'layout', 'show_name', 'enable_quantity', 'quantity_step', 'quantity_max',
   'remove_zero', 'on_icon', 'off_icon', 'on_color', 'off_color',
-  'colorize_background', 'hold_action', 'haptic',
+  'colorize_background', 'hold_action', 'haptic', 'show_undo',
 ];
 
 function itemOptions(options) {
@@ -569,7 +569,10 @@ function readCatalog(hass, config) {
   if (!data || typeof data !== 'object' || Array.isArray(data)) {
     throw new Error('The catalog must contain categories with product arrays.');
   }
-  const defaults = { layout: 'vertical', enable_quantity: true, ...itemOptions(config.item_options || {}) };
+  const defaults = {
+    layout: 'vertical', enable_quantity: true, ...(config.show_undo === false ? { show_undo: false } : {}),
+    ...itemOptions(config.item_options || {}),
+  };
   const groups = [];
   for (const [category, entries] of Object.entries(data)) {
     if (config.categories && !config.categories.includes(category)) continue;
@@ -1115,6 +1118,7 @@ class ShoppingListCatalogEditor extends HTMLElement {
             <label class="catalog-toggle"><ha-switch id="show_item_count"></ha-switch><span>Item count</span></label>
             <label class="catalog-toggle"><ha-switch id="show_list_button"></ha-switch><span>Shopping list button</span></label>
             <label class="catalog-toggle"><ha-switch id="show_add_button"></ha-switch><span>Add item button</span></label>
+            <label class="catalog-toggle"><ha-switch id="show_undo"></ha-switch><span>Undo button</span></label>
           </div>
         </ha-expansion-panel>
         <ha-expansion-panel header="Product defaults" outlined>
@@ -1193,7 +1197,7 @@ class ShoppingListCatalogEditor extends HTMLElement {
     this.shadowRoot.getElementById('keep_at_zero').checked = options.remove_zero === false;
     this.shadowRoot.getElementById('fixed_columns').checked = config.fixed_columns === true;
     this.shadowRoot.getElementById('columns').setAttribute('label', config.fixed_columns ? 'Columns' : 'Maximum columns');
-    for (const option of ['show_category_tabs', 'show_search', 'show_title', 'show_item_count', 'show_list_button', 'show_add_button']) {
+    for (const option of ['show_category_tabs', 'show_search', 'show_title', 'show_item_count', 'show_list_button', 'show_add_button', 'show_undo']) {
       this.shadowRoot.getElementById(option).checked = config[option] !== false;
     }
     this._updateCategories();
@@ -1271,7 +1275,7 @@ class ShoppingListCatalogEditor extends HTMLElement {
     if (['columns', 'quantity_step', 'quantity_max'].includes(field)) {
       next = value === '' ? undefined : Number(value);
       if (next !== undefined && (!Number.isInteger(next) || next < 1 || (field === 'columns' && next > 6))) return;
-    } else if (['show_category_tabs', 'show_search', 'show_title', 'show_item_count', 'show_list_button', 'show_add_button', 'enable_quantity'].includes(field)) next = value ? undefined : false;
+    } else if (['show_category_tabs', 'show_search', 'show_title', 'show_item_count', 'show_list_button', 'show_add_button', 'show_undo', 'enable_quantity'].includes(field)) next = value ? undefined : false;
     else if (field === 'fixed_columns') next = value ? true : undefined;
     else if (field === 'keep_at_zero') next = value ? false : undefined;
     else if (field === 'layout') {
@@ -1564,6 +1568,13 @@ class ShoppingListCardEditor extends HTMLElement {
                 <span class="toggle-desc">Short vibration on tap and hold (mobile only).</span>
               </div>
             </label>
+            <label class="toggle-row">
+              <ha-switch id="show_undo"></ha-switch>
+              <div class="toggle-text">
+                <span class="toggle-title">Undo button</span>
+                <span class="toggle-desc">Briefly show an Undo button on the card after removing an item.</span>
+              </div>
+            </label>
           </div>
         </ha-expansion-panel>
       </div>
@@ -1833,6 +1844,7 @@ class ShoppingListCardEditor extends HTMLElement {
     layoutEl.value = layoutVal;
     layoutEl._slcValue = layoutVal;
     s.querySelector('#haptic').checked = !!c.haptic;
+    s.querySelector('#show_undo').checked = c.show_undo !== false;
     const holdVal = (c.hold_action?.action) || 'default';
     const holdEl = s.querySelector('#hold_action');
     holdEl.value = holdVal;
@@ -1887,6 +1899,8 @@ class ShoppingListCardEditor extends HTMLElement {
 
     const haptic = s.querySelector('#haptic').checked;
     if (haptic) n.haptic = true; else delete n.haptic;
+
+    if (s.querySelector('#show_undo').checked) delete n.show_undo; else n.show_undo = false;
 
     const layoutVal = this._selectVal('layout');
     if (layoutVal === 'vertical') n.layout = 'vertical'; else delete n.layout;
@@ -2025,9 +2039,6 @@ class ShoppingListCatalogCard extends HTMLElement {
         * { box-sizing: border-box; }
         [hidden] { display: none !important; }
         .catalog-header { display: flex; align-items: center; gap: 8px; margin-bottom: 12px; }
-        .catalog-header.undo-only { position: absolute; top: 0; right: 0; z-index: 2; margin: 0; }
-        :host([data-undo-overlay]) .catalog-toolbar, :host([data-undo-overlay]) .catalog-tabs,
-        :host([data-undo-overlay]) .catalog-section:first-child .catalog-category-heading { padding-right: 44px; }
         .catalog-title { flex: 1; margin: 0; min-width: 0; font-size: 20px; line-height: 1.3; font-weight: 500; overflow-wrap: anywhere; }
         .catalog-counter { color: var(--secondary-text-color); font-size: 12px; white-space: nowrap; }
         button { font: inherit; color: inherit; cursor: pointer; }
@@ -2064,7 +2075,6 @@ class ShoppingListCatalogCard extends HTMLElement {
         .catalog-grid { display: grid; grid-template-columns: repeat(var(--catalog-columns, 4), minmax(0, 1fr)); gap: 8px; align-items: start; }
         .catalog-grid > shopping-list-card { display: block; min-width: 0; }
         .catalog-grid > shopping-list-card[hidden] { display: none !important; }
-        shopping-list-card shopping-list-undo { display: none !important; }
         :host([data-sync-state]:not([data-sync-state="ready"])) shopping-list-card .list-status { display: none; }
         .catalog-status:not(:empty) { margin-top: 12px; overflow-wrap: anywhere; }
         .catalog-empty { padding: 24px 0; margin: 0; color: var(--secondary-text-color); font-size: 14px; }
@@ -2075,7 +2085,6 @@ class ShoppingListCatalogCard extends HTMLElement {
       <div class="catalog-header">
         <h2 class="catalog-title"></h2>
         <span class="catalog-counter" aria-live="polite"></span>
-        <shopping-list-undo class="catalog-undo" hidden></shopping-list-undo>
         <button class="catalog-icon-button catalog-add-toggle" type="button" aria-label="Add item to shopping list" title="Add item to shopping list" aria-expanded="false" aria-controls="catalog-add-form"><ha-icon icon="mdi:plus"></ha-icon></button>
         <button class="catalog-icon-button catalog-open-list" type="button" aria-label="Open shopping list" title="Open shopping list" aria-expanded="false" aria-controls="catalog-list-panel"><ha-icon icon="mdi:format-list-checks"></ha-icon></button>
       </div>
@@ -2165,7 +2174,7 @@ class ShoppingListCatalogCard extends HTMLElement {
       || config.categories.some(category => typeof category !== 'string' || !category.trim()))) {
       throw new Error('Categories must be a list of category names.');
     }
-    for (const option of ['fixed_columns', 'show_category_tabs', 'show_search', 'show_title', 'show_item_count', 'show_list_button', 'show_add_button']) {
+    for (const option of ['fixed_columns', 'show_category_tabs', 'show_search', 'show_title', 'show_item_count', 'show_list_button', 'show_add_button', 'show_undo']) {
       if (config[option] !== undefined && typeof config[option] !== 'boolean') {
         throw new Error(`${option} must be true or false.`);
       }
@@ -2188,7 +2197,8 @@ class ShoppingListCatalogCard extends HTMLElement {
     this.shadowRoot.querySelector('.catalog-title').textContent = config.title || 'Shopping';
     this.shadowRoot.querySelector('.catalog-title').hidden = config.show_title === false;
     this.shadowRoot.querySelector('.catalog-counter').hidden = config.show_item_count === false;
-    this._updateHeaderVisibility();
+    this.shadowRoot.querySelector('.catalog-header').hidden = [config.show_title, config.show_item_count,
+      config.show_list_button, config.show_add_button].every(value => value === false);
     this._tabs.hidden = config.show_category_tabs === false;
     this.shadowRoot.querySelector('.catalog-search').hidden = config.show_search === false;
     if (config.show_search === false) {
@@ -2509,6 +2519,8 @@ class ShoppingListCatalogCard extends HTMLElement {
   _applyFilters() {
     const terms = searchText(this._query).trim().split(/\s+/).filter(Boolean);
     const items = this._snapshot?.items;
+    // Keep a just-removed product visible under On list so its Undo button stays reachable.
+    const undoKeys = new Set(this._snapshot?.undo?.keys || []);
     let visible = 0;
     for (const group of this._groups) {
       let count = 0;
@@ -2516,7 +2528,8 @@ class ShoppingListCatalogCard extends HTMLElement {
         const record = this._products.get(product.key);
         const matches = (this._category === null || this._category === group.name)
           && terms.every(term => product.search.includes(term))
-          && (!this._onList || productOnList(product, items));
+          && (!this._onList || productOnList(product, items)
+            || product.names.some(name => undoKeys.has(name.toLowerCase())));
         if (!matches && !record.card.hidden) record.card._clearHolds?.();
         record.card.hidden = !matches;
         record.card.inert = !matches;
@@ -2543,9 +2556,6 @@ class ShoppingListCatalogCard extends HTMLElement {
   }
 
   _renderStatus() {
-    const undo = this.shadowRoot.querySelector('.catalog-undo');
-    undo.update(this._store, this._snapshot);
-    this._updateHeaderVisibility();
     const status = this._snapshot?.status || 'loading';
     this.setAttribute('data-sync-state', status);
     const message = this._sourceError || this._snapshot?.error || (status === 'loading' ? 'Loading shopping list...' : '');
@@ -2572,17 +2582,6 @@ class ShoppingListCatalogCard extends HTMLElement {
 
   getCardSize() {
     return Math.max(3, 2 + this._groups.reduce((rows, group) => rows + 1 + Math.ceil(group.products.length / (this._config?.columns || 4)) * 2, 0));
-  }
-
-  _updateHeaderVisibility() {
-    const config = this._config || {};
-    const undoVisible = !this.shadowRoot.querySelector('.catalog-undo').hidden;
-    const empty = [config.show_title, config.show_item_count, config.show_list_button, config.show_add_button]
-      .every(value => value === false);
-    const header = this.shadowRoot.querySelector('.catalog-header');
-    header.hidden = empty && !undoVisible;
-    header.classList.toggle('undo-only', empty);
-    this.toggleAttribute('data-undo-overlay', empty && undoVisible);
   }
 
   getLayoutOptions() { return { grid_rows: 'auto', grid_columns: 12, grid_min_columns: 4 }; }
@@ -2943,10 +2942,10 @@ class ShoppingListCard extends HTMLElement {
   }
 
   _renderStatus() {
-    const inCatalog = this.getRootNode().host?.localName === 'shopping-list-catalog';
     const keys = this._config ? [this._buildFullName(), ...this._getTypes().map(type => this._buildNameFor(type.name))]
       .map(name => name.toLowerCase()) : [];
-    this._undoControl?.update(inCatalog ? null : this._store, inCatalog ? null : this._syncState, keys);
+    const showUndo = this._config?.show_undo !== false;
+    this._undoControl?.update(showUndo ? this._store : null, showUndo ? this._syncState : null, keys);
     const haCard = this.querySelector('ha-card');
     haCard?.classList.toggle('has-undo', !!this._undoControl && !this._undoControl.hidden);
     haCard?.classList.toggle('has-vertical-undo', this._config?.layout === 'vertical');
