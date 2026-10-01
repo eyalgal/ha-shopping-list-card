@@ -442,3 +442,42 @@ test('Undo keeps the most recent removal when concurrent batches finish out of o
   assert.equal(setup.store.snapshot.undo.summary, 'Bread');
   assert.equal(setup.store.snapshot.undo.count, 1);
 });
+
+test('Undo expires after ten seconds, restarting for a newer removal', async context => {
+  context.mock.timers.enable({ apis: ['setTimeout'] });
+  const setup = fixture(context, { service(domain, service, data) {
+    setup.push(setup.state.items.filter(entry => entry.uid !== data.item));
+  } });
+  await settle();
+  setup.push([item('Milk'), item('Bread', 'bread')]);
+  await setup.store.execute(['milk'], items => [planItemAction({ title: 'Milk' }, items, null, 'remove')]);
+  context.mock.timers.tick(9000);
+  await setup.store.execute(['bread'], items => [planItemAction({ title: 'Bread' }, items, null, 'remove')]);
+  context.mock.timers.tick(9000);
+  assert.equal(setup.store.snapshot.undo.summary, 'Bread');
+  context.mock.timers.tick(1000);
+  assert.equal(setup.store.snapshot.undo, null);
+  assert.equal(await setup.store.undoLastRemoval(), false);
+});
+
+test('Undo expiring during a restore clears only after the restore settles', async context => {
+  context.mock.timers.enable({ apis: ['setTimeout'] });
+  const restore = deferred();
+  const setup = fixture(context, { async service(domain, service) {
+    if (service === 'remove_item') setup.push([]);
+    else {
+      await restore.promise;
+      throw new Error('denied');
+    }
+  } });
+  await settle();
+  setup.push([item('Milk')]);
+  await setup.store.execute(['milk'], items => [planItemAction({ title: 'Milk' }, items, null, 'remove')]);
+  const undo = setup.store.undoLastRemoval();
+  await settle();
+  context.mock.timers.tick(10000);
+  assert.equal(setup.store.snapshot.undo.busy, true);
+  restore.resolve();
+  await assert.rejects(undo, /denied/);
+  assert.equal(setup.store.snapshot.undo, null);
+});

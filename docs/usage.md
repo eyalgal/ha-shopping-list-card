@@ -70,12 +70,12 @@ Set `hold_action: { action: more-info }` to open the list's more-info dialog wit
 
 ## Undo Removal
 
-After a confirmed removal, **Undo** appears on the affected standalone card or once above the catalog products. It restores the last confirmed removal batch, including successfully removed variants from a bulk hold. Setting an item to zero is also undoable; ordinary quantity changes are not.
+After a confirmed removal, an **Undo** icon appears in the corner of the affected standalone card, or in the catalog header beside the add and list buttons. It does not change the card or catalog height. The icon restores the last confirmed removal batch, including successfully removed variants from a bulk hold. Setting an item to zero is also undoable; ordinary quantity changes are not. Hover or focus the icon to see what was removed.
 
 - Restores exact names, quantities, and supported descriptions/due dates. Deleted items receive new UIDs and may appear at the end of the list. Original ordering and other provider-specific metadata cannot be restored.
 - Refreshes the list first and refuses to overwrite entries that changed or were re-added. Undo is disabled while disconnected or while another card write is pending. The check is not an atomic cross-device transaction.
-- Failed restores are never retried automatically. After a partial restore, only the remaining entries stay available for explicit retry.
-- One batch is shared by cards using the same list and browser connection. A later removal replaces it; editing a captured item invalidates that item's Undo. Dismiss, reload, or removing the last connected card clears the batch.
+- Failed restores are never retried automatically. The icon turns red and its tooltip shows the error. After a partial restore, only the remaining entries stay available for explicit retry.
+- One batch is shared by cards using the same list and browser connection. A later removal replaces it; editing a captured item invalidates that item's Undo. The icon disappears after 10 seconds, on reload, or when the last connected card is removed.
 - Only removals made through Shopping List Card are captured. Native full-list controls and external apps do not contribute to Undo. It is not persistent or cross-device history.
 
 ## Browsing a Catalog

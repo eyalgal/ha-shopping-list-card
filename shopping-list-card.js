@@ -90,6 +90,7 @@ function planListAddition(items, text) {
 }
 
 const stores = new WeakMap();
+const UNDO_TIMEOUT = 10000;
 
 function getTodoStore(hass, entityId) {
   const connection = hass.connection;
@@ -132,6 +133,8 @@ class TodoStore {
     this._allItems = [];
     this._undo = null;
     this._undoBusy = false;
+    this._undoTimer = null;
+    this._undoExpired = false;
     this._operationSequence = 0;
     this._undoSequence = 0;
     this._availability = this._availabilityError();
@@ -344,11 +347,28 @@ class TodoStore {
     if (!confirmed.length || sequence < this._undoSequence) return;
     this._undoSequence = sequence;
     this._undo = { id: sequence, records: confirmed };
+    this._scheduleUndoExpiry();
+  }
+
+  _scheduleUndoExpiry() {
+    clearTimeout(this._undoTimer);
+    this._undoTimer = setTimeout(() => {
+      this._undoTimer = null;
+      if (this._undoBusy) this._undoExpired = true;
+      else this.dismissUndo();
+    }, UNDO_TIMEOUT);
+  }
+
+  _clearUndo() {
+    clearTimeout(this._undoTimer);
+    this._undoTimer = null;
+    this._undoExpired = false;
+    this._undo = null;
   }
 
   dismissUndo() {
     if (this._undoBusy) return;
-    this._undo = null;
+    this._clearUndo();
     this._notify();
   }
 
@@ -406,7 +426,7 @@ class TodoStore {
       if (this._current(generation) && this._undo === batch) {
         const restored = new Set(actions.filter(action => action.confirmed(this.items)).map(action => action.record));
         batch.records = batch.records.filter(record => !restored.has(record));
-        if (!batch.records.length) this._undo = null;
+        if (!batch.records.length || this._undoExpired) this._clearUndo();
       }
       this._undoBusy = false;
       this._notify();
@@ -424,7 +444,8 @@ class TodoStore {
     const removals = isUndo ? [] : actions.map(action => this._removalRecord(action));
     if (!isUndo && this._undo) {
       const records = this._undo.records.filter(record => !keys.includes(record.key));
-      this._undo = records.length ? { ...this._undo, records } : null;
+      if (records.length) this._undo = { ...this._undo, records };
+      else this._clearUndo();
     }
     const generation = this._generation;
     const hass = this.hass;
@@ -462,7 +483,7 @@ class TodoStore {
   _dispose() {
     if (this.listeners.size || this.pending.size || this._undoBusy) return;
     this.closed = true;
-    this._undo = null;
+    this._clearUndo();
     this._generation++;
     this._stopSubscription();
     this._clearRetry();
@@ -621,7 +642,13 @@ const CARD_DEFAULTS = {
 };
 
 const CARD_STYLES = `
-      ha-card { box-sizing: border-box; border-radius: var(--ha-card-border-radius,12px); box-shadow: var(--ha-card-box-shadow); overflow:hidden; background: var(--ha-card-background, var(--card-background-color)); }
+      ha-card { position: relative; box-sizing: border-box; border-radius: var(--ha-card-border-radius,12px); box-shadow: var(--ha-card-box-shadow); overflow:hidden; background: var(--ha-card-background, var(--card-background-color)); }
+      .card-undo { --undo-size: 28px; position: absolute; z-index: 2; top: 14px; right: 6px; }
+      .card-undo[hidden] { display: none; }
+      ha-card.has-undo .card-container:not(.vertical-layout):not(.types-mode) { padding-right: 40px; }
+      ha-card.has-undo .types-header:not(.vertical-header) { padding-right: 40px; }
+      /* Vertical tiles: sit in the top corner, above the quantity buttons (which start at 30px). */
+      ha-card.has-vertical-undo .card-undo { top: 2px; right: 4px; }
       .card-content { padding:0 !important; margin: -1px 0; }
       .card-container { display:flex; align-items:center; padding:10px 12px; gap:10px; cursor:pointer; transition:background-color .2s; box-sizing: border-box; outline: none; }
       .card-container:hover { background: var(--secondary-background-color) }
@@ -1903,27 +1930,24 @@ class ShoppingListUndo extends HTMLElement {
     this.attachShadow({ mode: 'open' });
     this.shadowRoot.innerHTML = `
       <style>
-        :host { display: block; padding: 8px; color: var(--primary-text-color); }
+        :host { display: inline-flex; flex-shrink: 0; width: var(--undo-size, 36px); height: var(--undo-size, 36px); }
         :host([hidden]) { display: none; }
-        .notice { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; font-size: 13px; }
-        .message { flex: 1 1 90px; min-width: 0; overflow-wrap: anywhere; }
-        button { display: inline-flex; align-items: center; justify-content: center; gap: 4px; min-height: 36px; padding: 4px 8px; border: 0; border-radius: 4px; background: transparent; color: var(--primary-color); font: inherit; cursor: pointer; }
-        button:focus-visible { outline: 2px solid var(--primary-color); outline-offset: 1px; }
-        button:disabled { opacity: .5; cursor: default; }
-        .dismiss { width: 36px; padding: 0; color: var(--secondary-text-color); }
-        ha-icon { --mdc-icon-size: 20px; }
-        .error { margin-top: 6px; color: var(--error-color, #db4437); font-size: 13px; overflow-wrap: anywhere; }
-        .error:empty { display: none; }
+        .undo { display: inline-flex; align-items: center; justify-content: center; box-sizing: border-box; width: 100%; height: 100%; padding: 0; border: 0; border-radius: 50%; background: var(--card-background-color, #fff); box-shadow: 0 0 0 1px var(--divider-color, #ccc); color: var(--primary-color); cursor: pointer; }
+        .undo:hover { background: var(--secondary-background-color, #eee); }
+        .undo:focus-visible { outline: 2px solid var(--primary-color); outline-offset: 1px; }
+        .undo:disabled { opacity: .5; cursor: default; }
+        .undo.has-error { color: var(--error-color, #db4437); box-shadow: 0 0 0 1px currentColor; }
+        ha-icon { --mdc-icon-size: calc(var(--undo-size, 36px) - 14px); }
+        .live, .error { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
       </style>
-      <div class="notice">
-        <span class="message" role="status" aria-live="polite"></span>
-        <button class="undo" type="button" title="Undo last removal"><ha-icon icon="mdi:undo"></ha-icon>Undo</button>
-        <button class="dismiss" type="button" title="Dismiss Undo" aria-label="Dismiss Undo"><ha-icon icon="mdi:close"></ha-icon></button>
-      </div>
-      <div class="error" role="alert"></div>
+      <button class="undo" type="button"><ha-icon icon="mdi:undo"></ha-icon></button>
+      <span class="live" role="status" aria-live="polite"></span>
+      <span class="error" role="alert"></span>
     `;
-    this.shadowRoot.querySelector('.undo').addEventListener('click', () => { void this._restore(); });
-    this.shadowRoot.querySelector('.dismiss').addEventListener('click', () => this._store?.dismissUndo());
+    this.shadowRoot.querySelector('.undo').addEventListener('click', event => {
+      event.stopPropagation();
+      void this._restore();
+    });
   }
 
   update(store, snapshot, keys = null) {
@@ -1938,12 +1962,17 @@ class ShoppingListUndo extends HTMLElement {
     const undo = snapshot?.undo;
     this.hidden = !undo || !!this._keys && !undo.keys.some(key => this._keys.includes(key));
     if (this.hidden) return;
-    this.shadowRoot.querySelector('.message').textContent = undo.busy ? 'Restoring items...'
+    const message = undo.busy ? 'Restoring items...'
       : undo.count === 1 ? `Removed ${undo.summary}` : `Removed ${undo.count} items`;
-    this.shadowRoot.querySelector('.undo').disabled = undo.busy || !this._store?.ready || !!snapshot.pending.size;
-    this.shadowRoot.querySelector('.dismiss').disabled = undo.busy;
+    const button = this.shadowRoot.querySelector('.undo');
+    const label = undo.busy ? message : `Undo: ${message}`;
+    button.disabled = undo.busy || !this._store?.ready || !!snapshot.pending.size;
+    button.title = this._error ? `${label}. ${this._error}` : label;
+    button.setAttribute('aria-label', label);
+    button.setAttribute('aria-busy', String(undo.busy));
+    button.classList.toggle('has-error', !!this._error);
+    this.shadowRoot.querySelector('.live').textContent = message;
     this.shadowRoot.querySelector('.error').textContent = this._error || '';
-    this.shadowRoot.querySelector('.notice').setAttribute('aria-busy', String(undo.busy));
   }
 
   async _restore() {
@@ -1989,10 +2018,13 @@ class ShoppingListCatalogCard extends HTMLElement {
     this._addRequest = null;
     this.shadowRoot.innerHTML = `
       <style>
-        :host { display: block; min-width: 0; container-type: inline-size; color: var(--primary-text-color); }
+        :host { display: block; position: relative; min-width: 0; container-type: inline-size; color: var(--primary-text-color); }
         * { box-sizing: border-box; }
         [hidden] { display: none !important; }
         .catalog-header { display: flex; align-items: center; gap: 8px; margin-bottom: 12px; }
+        .catalog-header.undo-only { position: absolute; top: 0; right: 0; z-index: 2; margin: 0; }
+        :host([data-undo-overlay]) .catalog-toolbar, :host([data-undo-overlay]) .catalog-tabs,
+        :host([data-undo-overlay]) .catalog-section:first-child .catalog-category-heading { padding-right: 44px; }
         .catalog-title { flex: 1; margin: 0; min-width: 0; font-size: 20px; line-height: 1.3; font-weight: 500; overflow-wrap: anywhere; }
         .catalog-counter { color: var(--secondary-text-color); font-size: 12px; white-space: nowrap; }
         button { font: inherit; color: inherit; cursor: pointer; }
@@ -2040,6 +2072,7 @@ class ShoppingListCatalogCard extends HTMLElement {
       <div class="catalog-header">
         <h2 class="catalog-title"></h2>
         <span class="catalog-counter" aria-live="polite"></span>
+        <shopping-list-undo class="catalog-undo" hidden></shopping-list-undo>
         <button class="catalog-icon-button catalog-add-toggle" type="button" aria-label="Add item to shopping list" title="Add item to shopping list" aria-expanded="false" aria-controls="catalog-add-form"><ha-icon icon="mdi:plus"></ha-icon></button>
         <button class="catalog-icon-button catalog-open-list" type="button" aria-label="Open shopping list" title="Open shopping list" aria-expanded="false" aria-controls="catalog-list-panel"><ha-icon icon="mdi:format-list-checks"></ha-icon></button>
       </div>
@@ -2062,7 +2095,6 @@ class ShoppingListCatalogCard extends HTMLElement {
       </section>
       <div class="catalog-tabs" role="tablist" aria-label="Product categories"></div>
       <div class="catalog-status" role="status" aria-live="polite"></div>
-      <shopping-list-undo hidden></shopping-list-undo>
       <div class="catalog-content" id="catalog-content" role="tabpanel"></div>
       <p class="catalog-empty" role="status" hidden></p>
     `;
@@ -2153,8 +2185,7 @@ class ShoppingListCatalogCard extends HTMLElement {
     this.shadowRoot.querySelector('.catalog-title').textContent = config.title || 'Shopping';
     this.shadowRoot.querySelector('.catalog-title').hidden = config.show_title === false;
     this.shadowRoot.querySelector('.catalog-counter').hidden = config.show_item_count === false;
-    this.shadowRoot.querySelector('.catalog-header').hidden = [config.show_title, config.show_item_count,
-      config.show_list_button, config.show_add_button].every(value => value === false);
+    this._updateHeaderVisibility();
     this._tabs.hidden = config.show_category_tabs === false;
     this.shadowRoot.querySelector('.catalog-search').hidden = config.show_search === false;
     if (config.show_search === false) {
@@ -2509,7 +2540,9 @@ class ShoppingListCatalogCard extends HTMLElement {
   }
 
   _renderStatus() {
-    this.shadowRoot.querySelector('shopping-list-undo').update(this._store, this._snapshot);
+    const undo = this.shadowRoot.querySelector('.catalog-undo');
+    undo.update(this._store, this._snapshot);
+    this._updateHeaderVisibility();
     const status = this._snapshot?.status || 'loading';
     this.setAttribute('data-sync-state', status);
     const message = this._sourceError || this._snapshot?.error || (status === 'loading' ? 'Loading shopping list...' : '');
@@ -2536,6 +2569,17 @@ class ShoppingListCatalogCard extends HTMLElement {
 
   getCardSize() {
     return Math.max(3, 2 + this._groups.reduce((rows, group) => rows + 1 + Math.ceil(group.products.length / (this._config?.columns || 4)) * 2, 0));
+  }
+
+  _updateHeaderVisibility() {
+    const config = this._config || {};
+    const undoVisible = !this.shadowRoot.querySelector('.catalog-undo').hidden;
+    const empty = [config.show_title, config.show_item_count, config.show_list_button, config.show_add_button]
+      .every(value => value === false);
+    const header = this.shadowRoot.querySelector('.catalog-header');
+    header.hidden = empty && !undoVisible;
+    header.classList.toggle('undo-only', empty);
+    this.toggleAttribute('data-undo-overlay', empty && undoVisible);
   }
 
   getLayoutOptions() { return { grid_rows: 'auto', grid_columns: 12, grid_min_columns: 4 }; }
@@ -2888,7 +2932,7 @@ class ShoppingListCard extends HTMLElement {
 
   _ensureShell() {
     if (this.content) return;
-    this.innerHTML = `<ha-card><div class="list-status" role="status" aria-live="polite"></div><div class="card-content"></div><shopping-list-undo hidden></shopping-list-undo></ha-card>`;
+    this.innerHTML = `<ha-card><div class="list-status" role="status" aria-live="polite"></div><div class="card-content"></div><shopping-list-undo class="card-undo" hidden></shopping-list-undo></ha-card>`;
     this.content = this.querySelector('div.card-content');
     this._statusElement = this.querySelector('.list-status');
     this._undoControl = this.querySelector('shopping-list-undo');
@@ -2900,6 +2944,9 @@ class ShoppingListCard extends HTMLElement {
     const keys = this._config ? [this._buildFullName(), ...this._getTypes().map(type => this._buildNameFor(type.name))]
       .map(name => name.toLowerCase()) : [];
     this._undoControl?.update(inCatalog ? null : this._store, inCatalog ? null : this._syncState, keys);
+    const haCard = this.querySelector('ha-card');
+    haCard?.classList.toggle('has-undo', !!this._undoControl && !this._undoControl.hidden);
+    haCard?.classList.toggle('has-vertical-undo', this._config?.layout === 'vertical');
     const status = this._syncState?.status || 'loading';
     const message = this._actionError || this._syncState?.error || (status === 'loading' ? 'Loading list...' : '');
     const severity = this._actionError || status === 'error' ? 'error' : status === 'loading' ? 'info' : 'warning';

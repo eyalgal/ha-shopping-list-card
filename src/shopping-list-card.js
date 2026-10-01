@@ -336,7 +336,7 @@ class ShoppingListCard extends HTMLElement {
 
   _ensureShell() {
     if (this.content) return;
-    this.innerHTML = `<ha-card><div class="list-status" role="status" aria-live="polite"></div><div class="card-content"></div><shopping-list-undo hidden></shopping-list-undo></ha-card>`;
+    this.innerHTML = `<ha-card><div class="list-status" role="status" aria-live="polite"></div><div class="card-content"></div><shopping-list-undo class="card-undo" hidden></shopping-list-undo></ha-card>`;
     this.content = this.querySelector('div.card-content');
     this._statusElement = this.querySelector('.list-status');
     this._undoControl = this.querySelector('shopping-list-undo');
@@ -348,6 +348,9 @@ class ShoppingListCard extends HTMLElement {
     const keys = this._config ? [this._buildFullName(), ...this._getTypes().map(type => this._buildNameFor(type.name))]
       .map(name => name.toLowerCase()) : [];
     this._undoControl?.update(inCatalog ? null : this._store, inCatalog ? null : this._syncState, keys);
+    const haCard = this.querySelector('ha-card');
+    haCard?.classList.toggle('has-undo', !!this._undoControl && !this._undoControl.hidden);
+    haCard?.classList.toggle('has-vertical-undo', this._config?.layout === 'vertical');
     const status = this._syncState?.status || 'loading';
     const message = this._actionError || this._syncState?.error || (status === 'loading' ? 'Loading list...' : '');
     const severity = this._actionError || status === 'error' ? 'error' : status === 'loading' ? 'info' : 'warning';

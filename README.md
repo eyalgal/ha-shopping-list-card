@@ -78,7 +78,7 @@ Horizontal variant groups and vertical tiles can share the same shopping list.
 
 ### Mobile Catalog and Undo
 
-<img src="docs/images/catalog-mobile-undo.png" alt="Two-column catalog at phone width, showing the Undo notice after removing Eggs and separate Milk and Lactose-free quantities" width="390"/>
+<img src="docs/images/catalog-mobile-undo.png" alt="Two-column catalog at phone width, showing the Undo icon in the catalog header after removing Eggs, and separate Milk and Lactose-free quantities" width="390"/>
 
 Compact tiles keep the main item and its variants accessible. Screenshots use demo data and sample photos; product-photo files are not bundled with the card.
 
@@ -89,7 +89,7 @@ Compact tiles keep the main item and its variants accessible. Screenshots use de
 ## Good to Know
 
 - **Catalogs are read-only sources.** Quick-add changes the shopping list, not the JSON catalog. Edit the source to add permanent products.
-- **Undo is temporary.** It covers this card's last removal batch in the current browser, not edits through other apps or the native list. [Undo details](docs/usage.md#undo-removal).
+- **Undo is temporary.** A 10-second icon covers this card's last removal batch in the current browser, not edits through other apps or the native list. [Undo details](docs/usage.md#undo-removal).
 - **Quantities affect removal.** Above one, use the minus button or default hold action; a normal tap does not remove the item. Kept-zero mode behaves differently. [Quantity behavior](docs/usage.md#quantities).
 - **No offline write queue.** The card waits for Home Assistant confirmation and does not automatically repeat failed changes.
 

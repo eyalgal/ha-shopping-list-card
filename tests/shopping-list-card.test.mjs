@@ -80,8 +80,13 @@ test('standalone cards offer shared Undo only for the affected item', async cont
   const undo = otherMilk.querySelector('shopping-list-undo');
   assert.equal(undo.hidden, false);
   assert.equal(bread.querySelector('shopping-list-undo').hidden, true);
-  assert.equal(undo.shadowRoot.querySelector('.message').textContent, 'Removed Milk');
-  undo.shadowRoot.querySelector('.undo').click();
+  const button = undo.shadowRoot.querySelector('.undo');
+  assert.equal(button.getAttribute('aria-label'), 'Undo: Removed Milk');
+  assert.equal(button.textContent.trim(), '');
+  assert.equal(undo.parentElement.localName, 'ha-card');
+  assert.equal(otherMilk.querySelector('ha-card').classList.contains('has-undo'), true);
+  assert.equal(bread.querySelector('ha-card').classList.contains('has-undo'), false);
+  button.click();
   await settle();
   assert.equal(setup.services.length, 2);
   assert.equal(setup.services[1].service, 'add_item');
@@ -108,11 +113,14 @@ test('catalog Undo restores bulk variant removal from one notice outside the til
   onList.checked = true;
   onList.dispatchEvent(new environment.window.Event('change'));
   await milk._removeAllTypes();
-  const undo = catalog.shadowRoot.querySelector('shopping-list-undo');
+  const undo = catalog.shadowRoot.querySelector('shopping-list-undo.catalog-undo');
   assert.equal(milk.hidden, true);
   assert.equal(undo.hidden, false);
+  assert.equal(undo.parentElement.classList.contains('catalog-header'), true);
+  assert.equal([...catalog.shadowRoot.querySelectorAll('shopping-list-undo')]
+    .filter(control => !control.closest('shopping-list-card')).length, 1);
   assert.equal(milk.querySelector('shopping-list-undo').hidden, true);
-  assert.equal(undo.shadowRoot.querySelector('.message').textContent, 'Removed 2 items');
+  assert.equal(undo.shadowRoot.querySelector('.undo').getAttribute('aria-label'), 'Undo: Removed 2 items');
   undo.shadowRoot.querySelector('.undo').click();
   await settle();
   assert.equal(undo.hidden, true);
@@ -123,7 +131,7 @@ test('catalog Undo restores bulk variant removal from one notice outside the til
   assert.deepEqual(environment.errors, []);
 });
 
-test('Undo errors retain the notice and dismissed removals are not replayed', async context => {
+test('Undo errors retain the icon and expired removals are not replayed', async context => {
   const environment = createEnvironment(context);
   const setup = createHass([item('Milk')], { service(domain, service) {
     if (service === 'remove_item') setup.push([]);
@@ -138,12 +146,37 @@ test('Undo errors retain the notice and dismissed removals are not replayed', as
   await settle();
   assert.equal(undo.hidden, false);
   assert.match(undo.shadowRoot.querySelector('.error').textContent, /denied/);
+  assert.match(undo.shadowRoot.querySelector('.undo').title, /denied/);
   assert.equal(undo.shadowRoot.querySelector('.error img'), null);
-  undo.shadowRoot.querySelector('.dismiss').click();
+  const expiry = [...environment.timers.entries()].find(([, timer]) => timer.delay === 10000);
+  environment.timers.delete(expiry[0]);
+  expiry[1].callback();
   assert.equal(undo.hidden, true);
+  assert.equal(card.querySelector('ha-card').classList.contains('has-undo'), false);
   setup.push([]);
   await settle();
   assert.equal(setup.services.length, 2);
+});
+
+test('catalog Undo uses the header without adding a row when header controls are hidden', async context => {
+  const environment = createEnvironment(context);
+  const setup = createHass([item('Milk')], { service() { setup.push([]); } });
+  catalogSource(setup, { Dairy: [{ title: 'Milk' }] });
+  const catalog = mountCatalog(environment, setup.hass, {
+    show_title: false, show_item_count: false, show_list_button: false, show_add_button: false,
+  });
+  await settle();
+  const header = catalog.shadowRoot.querySelector('.catalog-header');
+  assert.equal(header.hidden, true);
+  catalog.shadowRoot.querySelector('shopping-list-card').querySelector('.card-container').click();
+  await settle();
+  assert.equal(header.hidden, false);
+  assert.equal(header.classList.contains('undo-only'), true);
+  assert.equal(catalog.hasAttribute('data-undo-overlay'), true);
+  assert.equal(catalog.shadowRoot.querySelector('.catalog-undo').hidden, false);
+  catalog._store.dismissUndo();
+  assert.equal(header.hidden, true);
+  assert.equal(catalog.hasAttribute('data-undo-overlay'), false);
 });
 
 test('Undo after a long press is not swallowed by the trailing-click guard', async context => {

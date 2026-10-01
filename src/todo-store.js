@@ -1,6 +1,7 @@
 import { matchItem } from './item-model.js';
 
 const stores = new WeakMap();
+const UNDO_TIMEOUT = 10000;
 
 export function getTodoStore(hass, entityId) {
   const connection = hass.connection;
@@ -43,6 +44,8 @@ class TodoStore {
     this._allItems = [];
     this._undo = null;
     this._undoBusy = false;
+    this._undoTimer = null;
+    this._undoExpired = false;
     this._operationSequence = 0;
     this._undoSequence = 0;
     this._availability = this._availabilityError();
@@ -255,11 +258,28 @@ class TodoStore {
     if (!confirmed.length || sequence < this._undoSequence) return;
     this._undoSequence = sequence;
     this._undo = { id: sequence, records: confirmed };
+    this._scheduleUndoExpiry();
+  }
+
+  _scheduleUndoExpiry() {
+    clearTimeout(this._undoTimer);
+    this._undoTimer = setTimeout(() => {
+      this._undoTimer = null;
+      if (this._undoBusy) this._undoExpired = true;
+      else this.dismissUndo();
+    }, UNDO_TIMEOUT);
+  }
+
+  _clearUndo() {
+    clearTimeout(this._undoTimer);
+    this._undoTimer = null;
+    this._undoExpired = false;
+    this._undo = null;
   }
 
   dismissUndo() {
     if (this._undoBusy) return;
-    this._undo = null;
+    this._clearUndo();
     this._notify();
   }
 
@@ -317,7 +337,7 @@ class TodoStore {
       if (this._current(generation) && this._undo === batch) {
         const restored = new Set(actions.filter(action => action.confirmed(this.items)).map(action => action.record));
         batch.records = batch.records.filter(record => !restored.has(record));
-        if (!batch.records.length) this._undo = null;
+        if (!batch.records.length || this._undoExpired) this._clearUndo();
       }
       this._undoBusy = false;
       this._notify();
@@ -335,7 +355,8 @@ class TodoStore {
     const removals = isUndo ? [] : actions.map(action => this._removalRecord(action));
     if (!isUndo && this._undo) {
       const records = this._undo.records.filter(record => !keys.includes(record.key));
-      this._undo = records.length ? { ...this._undo, records } : null;
+      if (records.length) this._undo = { ...this._undo, records };
+      else this._clearUndo();
     }
     const generation = this._generation;
     const hass = this.hass;
@@ -373,7 +394,7 @@ class TodoStore {
   _dispose() {
     if (this.listeners.size || this.pending.size || this._undoBusy) return;
     this.closed = true;
-    this._undo = null;
+    this._clearUndo();
     this._generation++;
     this._stopSubscription();
     this._clearRetry();
