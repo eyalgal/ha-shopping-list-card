@@ -2,7 +2,7 @@
 
 Use **Catalog** mode in Shopping List Card to browse products from one shared JSON-backed sensor. Categories, search, variants, quantities, the full shopping list, and quick-add are built in. No generated tile template, `auto-entities`, or `layout-card` is needed.
 
-Use Shopping List Card **3.0.0** for Catalog mode. The earlier 2.2.0 test builds also supported it; upgrading from the latest test build does not require changing your JSON or card configuration. Follow the pre-release installation instructions on the [release page](https://github.com/eyalgal/ha-shopping-list-card/releases).
+Use Shopping List Card **3.0.0** for Catalog mode. Follow the pre-release installation instructions on the [release page](https://github.com/eyalgal/ha-shopping-list-card/releases).
 
 This folder keeps its original URL, but the instructions and dashboard example now use Catalog mode. The existing JSON format is still supported; you do not need to convert your catalog.
 
@@ -39,6 +39,8 @@ The sample sensor reads the file every 300 seconds. For an immediate refresh aft
 4. Set the title and maximum columns. Under **Product defaults**, set the image base path if you use local product images.
 5. Under **Display**, choose all categories or a subset and turn individual controls on or off. Save the card.
 
+In Home Assistant 2026.6 or later, you can also select the catalog sensor in the entity-based Add Card picker. **Shopping List Card** appears under **Community** when that sensor has valid, nonempty catalog data and a to-do entity exists. The suggestion selects Catalog mode and fills the source and optional attribute. Check its suggested to-do list before saving; unrelated sensors are not suggested.
+
 The same setup in the card's YAML editor is [catalog-card.yaml](catalog-card.yaml):
 
 ```yaml
@@ -60,9 +62,9 @@ The editor reports category/product counts and source problems such as invalid J
 
 ## Use the Catalog
 
-- Tap a product to add it to the list; tap again to remove it. This removes the to-do item, rather than marking it completed.
-- After an accidental removal, use **Undo** above the catalog to restore the last confirmed batch and its quantities. It covers this card's removals, not edits made through the native full list or other apps. See [Undo limits](../../README.md#undo-removal).
-- Open a product's chevron to choose variants. Tap a variant to add or remove that exact item. The header is also actionable: it uses the bare title, or the title plus subtitle when one is set.
+- Tap an unselected product to add it. At quantity one, tap to remove it. Above one, decrement first or use the default hold action. [Quantity details](../../docs/usage.md#quantities) cover kept-zero mode. Removal deletes the item rather than marking it completed.
+- After an accidental removal, use **Undo** above the catalog to restore the last confirmed batch and its quantities. It covers this card's removals, not edits made through the native full list or other apps. See [Undo limits](../../docs/usage.md#undo-removal).
+- Open a product's chevron to choose variants. Each row follows the same quantity/removal rules. The header is also actionable: it uses the bare title, or the title plus subtitle when one is set.
 - Use `+` and `-` to adjust quantities. Catalog mode enables these by default. The default hold action removes an item; holding a grouped header clears its configured variants too. Change this under product options if you prefer more-info or no hold action.
 - Use category tabs, search, and **On list** to filter catalog tiles. On list does not include uncatalogued items.
 - Open the **list icon** for the full native to-do list, including items outside the catalog and completed items. Editing and completion controls depend on the to-do integration. Catalog filters do not restrict this view.
@@ -106,13 +108,13 @@ For explicit variants, replace the relevant product rows with an entry like this
 
 Here a header tap selects `Apple - Pink Lady`, and the chevron exposes all three variants. `types` also accepts plain string arrays or the existing comma-separated string format. Explicit `types` are not regrouped. Flat rows only merge within the same category when their title and behavior/display settings match; explicit product IDs prevent automatic grouping. Per-variant images are retained.
 
-The [product options reference](../../README.md#options) also applies to JSON entries: for example `image`, `list_prefix`, `quantity_max`, `remove_zero`, colors, or `hold_action`. Products always use the Catalog card's `todo_list`; individual entries cannot redirect writes to another list.
+The [product options reference](../../docs/configuration.md#single-options) also applies to JSON entries: for example `image`, `list_prefix`, `quantity_max`, `remove_zero`, colors, or `hold_action`. Products always use the Catalog card's `todo_list`; individual entries cannot redirect writes to another list.
 
 Set shared defaults in the card's `item_options`; per-product JSON settings override them. In **Single** mode you can edit variants visually under **Content > Variants**. In **Catalog** mode variants belong to the shared JSON source, not the card editor.
 
 ### Images
 
-Place local images under `/config/www/images/shopping-list/` and set `item_options.image_base` to `/local/images/shopping-list/`. A product titled `Baby Carrots` tries PNG filenames based on its title, including `baby-carrots.png` and `baby_carrots.png`; see [image naming](../../README.md#custom-images) for all supported forms. Use `image` on a product or variant for an explicit URL. Missing images fall back to an icon. The card does not download a product-image library for you.
+Place local images under `/config/www/images/shopping-list/` and set `item_options.image_base` to `/local/images/shopping-list/`. A product titled `Baby Carrots` tries PNG filenames based on its title, including `baby-carrots.png` and `baby_carrots.png`; see [image naming](../../docs/usage.md#images) for all supported forms. Use `image` on a product or variant for an explicit URL. Missing images fall back to an icon. The card does not download a product-image library for you.
 
 ### Categories and Order
 
@@ -143,7 +145,7 @@ Omit `categories` to show all categories together, or specify exact category nam
 
 `columns` normally sets a responsive maximum. Add `fixed_columns: true` to enforce the exact count at every width, including phones. The same setting is **Catalog > Fixed columns** in the visual editor; **Display > Item count** controls the top counter. Use a count that fits the available space, especially for narrow cards with quantity controls.
 
-See the [catalog options reference](../../README.md#catalog-options) for defaults and supported fields.
+See the [catalog options reference](../../docs/configuration.md#catalog-options) for defaults and supported fields.
 
 ## Migrate from a Generated Grid
 
@@ -153,8 +155,6 @@ See the [catalog options reference](../../README.md#catalog-options) for default
 4. Compare existing selections and quantities, then remove the old generated-grid card when satisfied. The new list icon replaces the need for a separate full-list card, though you can keep one alongside it.
 
 `layout-card` and `auto-entities` are no longer dependencies of this example. Only remove their resources if no other dashboard uses them. Flat subtitle rows and explicit `types` both work without a data-format migration.
-
-For an earlier 2.2.0 test build using `custom:shopping-list-catalog-card`, replace the type with `custom:shopping-list-card` and add `mode: catalog`. Keep the other settings; the removed type has no compatibility alias.
 
 ## Troubleshooting
 

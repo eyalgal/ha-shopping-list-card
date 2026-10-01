@@ -1,438 +1,117 @@
-# 🛍️ Shopping List Card
+# Shopping List Card
 [![GitHub Release][release_badge]][release]
 [![Downloads][downloads_badge]][release]
 [![Community Forum][forum_badge]][forum]
-[![Buy Me A Coffee][bmac_badge]][bmac]
 
-<!-- Link references -->
+A Home Assistant card that turns your existing to-do list into product tiles or a browsable shopping catalog. Pick products, choose variants, and adjust quantities without typing the same names again.
+
+<img src="docs/images/catalog-hero.png" alt="Shopping catalog with Fruit, Dairy, and Pantry categories, selected products, and expanded Milk variants with independent quantities" width="960"/>
+
+Catalog mode with demo products, category tabs, quantities, and expanded variants.
+
+- **Single or Catalog:** a few favorite products, or a shared catalog with categories, search, and an On list filter.
+- **Variants and quantities:** plain Milk and Lactose-free can have separate quantities in one expandable tile.
+- **Full list, quick-add, and Undo:** manage the complete list, add a one-off item, or restore an accidental removal.
+- **Shared across dashboards:** selections stay in your existing to-do integration, with live updates through Home Assistant.
+
+## Get Started
+
+1. Use an existing `todo` entity or add [Local To-do](https://www.home-assistant.io/integrations/local_todo/) under **Settings > Devices & Services > Add Integration**. Other to-do integrations work according to their supported actions.
+2. In [HACS](https://hacs.xyz/), search for **Shopping List Card** and download it.
+3. Edit your dashboard, add **Shopping List Card**, and choose **Single** or **Catalog** at the top of the visual editor.
+4. Select your to-do list, configure the products or catalog source, and save.
+
+[![Open your Home Assistant instance and open a repository inside the Home Assistant Community Store.](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=eyalgal&repository=ha-shopping-list-card)
+
+> Catalog mode and Undo are part of **3.0.0**, currently a **pre-release**. See the [release instructions][release] to install the test version. The release badge above tracks the latest stable release.
+
+## Card Modes
+
+### Single
+
+Use individual tiles for favorites, pantry staples, or recurring tasks. Enter a title and optionally add **Content > Variants**. Customize images, icons, colors, quantities, and horizontal or vertical layout. No sensor is needed.
+
+<details>
+<summary>Minimal Single configuration</summary>
+
+```yaml
+type: custom:shopping-list-card
+title: Milk
+todo_list: todo.shopping_list
+enable_quantity: true
+types:
+  - Lactose-free
+```
+
+</details>
+
+<a id="native-catalog"></a>
+
+### Catalog
+
+Browse products from a shared JSON-backed sensor. Choose categories, search, open the full list, or quick-add an item. Columns can adapt to available width or stay fixed; title, count, and controls can be hidden independently.
+
+The editor validates the source and offers **Starter JSON** for a new catalog. Follow the [JSON catalog setup guide](examples/auto-generated-grid/) to connect the sensor. No `auto-entities`, `layout-card`, or generated grid is required.
+
+<details>
+<summary>Minimal Catalog configuration</summary>
+
+```yaml
+type: custom:shopping-list-card
+mode: catalog
+catalog_entity: sensor.shopping_list_items
+todo_list: todo.shopping_list
+```
+
+Replace the sensor and list IDs with your own. Products live in the sensor's source data; selections and quantities live in the to-do integration.
+
+</details>
+
+<details>
+<summary>More screenshots: product cards and a mobile catalog</summary>
+
+### Product Cards
+
+<img src="docs/images/single-cards.png" alt="Single-mode Milk and Apple variant groups above vertical Bread, Coffee, Eggs, and Cheddar tiles" width="920"/>
+
+Horizontal variant groups and vertical tiles can share the same shopping list.
+
+### Mobile Catalog and Undo
+
+<img src="docs/images/catalog-mobile-undo.png" alt="Two-column catalog at phone width, showing the Undo notice after removing Eggs and separate Milk and Lactose-free quantities" width="390"/>
+
+Compact tiles keep the main item and its variants accessible. Screenshots use demo data and sample photos; product-photo files are not bundled with the card.
+
+</details>
+
+<a id="undo-removal"></a>
+
+## Good to Know
+
+- **Catalogs are read-only sources.** Quick-add changes the shopping list, not the JSON catalog. Edit the source to add permanent products.
+- **Undo is temporary.** It covers this card's last removal batch in the current browser, not edits through other apps or the native list. [Undo details](docs/usage.md#undo-removal).
+- **Quantities affect removal.** Above one, use the minus button or default hold action; a normal tap does not remove the item. Kept-zero mode behaves differently. [Quantity behavior](docs/usage.md#quantities).
+- **No offline write queue.** The card waits for Home Assistant confirmation and does not automatically repeat failed changes.
+
+<a id="configuration"></a><a id="options"></a><a id="catalog-options"></a><a id="custom-images"></a><a id="item-types-variants"></a>
+
+## Documentation
+
+| Guide | Contents |
+|---|---|
+| [Using the card](docs/usage.md) | Variants, quantities, images, prefixes, Undo, and shared-list behavior |
+| [Configuration reference](docs/configuration.md) | Every Single/Catalog option, defaults, and layout examples |
+| [JSON catalog setup](examples/auto-generated-grid/) | Sensor setup, product data, flat variants, existing-grid migration, and troubleshooting |
+| [Complete dashboard example](examples/auto-generated-grid/dashboard.yaml) | Native Sections dashboard with one Catalog card |
+| [Contributing](CONTRIBUTING.md) | Development, browser fixtures, and pre-release device checks |
+
+## Support
+
+[Community discussion][forum] · [Report an issue](https://github.com/eyalgal/ha-shopping-list-card/issues) · [Buy me a coffee][bmac]
+
 [release_badge]: https://img.shields.io/github/v/release/eyalgal/ha-shopping-list-card
 [release]: https://github.com/eyalgal/ha-shopping-list-card/releases
 [downloads_badge]: https://img.shields.io/github/downloads/eyalgal/ha-shopping-list-card/total.svg
 [forum_badge]: https://img.shields.io/badge/Community-Forum-5294E2.svg
 [forum]: https://community.home-assistant.io/t/shopping-list-card-a-simple-card-for-quick-adding-items-to-any-to-do-list/905005
-[bmac_badge]: https://img.shields.io/badge/buy_me_a-coffee-yellow
 [bmac]: https://www.buymeacoffee.com/eyalgal
-
-A Home Assistant dashboard card for adding and managing items in an existing to-do list. Use **Single** mode for one product with optional variants, or **Catalog** mode to browse a shared JSON-backed product catalog. Both modes use the same `todo.<name>` entity for shopping selections and quantities (Local To-do, Bring!, Todoist, etc.).
-
-<img src="https://github.com/user-attachments/assets/005161c4-abdc-4dca-a604-0386e69cae90" alt="Shopping List Card Preview" width="700"/>
-
-> The screenshot shows single-product tiles with a separate native [to-do list card](https://www.home-assistant.io/lovelace/todo-list/). Catalog mode can now open the full list from its own list button.
-
-## ✨ Features
-
-- **One card, two modes** - choose Single or Catalog in the visual editor. Catalog mode reads products from a shared sensor, with no generated-grid template or additional layout cards.
-- **Catalog browsing** - category tabs, search, an On list filter, configurable category subsets, and independent title/control visibility.
-- **Full list and quick-add** - open the native to-do list to manage all items, or add a missing shopping item without editing the catalog.
-- **Tap to add / tap to remove** with case-insensitive matching against an existing to-do list.
-- **Undo removal** - restore the last confirmed single-item or bulk-variant removal, including quantities and supported item details. Kept-at-zero removals can also be undone.
-- **Real-time updates** via a shared WebSocket subscription per entity (one subscription covers every card pointing at the same list, so a grid of 50 cards does not fan out into 50 sockets).
-- **Reliable recovery** with shared reconnect retries, visible connection and action errors, and pending-write protection across tiles for the same item. Refreshing an error only reloads the list; it never repeats a write.
-- **Quantity controls** - enable `+` / `-` buttons with optional `quantity_step` and `quantity_max`.
-- **Item types (variants)** - give one item several `types` (e.g. _Apple_ -> Pink Lady, Granny Smith, Gala). The card collapses to a single tile; tap to expand and add any type (with its own quantity) as `Title - Type`.
-- **Hold action** - configurable long-press: remove item (default), open more-info, or do nothing. Optional haptic feedback.
-- **Custom images, auto-derived** - set an `image_base` path and the card tries `title.png` in several slug variants (`dash-case`, `snake_case`, `with spaces`, `joinedword`) so you don't have to name your files exactly right.
-- **List prefix** - optionally store items as `"Dairy - Milk"` for category-based sorting while the card still displays just the title.
-- **Theme-aware colors** - HA color names like `red`, `blue`, `green` follow your theme; unknown variables fall back to sensible hex defaults so the card never renders blank.
-- **Two layouts** - horizontal (icon left, text right) or vertical (icon on top, great for grid dashboards). `show_name: false` produces an icon-only card.
-- **Colorize background** - optional tinted background matching the on-state color.
-- **Polished visual editor** - collapsible sections for Content / Layout & Display / Icons & Colors / Behavior, native icon picker, color swatches, image upload.
-- **Accessible** - proper `role`, `aria-pressed`, `aria-label`, keyboard-activatable quantity buttons, error states surfaced via `ha-alert`.
-- **XSS-safe** - all user content is escaped before insertion.
-
-When the list is loading, disconnected, or not yet confirmed after an update, item changes are temporarily blocked. The card does not queue offline changes or automatically retry failed adds, removals, or quantity updates.
-
-## ✅ Prerequisites
-
-- **A to-do entity.** Either the built-in [Local To-do](https://www.home-assistant.io/integrations/local_todo/) integration or any third-party integration that exposes a `todo.<your_list>` entity (Bring!, Todoist, etc.). Add it under **Settings → Devices & Services → Add Integration**.
-
-> If no to-do entities are found, the visual editor shows a helpful message with a link to the `todo` docs.
-
-## 🚀 Installation (HACS)
-
-Shopping List Card is available in [HACS](https://hacs.xyz/).
-
-[![Open your Home Assistant instance and open a repository inside the Home Assistant Community Store.](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=eyalgal&repository=ha-shopping-list-card)
-
-_or_
-
-1. Install HACS if you don't already have it.
-2. Open HACS in Home Assistant.
-3. Search for "Shopping List Card".
-4. Click download.
-
-## Card Modes
-
-Add **Shopping List Card** from the dashboard card picker, then choose **Single** or **Catalog** using **Card mode** at the top of its visual editor. Both modes use `type: custom:shopping-list-card`.
-
-- **Single:** select your to-do list, enter the product title, and optionally add variants under **Content > Variants**. Set layout, images, quantities, and hold behavior in the editor. This mode needs no catalog sensor. In YAML, use `mode: single` or omit `mode`.
-- **Catalog:** select a catalog sensor and your to-do list, then choose categories, display controls, and product defaults. Use `mode: catalog`. Products and variants live in the sensor's source data, not in the card configuration.
-
-Catalog mode is part of **3.0.0** and was previously available in the 2.2.0 test builds. See the [release page][release] for pre-release installation instructions. Updating from the latest 2.2.0 test build does not require changing your card configuration or JSON catalog.
-
-The separate `custom:shopping-list-catalog-card` type has been removed. Replace it with `type: custom:shopping-list-card` and add `mode: catalog`; the remaining catalog settings stay the same. There is no alias for the removed type.
-
-## Native Catalog
-
-Choose **Catalog** mode to display a shared product catalog with category tabs, search, and an **On list** filter. It does not require `auto-entities` or `layout-card`.
-
-The catalog is not another shopping list. A sensor provides the available products, and the existing `todo` entity stores the items and quantities you need to buy. The catalog uses the same product tiles, variants, quantity controls, and hold actions as single-product cards.
-
-### Quick Setup
-
-1. **Choose the source.** Reuse your existing JSON-backed sensor, or follow the [JSON catalog setup guide](examples/auto-generated-grid/). The card reads sensor attributes, not a JSON file path or URL directly.
-2. **Add the card.** Edit the dashboard, add **Shopping List Card**, and select **Card mode > Catalog**.
-3. **Connect the data.** Select **Catalog sensor** and **To-do list**. The editor detects a valid source and fills **Catalog attribute** when the category map is wrapped in an object or JSON-string attribute. It stays empty for direct category arrays. The validation status reports category/product counts or the source error.
-4. **Choose the view.** Set the maximum columns, or enable **Fixed columns** for an exact count. Under **Display**, choose all categories or a subset and toggle tabs, search, title, item count, and buttons. Under **Product defaults**, set layout, image base, and quantity behavior.
-5. **Save and use it.** Tap products to add or remove them, expand variants with the chevron, and use the list icon to manage the complete shopping list.
-
-You can also start by selecting the catalog sensor in Home Assistant's entity-based Add Card picker (Home Assistant 2026.6 or later). **Shopping List Card** appears under **Community** when the sensor has valid, nonempty catalog data and a to-do entity exists. The suggestion selects Catalog mode and fills in that sensor and, when needed, its catalog attribute. Check the suggested to-do list before saving. Ordinary sensors are not suggested.
-
-For a new catalog, **Starter JSON** in the Catalog editor downloads a small example with categories, products, and variants. **Setup guide** opens the sensor setup instructions. The download does not create a Home Assistant sensor, overwrite an existing file, or change the shopping list. For an existing configuration with the wrong attribute, the editor offers the detected source without silently changing your settings.
-
-The equivalent configuration for one card is:
-
-```yaml
-type: custom:shopping-list-card
-mode: catalog
-catalog_entity: sensor.shopping_list_items
-todo_list: todo.shopping_list
-title: Shopping
-columns: 4
-item_options:
-  image_base: /local/images/shopping-list/
-```
-
-Replace the example entity IDs with your own. Keep the same to-do entity, titles, subtitles, and prefixes when moving from old tiles so existing selections still match. The [migration guide](examples/auto-generated-grid/#migrate-from-a-generated-grid) explains how to replace the generated grid without rewriting the JSON or shopping list.
-
-### Everyday Use
-
-- Tap a product or variant to add it; tap again to remove it. Removal is not the same as marking a to-do item completed.
-- Tap the chevron to expand variants. Tapping the header itself acts on the bare title, or the title plus subtitle when configured.
-- Adjust quantities with `+` and `-`. By default, a hold removes an item; a grouped header hold clears its configured variants too.
-- Filter tiles with category tabs, search, and **On list**. The full list behind the list icon is not limited by these filters.
-- Use the plus icon for a one-off shopping-list item. To add a permanent product or variant to the catalog, edit the shared JSON and refresh its sensor.
-
-### Catalog Source
-
-By default, each array-valued sensor attribute is treated as a category. Other attributes, such as `friendly_name`, are ignored. Each product is an object with a required `title` and optional product fields such as `subtitle`, `types`, `image`, and `list_prefix`. Variant objects can have their own image or icon. Existing JSON remains supported:
-
-```json
-{
-  "Fruits": [
-    { "title": "Apple", "subtitle": "Pink Lady", "types": ["Pink Lady", "Granny Smith", "Gala"] },
-    { "title": "Pear" }
-  ],
-  "Dairy and Eggs": [
-    { "title": "Milk" },
-    { "title": "Milk", "subtitle": "Lactose-free" }
-  ]
-}
-```
-
-Flat catalogs are supported too. Repeated products with the same title and compatible settings in one category are grouped into a variant dropdown using their subtitles. For example, separate `Chicken` entries with `subtitle: Breast` and `subtitle: Legs` become one Chicken tile with both variants. A bare entry is used for the header when present; otherwise the first subtitle remains the header's default. Stored to-do names are unchanged, and per-variant images are preserved.
-
-Explicit `types` entries and products with their own `id` remain as configured. Products with different list prefixes, quantity limits, or other behavior/display options are not merged. Single subtitle entries remain ordinary tiles. Groups appear where their first member occurred; other products retain their source order.
-
-If the entire category map is in one attribute, set `catalog_attribute` to its name. That attribute may contain an object or a JSON string. Categories and products follow the source order, not an automatic alphabetical sort. Category names do not automatically become list prefixes. See the [JSON format and maintenance guide](examples/auto-generated-grid/#product-json) for variant formats, images, new categories, and sensor refreshes.
-
-### Catalog Options
-
-| Option | Required | Description | Default |
-|---|---|---|---|
-| `mode` | Yes | Set to `catalog` on `custom:shopping-list-card`. | `single` when omitted |
-| `catalog_entity` | Yes | Sensor containing the shared product catalog. | - |
-| `todo_list` | Yes | Existing to-do entity used by every product tile. | - |
-| `catalog_attribute` | No | Attribute containing the entire category map. | Category arrays directly in sensor attributes |
-| `title` | No | Catalog heading. | `Shopping` |
-| `columns` | No | Number of grid columns, from 1 to 6. A responsive maximum unless `fixed_columns` is enabled. | `4` |
-| `fixed_columns` | No | Keep exactly `columns` tracks at every container width, including phones. When `false`, narrow containers use fewer columns. | `false` |
-| `categories` | No | Category names to display. Omit for all categories; an empty list displays none. Missing names never fall back to showing other categories. | All categories |
-| `show_category_tabs` | No | Show the category selector. When `false`, all allowed categories are displayed together. | `true` |
-| `show_search` | No | Show the catalog search box. Disabling it clears any active search. | `true` |
-| `show_title` | No | Show the main catalog heading. | `true` |
-| `show_item_count` | No | Show the top visible/total product count (`X / X`). Does not affect category-tab or section counts. | `true` |
-| `show_list_button` | No | Show the button that expands the full native Home Assistant to-do list. | `true` |
-| `show_add_button` | No | Show the quick-add button for a missing shopping-list item. | `true` |
-| `item_options` | No | Shared single-product defaults, such as `layout`, `image_base`, `enable_quantity`, colors, and `hold_action`. Per-product values override these defaults. | Vertical tiles with quantity controls enabled |
-
-For exactly three columns and no top item counter:
-
-```yaml
-type: custom:shopping-list-card
-mode: catalog
-catalog_entity: sensor.shopping_list_items
-todo_list: todo.shopping_list
-columns: 3
-fixed_columns: true
-show_item_count: false
-```
-
-In the visual editor, enable **Catalog > Fixed columns** and disable **Display > Item count**. Fixed columns do not reduce on phones, so choose a count that leaves enough room for product names and controls. Omit `fixed_columns` or set it to `false` to restore responsive sizing. Hiding the top count does not change filters, category counts, or list contents. When the title, item count, list button, and add button are all hidden, the unused header row is removed too.
-
-In the visual editor, **Display** contains category checkboxes and the visibility switches. For a fixed view of selected categories without navigation, search, or a title:
-
-```yaml
-type: custom:shopping-list-card
-mode: catalog
-catalog_entity: sensor.shopping_list_items
-todo_list: todo.shopping_list
-categories:
-  - Fruits
-  - Dairy and Eggs
-show_category_tabs: false
-show_search: false
-show_title: false
-```
-
-Omit `categories` to show every category together. These options only affect this card, not other dashboards or the shared catalog. Disabling category tabs clears the previous selected tab. Category section headings remain visible when the main title is hidden.
-
-Products cannot override the catalog's target `todo_list`. Search matches category, title, subtitle, and variant names, ignoring case and accents. **On list** includes a product when its header item or any variant is active; kept-zero entries are inactive. The count shows visible catalog products, not the sum of quantities.
-
-### Shopping List and Quick Add
-
-The list icon expands Home Assistant's native `todo-list` card instead of the entity's count-only more-info dialog. It shows the entire selected list, including items that are not in the catalog and completed items. Catalog category/search filters do not restrict this list. Native item editing, completion, and removal follow the capabilities of the to-do integration. Closing the section unloads the native card.
-
-The plus button opens a quick-add field. Type a missing item and submit to add it directly to `todo_list`. This does not add a product to the JSON catalog or apply a catalog category prefix. An existing active item is not added twice, and an existing kept-zero item is reactivated when the list supports updates. The form clears only after Home Assistant confirms the change; failed saves keep the text for correction, and offline writes are not queued. Pending protection is shared with the existing catalog tiles on the same connection.
-
-Adding a permanent catalog product from the card is not supported with the read-only JSON/sensor source. Continue editing the shared JSON for permanent products; the quick-add field is for the shopping list only.
-
-### Undo Removal
-
-After this card confirms a removal, **Undo** appears on the affected standalone card or once above the catalog products. It restores the last removal batch, including all successfully removed variants from a bulk hold. Setting an item to zero with `remove_zero: false` is also undoable; ordinary quantity adjustments are not.
-
-- Restore keeps the original item names, quantities, and supported descriptions/due dates. A deleted item is recreated with a new UID and may appear at the end of the list; its original position and other provider-specific metadata cannot be restored.
-- Undo refreshes the list first and refuses to overwrite items that have since changed or been re-added. It is disabled while disconnected or while this card has another write pending. This is not an atomic cross-device transaction.
-- A failed or partially successful restore is not retried automatically. Successfully restored entries are removed from the Undo batch; the remaining entries can be retried explicitly.
-- One batch is shared by cards targeting the same list and browser connection. A later removal replaces it; editing one of its items invalidates that item's Undo. Dismiss, page reload, or removing the last connected card clears the batch. It is not permanent history or synchronized across devices.
-- Only removals made through Shopping List Card are captured. Changes in the native full-list card, another dashboard control, or an external app are not recorded for Undo.
-
-### Sharing and Persistence
-
-- Point each dashboard at the same `catalog_entity` and `todo_list` to share products and shopping selections. No catalog copy is saved in browser storage.
-- Shopping selections persist in the to-do integration and update connected devices through Home Assistant. Catalog changes appear when the source sensor refreshes, including after reopening a dashboard.
-- Search text, the selected category, the **On list** filter, and expanded variants are local view state. They do not change other dashboards and are not restored after a page reload.
-- This version reads the shared catalog; it does not write to the JSON file. Edit products at their source. The sensor must expose new category keys before the card can display them; the example command-line sensor uses an explicit `json_attributes` list and a five-minute scan interval.
-- Writes are confirmed by Home Assistant; offline changes are not queued or automatically retried. The shared pending-write guard covers cards on one browser connection, not atomic transactions across devices. Simultaneous edits from separate devices remain subject to the to-do integration's conflict behavior.
-
----
-
-## ⚙️ Configuration
-
-The card ships with a full visual editor. The following options are for **Single** mode; use the catalog options above for **Catalog** mode.
-
-### YAML example
-
-```yaml
-type: custom:shopping-list-card
-mode: single
-title: Feed Guinness
-subtitle: Morning & Evening
-todo_list: todo.daily_chores
-layout: vertical
-enable_quantity: true
-quantity_step: 1
-quantity_max: 10
-image: /local/images/guinness.png
-on_color: brown
-colorize_background: true
-hold_action:
-  action: more-info
-haptic: true
-```
-
-### Options
-
-| Name | Type | Required | Description | Default |
-|---|---|---|---|---|
-| `type` | string | yes | Must be `custom:shopping-list-card`. | - |
-| `mode` | string | no | `single` for one product or `catalog` for the sensor-backed catalog. | `single` |
-| `title` | string | yes | The item name. | - |
-| `subtitle` | string | no | A secondary line of text. Included when matching/writing: the stored item is `"<title> - <subtitle>"`. | `''` |
-| `types` | list or string | no | Turns the card into an expandable group. A list of entries (a string, or `{ name, image, icon }`), or a single comma-separated string like `"Pink Lady, Granny Smith, Gala"` (handy from a JSON catalog). Each is added as `"<title> - <type>"`. Tapping the card header adds the bare title (or `"<title> - <subtitle>"` when `subtitle` is set); the chevron expands the variant list. Works in both `horizontal` and `vertical` layouts. | - |
-| `types_sort` | string | no | Order of the variant rows: `none` (as listed), `asc` (A-Z), or `desc` (Z-A). Case-insensitive, natural (numbers sorted numerically). Only used when `types` is set. | `none` |
-| `todo_list` | string | yes | The `todo.<name>` entity to manage. | - |
-| `list_prefix` | string | no | When set, items are stored as `"<prefix> - <title>"` for category sorting. Display is unchanged. | `''` |
-| `image` | string | no | URL to a custom image. Replaces the icon when set. | `''` |
-| `image_base` | string | no | Base path for auto-derived images. When set and `image` is empty, the card tries `<image_base><slug>.png` in several slug variants of the title. | `''` |
-| `layout` | string | no | `horizontal` or `vertical`. | `horizontal` |
-| `show_name` | boolean | no | Set to `false` for an icon-only card. | `true` |
-| `enable_quantity` | boolean | no | Show `+` / `-` buttons when the item is on the list. | `false` |
-| `quantity_step` | number | no | How much `+` / `-` adjusts per tap. | `1` |
-| `quantity_max` | number | no | Optional cap for the quantity. | - |
-| `remove_zero` | boolean | no | Delete the item when its quantity hits 0. Set `false` to keep it as `Milk (0)` and always suffix the quantity. | `true` |
-| `on_icon` | string | no | Icon when the item is on the list. | `mdi:check` |
-| `on_color` | string | no | Color for the on state (HA name like `green`, `teal`, or `#4CAF50`). | `green` |
-| `off_icon` | string | no | Icon when the item is not on the list. | `mdi:plus` |
-| `off_color` | string | no | Color for the off state. | `grey` |
-| `colorize_background` | boolean | no | Tint the whole card with the on-color when on. | `true` |
-| `hold_action` | object | no | `{ action: 'default' \| 'more-info' \| 'none' }`. `default` removes the item. | `{ action: 'default' }` |
-| `haptic` | boolean | no | Short vibration on tap and hold (mobile only). | `false` |
-
----
-
-### Custom images
-
-Either set a specific URL, or let the card derive one from the title.
-
-**Explicit URL**
-
-```yaml
-type: custom:shopping-list-card
-title: Milk
-todo_list: todo.shopping_list
-image: /local/shopping/milk.png
-```
-
-**Auto-derived from title**
-
-```yaml
-type: custom:shopping-list-card
-title: Ice Cream
-todo_list: todo.shopping_list
-image_base: /local/images/shopping-list/
-```
-
-With the title `Ice Cream`, the card tries in order and uses the first that loads:
-
-1. `/local/images/shopping-list/ice-cream.png`
-2. `/local/images/shopping-list/ice_cream.png`
-3. `/local/images/shopping-list/ice%20cream.png`
-4. `/local/images/shopping-list/icecream.png`
-
-If all four fail, the card falls back to the icon.
-
-- Store local images in `/config/www/` and reference them as `/local/...`.
-- External URLs work but may be blocked by your browser's CSP.
-
-### Layout options
-
-- **Horizontal** (default): Icon/image on the left, text on the right.
-- **Vertical**: Icon/image on top, text below. Great for grid layouts. Images are shown uncropped with their aspect ratio preserved.
-
-### Quantity behavior
-
-When `enable_quantity: true`:
-
-- An item on the list shows its quantity with `+` and `-` buttons.
-- If quantity is `1`, the `-` button is hidden and tapping the main card removes the item.
-- If quantity is greater than `1`, the `-` button is visible for decrementing.
-- `quantity_step` controls how much each tap adjusts by (default `1`).
-- `quantity_max` sets an optional cap.
-
-When `remove_zero: false`:
-
-- An emptied item stays on the list as `Milk (0)` instead of being deleted
-
-### List prefix (category sorting)
-
-Set `list_prefix: Dairy` and the card will store items as `"Dairy - Milk"` on your to-do list. The list stays sorted by category, but the card's own UI keeps showing just `Milk`.
-
-```yaml
-type: custom:shopping-list-card
-title: Milk
-list_prefix: Dairy
-todo_list: todo.shopping_list
-```
-
----
-
-### Item types (variants)
-
-When you want one tile to cover several variants of the same item, list them under `types`. The card renders as a single tile with a chevron. Tapping the **chevron** expands an inline list of the variants; tapping a variant adds it as `"<title> - <type>"`, so it shows up on your to-do list as e.g. `Apple - Pink Lady`. Tapping again removes it, and `enable_quantity` adds per-variant `+` / `-` controls.
-
-Tapping the **header body** (outside the chevron and quantity buttons) adds or removes the header item, exactly like a normal single-item card. By default that is the bare title (`Apple`); if you also set a `subtitle`, the header item is `"<title> - <subtitle>"` (e.g. `Apple - Pink Lady`), so you can keep a default variant available with a single tap while the chevron exposes the rest.
-
-With `enable_quantity: true`, the selected header item has its own quantity controls in both layouts. At regular widths, tap the header to add plain `Milk`, then its `+` button to get `Milk (2)`. The chevron stays at the right, and quantities do not increase the collapsed card's height. Lactose-free keeps its separate quantity. Catalog mode enables quantities by default.
-
-On tiles narrower than 220px, the header shows a quantity badge instead of quantity buttons. Expand the card to adjust the main item in its own first row, such as **Milk**, followed by **Lactose-free**. If the header already targets a configured variant, use that variant's existing row instead; it is not duplicated. Product names shorten to fit, and the chevron stays accessible rather than wrapping onto another line.
-
-The chevron opens or closes the variants independently of item actions, including while an update is pending or the list is disconnected. A long press does not disable collapse. The list stays expanded until you close it; changing a quantity does not automatically collapse it.
-
-**Holding** clears items in bulk (respecting `hold_action: none`):
-
-- Hold the **header** to remove every item that belongs to this card (the bare title and all of its variants).
-- Hold a **variant row** to remove that specific variant entirely, regardless of its quantity.
-
-With `hold_action: { action: more-info }`, holding either the header or a variant opens the list's more-info dialog without removing anything.
-
-Use `types_sort` to order the rows alphabetically (`asc` for A-Z, `desc` for Z-A) instead of the order they are listed.
-
-```yaml
-type: custom:shopping-list-card
-title: Apple
-todo_list: todo.shopping_list
-enable_quantity: true
-types_sort: asc
-types:
-  - Pink Lady
-  - Granny Smith
-  - Gala
-```
-
-In the **Single** mode visual editor, **Content > Variants** lets you add, rename, remove, and reorder variants. Expand a row's image/icon settings to upload a picture, enter an image URL, or choose an icon. Move-up and move-down controls are available when **Sort types** is **As listed**. In **Catalog** mode, edit variants in the shared JSON source instead.
-
-Names must be nonempty and unique, ignoring case. Invalid edits remain drafts until corrected; the card preview retains the last valid configuration. Renaming or removing a variant changes only the card configuration, not existing to-do items. Renamed variants will match the new name, so existing entries under the old name remain in your list.
-
-Existing string lists, comma-separated strings, and object entries remain supported. Unrelated edits preserve the original format and custom properties. A plain name becomes an object when it gains an image or icon. Objects can also be configured directly in YAML:
-
-```yaml
-type: custom:shopping-list-card
-title: Apple
-todo_list: todo.shopping_list
-types:
-  - name: Pink Lady
-    image: /local/shopping/pink-lady.png
-  - name: Granny Smith
-    icon: mdi:food-apple-outline
-  - Gala
-```
-
-Both layouts are supported - add `layout: vertical` for a grid-friendly tile (icon on top, name centered, chevron in the bottom-right). The card keeps its compact shape when collapsed and expands the variant list below.
-
-> Because the card grows when expanded, it works best in masonry or grid dashboards where the row height can flex. In the **sections** layout a fixed row height may clip the expanded list.
-
----
-
-## Development
-
-Use Node.js 22.13 or newer. Run `npm ci`, then `npm run check` to lint, build, and run the regression tests. The root `shopping-list-card.js` is the generated HACS artifact and must be rebuilt and committed with source changes.
-
-Source ownership:
-
-- `src/shopping-list-card.js`: card rendering and interactions.
-- `src/todo-store.js`: shared subscriptions, recovery, stale-response protection, and pending writes.
-- `src/undo-control.js`: shared Undo notice, retry errors, and dismissal.
-- `src/item-model.js`: naming, quantity actions, and lossless variant updates.
-- `src/editor.js` and `src/variants-editor.js`: the visual configuration editor and variant rows.
-- `src/catalog-card.js`, `src/catalog-model.js`, and `src/catalog-editor.js`: the sensor-backed catalog view, data validation, and configuration editor.
-- `src/card-defaults.js` and `src/card-styles.js`: shared defaults and card styling.
-
-Tests use mocked Home Assistant services and a DOM implementation; they never connect to a real shopping list. CI tests Node.js 22 and 24 and checks that the committed bundle matches the source.
-
-Serve the repository on a local HTTP server to open `tests/browser.html?catalog` for the full sample catalog, `?catalog&editor` for its settings, or `?editor` for the variants editor. These fixtures use fake list data and simulated Home Assistant controls.
-
-### Pre-release Device Checks
-
-Before stable release, test the installed pre-release on physical iOS and Android companion apps as well as a desktop browser. Browser emulation does not verify device haptics, mobile downloads, or the WebView lifecycle. Use a disposable to-do list for these checks:
-
-1. Add plain Milk and Lactose-free, change their quantities independently, and expand/collapse at the intended tile width without text or controls overlapping.
-2. Remove a product and Undo it. Hold a variant header to remove a group and Undo the batch; check the exact quantities. Try a kept-zero item too.
-3. Disconnect and reconnect, then repeat an edit and Undo. Double-tap during a slow update and verify no duplicate items appear. Reopen the app and confirm the persistent list is correct; the previous Undo notice should not return.
-4. In the card editor, select direct and wrapped JSON sensors, check malformed-source errors, and download Starter JSON. Confirm that saved settings survive switching modes.
-
----
-
-## 📚 Examples
-
-- **[JSON shopping catalog](examples/auto-generated-grid/)** - complete Catalog setup, JSON and variant formats, images, display controls, migration from the old generated grid, and troubleshooting. Includes a sample sensor and product catalog; no `layout-card` or `auto-entities` dependency.
-- **[Catalog card](examples/auto-generated-grid/catalog-card.yaml)** - one card for an existing dashboard.
-- **[Complete shopping dashboard](examples/auto-generated-grid/dashboard.yaml)** - a native Sections dashboard containing the Catalog card.
-
----
-
-## ❤️ Support
-
-If you find this card useful and would like to show your support, you can buy me a coffee:
-
-<a href="https://coff.ee/eyalgal" target="_blank"><img src="https://cdn.buymeacoffee.com/buttons/v2/default-yellow.png" alt="Buy Me A Coffee" style="height: 60px !important;width: 217px !important;" ></a>
