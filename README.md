@@ -3,14 +3,14 @@
 [![Downloads][downloads_badge]][release]
 [![Community Forum][forum_badge]][forum]
 
-A Home Assistant card that turns your existing to-do list into product tiles or a browsable shopping catalog. Pick products, choose variants, and adjust quantities without typing the same names again.
+A Home Assistant card that turns your existing to-do list into product tiles or a browsable shopping catalog. Tap a product to add it to your list instead of typing it in every time, then pick variants and adjust quantities.
 
 <img src="https://raw.githubusercontent.com/eyalgal/ha-shopping-list-card/main/docs/images/catalog-hero.png" alt="Shopping catalog with Fruit, Dairy, and Pantry categories, selected products, and expanded Milk variants with independent quantities" width="960"/>
 
 Catalog mode with demo products, category tabs, quantities, and expanded variants.
 
 - **Single or Catalog:** a few favorite products, or a shared catalog with categories, search, and an On list filter.
-- **Variants and quantities:** plain Milk and Lactose-free can have separate quantities in one expandable tile.
+- **Variants and quantities:** group related products on one expandable tile, like Gala and Granny Smith apples, each with its own quantity.
 - **Full list, quick-add, and Undo:** manage the complete list, add a one-off item, or restore an accidental removal.
 - **Shared across dashboards:** selections stay in your existing to-do integration, with live updates through Home Assistant.
 
