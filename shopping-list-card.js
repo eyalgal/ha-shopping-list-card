@@ -1257,7 +1257,7 @@ class ShoppingListCatalogProducts extends HTMLElement {
       <div class="footer" hidden>
         <span class="footer-message" role="status" aria-live="polite"></span>
         <button type="button" class="discard">Discard changes</button>
-        <button type="button" class="save">Save</button>
+        <button type="button" class="save">Save products</button>
       </div>
     `;
     const header = this.shadowRoot.querySelector('.products-header');
@@ -1813,10 +1813,12 @@ class ShoppingListCatalogEditor extends HTMLElement {
       products.remove();
       this._products = null;
       this.shadowRoot.querySelector('.catalog-form').hidden = false;
+      this.dispatchEvent(new CustomEvent('catalog-products-toggle', { detail: { open: false } }));
       this.shadowRoot.querySelector('.catalog-edit-products').focus();
     });
     this.shadowRoot.querySelector('.catalog-form').hidden = true;
     this.shadowRoot.append(products);
+    this.dispatchEvent(new CustomEvent('catalog-products-toggle', { detail: { open: true } }));
     products.open(this._config.catalog_entity, this._config);
   }
 
@@ -2238,6 +2240,9 @@ class ShoppingListCardEditor extends HTMLElement {
       if (this._catalogEditor !== editor) return;
       this._emitConfig({ ...event.detail.config, type: 'custom:shopping-list-card', mode: 'catalog' });
     });
+    editor.addEventListener('catalog-products-toggle', event => {
+      if (this._catalogEditor === editor && this._modeSelector) this._modeSelector.hidden = event.detail.open;
+    });
     this.shadowRoot.append(editor);
     this._renderModeSelector();
     this._rendered = true;
@@ -2272,6 +2277,7 @@ class ShoppingListCardEditor extends HTMLElement {
       });
     }
     this.shadowRoot.prepend(container);
+    this._modeSelector = container;
   }
 
   _changeMode(mode) {

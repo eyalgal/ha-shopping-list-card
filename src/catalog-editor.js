@@ -268,10 +268,12 @@ class ShoppingListCatalogEditor extends HTMLElement {
       products.remove();
       this._products = null;
       this.shadowRoot.querySelector('.catalog-form').hidden = false;
+      this.dispatchEvent(new CustomEvent('catalog-products-toggle', { detail: { open: false } }));
       this.shadowRoot.querySelector('.catalog-edit-products').focus();
     });
     this.shadowRoot.querySelector('.catalog-form').hidden = true;
     this.shadowRoot.append(products);
+    this.dispatchEvent(new CustomEvent('catalog-products-toggle', { detail: { open: true } }));
     products.open(this._config.catalog_entity, this._config);
   }
 

@@ -394,6 +394,9 @@ class ShoppingListCardEditor extends HTMLElement {
       if (this._catalogEditor !== editor) return;
       this._emitConfig({ ...event.detail.config, type: 'custom:shopping-list-card', mode: 'catalog' });
     });
+    editor.addEventListener('catalog-products-toggle', event => {
+      if (this._catalogEditor === editor && this._modeSelector) this._modeSelector.hidden = event.detail.open;
+    });
     this.shadowRoot.append(editor);
     this._renderModeSelector();
     this._rendered = true;
@@ -428,6 +431,7 @@ class ShoppingListCardEditor extends HTMLElement {
       });
     }
     this.shadowRoot.prepend(container);
+    this._modeSelector = container;
   }
 
   _changeMode(mode) {

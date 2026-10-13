@@ -200,6 +200,23 @@ test('a conflicting save keeps local changes and offers a reload', async context
   assert.equal(root.querySelectorAll('[data-product]').length, 3);
 });
 
+test('the card mode switch is hidden while products are open', async context => {
+  const environment = createEnvironment(context);
+  const editor = environment.document.createElement('shopping-list-card-editor');
+  editor.setConfig({ type: 'custom:shopping-list-card', mode: 'catalog', catalog_entity: ENTITY, catalog_attribute: 'catalog', todo_list: 'todo.shopping' });
+  editor.hass = createHass(structuredClone(CATALOG)).hass;
+  environment.document.body.append(editor);
+  const mode = editor.shadowRoot.querySelector('.card-mode').parentElement;
+  const settings = editor.shadowRoot.querySelector('shopping-list-catalog-editor');
+  click(settings.shadowRoot.querySelector('.catalog-edit-products'));
+  await settle();
+  assert.equal(mode.hidden, true);
+  const products = settings.shadowRoot.querySelector('shopping-list-catalog-products');
+  assert.equal(products.shadowRoot.querySelector('.save').textContent, 'Save products');
+  click(products.shadowRoot.querySelector('.back'));
+  assert.equal(mode.hidden, false);
+});
+
 test('closing with unsaved changes asks first', async context => {
   const environment = createEnvironment(context, { confirm: false });
   const { editor, root } = await openProducts(environment, createHass(structuredClone(CATALOG)).hass);

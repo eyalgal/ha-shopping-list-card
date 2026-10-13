@@ -159,7 +159,7 @@ class ShoppingListCatalogProducts extends HTMLElement {
       <div class="footer" hidden>
         <span class="footer-message" role="status" aria-live="polite"></span>
         <button type="button" class="discard">Discard changes</button>
-        <button type="button" class="save">Save</button>
+        <button type="button" class="save">Save products</button>
       </div>
     `;
     const header = this.shadowRoot.querySelector('.products-header');
