@@ -1,4 +1,5 @@
 import { CARD_DEFAULTS } from './card-defaults.js';
+import { productFromForm } from './product-form.js';
 import './variants-editor.js';
 import './catalog-editor.js';
 
@@ -24,11 +25,19 @@ class ShoppingListCardEditor extends HTMLElement {
 
   setConfig(config) {
     const previousMode = this._config?.mode || 'single';
-    this._config = { ...config };
+    if (this._productDefaults) {
+      this._product = { ...config };
+      this._config = { ...this._productDefaults, ...config };
+    } else this._config = { ...config };
     if (!this._rendered) return;
     if (previousMode !== (config.mode || 'single')) this._render();
     else if (this._catalogEditor) this._catalogEditor.setConfig(this._config);
     else this._updateFormValues();
+  }
+
+  /** Edit one catalog product: set before setConfig; config-changed then carries the product. */
+  set productDefaults(defaults) {
+    this._productDefaults = defaults;
   }
 
   _render() {
@@ -40,7 +49,7 @@ class ShoppingListCardEditor extends HTMLElement {
     this._catalogEditor = null;
 
     const todoEntities = Object.keys(this._hass.states).filter(id => id.startsWith('todo.'));
-    const hasTodoEntities = todoEntities.length > 0;
+    const hasTodoEntities = todoEntities.length > 0 || !!this._productDefaults;
 
     // HA 2026.x removed `ha-textfield` (replaced by web-awesome based
     // `ha-input`). Prefer the legacy element when it is still registered for
@@ -53,6 +62,7 @@ class ShoppingListCardEditor extends HTMLElement {
     this.shadowRoot.innerHTML = `
       <style>
         :host { display: block; }
+        [hidden] { display: none !important; }
         .card-config { display: flex; flex-direction: column; gap: 12px; }
         ha-expansion-panel {
           --expansion-panel-summary-padding: 0 16px;
@@ -147,7 +157,7 @@ class ShoppingListCardEditor extends HTMLElement {
 
         <ha-expansion-panel outlined expanded header="Content" data-panel="content">
           <div class="panel-body">
-            <ha-entity-picker id="todo_list" label="To-do list entity" required></ha-entity-picker>
+            <ha-entity-picker id="todo_list" label="To-do list entity" required ${this._productDefaults ? 'hidden' : ''}></ha-entity-picker>
             <div class="row">
               <${TF} id="title" label="Title" required></${TF}>
               <${TF} id="subtitle" label="Subtitle"></${TF}>
@@ -262,7 +272,7 @@ class ShoppingListCardEditor extends HTMLElement {
       </div>
     `;
 
-    this._renderModeSelector();
+    if (!this._productDefaults) this._renderModeSelector();
 
     // Wire hass-consuming components
     const ep = this.shadowRoot.querySelector('#todo_list');
@@ -494,7 +504,7 @@ class ShoppingListCardEditor extends HTMLElement {
 
     let todoEntity = c.todo_list;
     let shouldAutoPopulate = false;
-    if (!todoEntity && this._hass && !this._hasInitialized) {
+    if (!todoEntity && this._hass && !this._hasInitialized && !this._productDefaults) {
       const todoEntities = Object.keys(this._hass.states).filter(id => id.startsWith('todo.'));
       if (todoEntities.length > 0) { todoEntity = todoEntities[0]; shouldAutoPopulate = true; }
       this._hasInitialized = true;
@@ -564,7 +574,7 @@ class ShoppingListCardEditor extends HTMLElement {
     if (imgBase) n.image_base = imgBase; else delete n.image_base;
     const prefix = s.querySelector('#list_prefix').value.trim();
     if (prefix) n.list_prefix = prefix; else delete n.list_prefix;
-    n.todo_list = s.querySelector('#todo_list').value;
+    if (!this._productDefaults) n.todo_list = s.querySelector('#todo_list').value;
 
     const enableQty = s.querySelector('#enable_quantity').checked;
     if (enableQty) n.enable_quantity = true; else delete n.enable_quantity;
@@ -616,7 +626,8 @@ class ShoppingListCardEditor extends HTMLElement {
 
   _emitConfig(config) {
     this._config = config;
-    this.dispatchEvent(new CustomEvent('config-changed', { detail: { config }, bubbles: true, composed: true }));
+    const detail = { config: this._productDefaults ? productFromForm(config, this._product, this._productDefaults) : config };
+    this.dispatchEvent(new CustomEvent('config-changed', { detail, bubbles: true, composed: true }));
   }
 }
 if (!customElements.get('shopping-list-card-editor')) {

@@ -1,4 +1,5 @@
 import { findCatalogSource, readCatalog } from './catalog-model.js';
+import { isCompanionCatalog } from './catalog-products-editor.js';
 
 class ShoppingListCatalogEditor extends HTMLElement {
   constructor() {
@@ -16,6 +17,7 @@ class ShoppingListCatalogEditor extends HTMLElement {
     this._hass = hass;
     if (!this._rendered) this._render();
     this.shadowRoot.querySelectorAll('ha-entity-picker').forEach(picker => { picker.hass = hass; });
+    if (this._products) this._products.hass = hass;
     this._updateCategories();
   }
 
@@ -51,9 +53,10 @@ class ShoppingListCatalogEditor extends HTMLElement {
             <${field} id="catalog_attribute" label="Catalog attribute (optional)"></${field}>
             <ha-alert class="catalog-source-status" role="status" aria-live="polite"></ha-alert>
             <div class="catalog-setup-actions">
+              <button class="catalog-edit-products" type="button" hidden><ha-icon icon="mdi:pencil"></ha-icon>Edit products</button>
               <button class="catalog-use-source" type="button" hidden></button>
               <button class="catalog-starter" type="button" title="Download starter catalog"><ha-icon icon="mdi:download"></ha-icon>Starter JSON</button>
-              <a href="https://github.com/eyalgal/ha-shopping-list-card/blob/main/examples/auto-generated-grid/README.md" target="_blank" rel="noopener noreferrer"><ha-icon icon="mdi:open-in-new"></ha-icon>Setup guide</a>
+              <a class="catalog-guide" href="https://github.com/eyalgal/ha-shopping-list-card/blob/main/examples/auto-generated-grid/README.md" target="_blank" rel="noopener noreferrer"><ha-icon icon="mdi:open-in-new"></ha-icon>Setup guide</a>
             </div>
             <ha-entity-picker id="todo_list" label="To-do list" required></ha-entity-picker>
             <div class="catalog-fields">
@@ -105,6 +108,7 @@ class ShoppingListCatalogEditor extends HTMLElement {
     const layout = this.shadowRoot.getElementById('layout');
     layout.options = [{ value: 'vertical', label: 'Vertical' }, { value: 'horizontal', label: 'Horizontal' }];
     this.shadowRoot.querySelector('.catalog-starter').addEventListener('click', () => this._downloadStarter());
+    this.shadowRoot.querySelector('.catalog-edit-products').addEventListener('click', () => this._openProducts());
     this.shadowRoot.querySelector('.catalog-use-source').addEventListener('click', () => {
       if (!this._detectedSource || !this._config) return;
       const config = { ...this._config };
@@ -189,6 +193,9 @@ class ShoppingListCatalogEditor extends HTMLElement {
     }
     sourceStatus.setAttribute('alert-type', level);
     sourceStatus.textContent = message;
+    const companion = isCompanionCatalog(this._hass, this._config.catalog_entity);
+    this.shadowRoot.querySelector('.catalog-edit-products').hidden = !companion || !this._hass.user?.is_admin;
+    this.shadowRoot.querySelector('.catalog-starter').hidden = companion;
     this._availableCategories = available;
     const selected = this._config.categories;
     this.shadowRoot.querySelector('.catalog-all-categories').checked = selected === undefined;
@@ -249,6 +256,23 @@ class ShoppingListCatalogEditor extends HTMLElement {
     if (config.item_options && !Object.keys(config.item_options).length) delete config.item_options;
     this._emitConfig(config);
     if (['fixed_columns', 'catalog_entity', 'catalog_attribute'].includes(field)) this._updateValues();
+  }
+
+  _openProducts() {
+    if (this._products || !this._config?.catalog_entity) return;
+    const products = document.createElement('shopping-list-catalog-products');
+    this._products = products;
+    products.hass = this._hass;
+    products.addEventListener('catalog-products-closed', () => {
+      if (this._products !== products) return;
+      products.remove();
+      this._products = null;
+      this.shadowRoot.querySelector('.catalog-form').hidden = false;
+      this.shadowRoot.querySelector('.catalog-edit-products').focus();
+    });
+    this.shadowRoot.querySelector('.catalog-form').hidden = true;
+    this.shadowRoot.append(products);
+    products.open(this._config.catalog_entity, this._config);
   }
 
   _downloadStarter() {

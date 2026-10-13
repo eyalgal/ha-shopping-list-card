@@ -62,6 +62,7 @@
     customElements.define('ha-icon', TestIcon);
     const editorMode = new URLSearchParams(location.search).has('editor');
     const catalogMode = new URLSearchParams(location.search).has('catalog');
+    const companionMode = new URLSearchParams(location.search).has('companion');
     customElements.define('ha-card', class extends HTMLElement {
       constructor() {
         super();
@@ -169,8 +170,11 @@
     drawing.fillText('MILK', 40, 44);
     const image = canvas.toDataURL('image/png');
     const push = () => { for (const callback of listeners) callback({ items: entries.map(entry => ({ ...entry })) }); };
+    let catalogRevision = 1;
     const hass = {
       connected: true,
+      user: { is_admin: true },
+      entities: companionMode ? { 'sensor.catalog': { entity_id: 'sensor.catalog', platform: 'shopping_list_catalog' } } : {},
       states: { 'todo.test': { state: '2' } },
       connection: {
         subscribeMessage(callback) {
@@ -179,7 +183,19 @@
           return Promise.resolve(() => listeners.delete(callback));
         },
       },
-      callWS: async () => ({ items: entries.map(entry => ({ ...entry })) }),
+      async callWS(message) {
+        calls.push(structuredClone(message));
+        if (message.type === 'shopping_list_catalog/get') {
+          return { title: 'Groceries', path: 'shopping_catalogs/groceries.json', catalog: structuredClone(catalogData), revision: `r${catalogRevision}`, error: null };
+        }
+        if (message.type === 'shopping_list_catalog/save') {
+          if (message.revision !== `r${catalogRevision}`) throw { code: 'conflict', message: 'The catalog changed since it was loaded.' };
+          catalogRevision++;
+          window.fixture.updateCatalog(message.catalog);
+          return { revision: `r${catalogRevision}` };
+        }
+        return { items: entries.map(entry => ({ ...entry })) };
+      },
       async callService(domain, service, data) {
         calls.push({ domain, service, data });
         if (pauseWrites) await new Promise(resolve => { releaseWrite = resolve; });
@@ -261,7 +277,7 @@
           if (product.title === 'Milk') product.image = image;
         }
       }
-      hass.states['sensor.catalog'] = { state: '1', attributes: catalogData };
+      hass.states['sensor.catalog'] = { state: '1', attributes: companionMode ? { catalog: catalogData } : catalogData };
     }
     const configurations = [
       { id: 'milk', title: 'Milk', enable_quantity: true, image },
@@ -285,7 +301,7 @@
     const editorChanges = [];
     const catalogConfig = {
       type: 'custom:shopping-list-card', mode: 'catalog', catalog_entity: 'sensor.catalog', todo_list: 'todo.test',
-      title: 'Shopping', columns: 4,
+      title: 'Shopping', columns: 4, ...(companionMode ? { catalog_attribute: 'catalog' } : {}),
     };
     if (editorMode) {
       document.querySelector('h1').textContent = 'Card settings';
@@ -336,8 +352,10 @@
       pushUnrelated() { push(); },
       updateCatalog(data) {
         catalogData = structuredClone(data);
-        hass.states['sensor.catalog'] = { state: String(Date.now()), attributes: catalogData };
+        hass.states['sensor.catalog'] = { state: String(Date.now()), attributes: companionMode ? { catalog: catalogData } : catalogData };
         for (const card of document.querySelectorAll('shopping-list-card[data-fixture-card]')) card.hass = { ...hass };
+        const editor = document.querySelector('shopping-list-card-editor');
+        if (editor) editor.hass = { ...hass };
       },
       setCatalogAvailable(available) {
         hass.states['sensor.catalog'] = { state: available ? '1' : 'unavailable', attributes: catalogData };
