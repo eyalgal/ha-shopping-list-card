@@ -217,6 +217,27 @@ test('the card mode switch is hidden while products are open', async context => 
   assert.equal(mode.hidden, false);
 });
 
+test('the product form has a way back to the list at the top and bottom', async context => {
+  const environment = createEnvironment(context);
+  const { root, editor } = await openProducts(environment, createHass(structuredClone(CATALOG)).hass);
+  assert.equal(root.querySelector('.done').hidden, true);
+  click(root.querySelector('.product-open'));
+  assert.equal(root.querySelector('.back').textContent, 'All products');
+  assert.equal(root.querySelector('.done').hidden, false);
+  click(root.querySelector('.done'));
+  assert.ok(root.querySelector('input.category-name'));
+  assert.equal(root.activeElement?.classList.contains('product-open'), true);
+
+  const settings = editor.shadowRoot;
+  const order = settings.getElementById('product_order');
+  const changes = [];
+  editor.addEventListener('config-changed', event => changes.push(event.detail.config));
+  order.dispatchEvent(new environment.window.CustomEvent('selected', { detail: { value: 'name' } }));
+  assert.equal(changes.at(-1).product_order, 'name');
+  order.dispatchEvent(new environment.window.CustomEvent('selected', { detail: { value: 'catalog' } }));
+  assert.equal('product_order' in changes.at(-1), false);
+});
+
 test('closing with unsaved changes asks first', async context => {
   const environment = createEnvironment(context, { confirm: false });
   const { editor, root } = await openProducts(environment, createHass(structuredClone(CATALOG)).hass);

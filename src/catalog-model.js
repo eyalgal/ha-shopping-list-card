@@ -120,7 +120,13 @@ export function readCatalog(hass, config) {
         names: [...new Set([buildName(options, options.subtitle), ...names.map(name => buildName(options, name))])],
       };
     });
-    groups.push({ name: category, products: groupSubtitleProducts(products, entries, defaults) });
+    const grouped = groupSubtitleProducts(products, entries, defaults);
+    if (config.product_order === 'name') {
+      const collator = new Intl.Collator(undefined, { numeric: true, sensitivity: 'base' });
+      grouped.sort((a, b) => collator.compare(a.config.title.trim(), b.config.title.trim())
+        || collator.compare(a.config.subtitle || '', b.config.subtitle || ''));
+    }
+    groups.push({ name: category, products: grouped });
   }
   return groups;
 }

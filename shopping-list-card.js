@@ -613,7 +613,13 @@ function readCatalog(hass, config) {
         names: [...new Set([buildName(options, options.subtitle), ...names.map(name => buildName(options, name))])],
       };
     });
-    groups.push({ name: category, products: groupSubtitleProducts(products, entries, defaults) });
+    const grouped = groupSubtitleProducts(products, entries, defaults);
+    if (config.product_order === 'name') {
+      const collator = new Intl.Collator(undefined, { numeric: true, sensitivity: 'base' });
+      grouped.sort((a, b) => collator.compare(a.config.title.trim(), b.config.title.trim())
+        || collator.compare(a.config.subtitle || '', b.config.subtitle || ''));
+    }
+    groups.push({ name: category, products: grouped });
   }
   return groups;
 }
@@ -1214,7 +1220,8 @@ class ShoppingListCatalogProducts extends HTMLElement {
         :host { display: block; min-width: 0; container-type: inline-size; }
         * { box-sizing: border-box; }
         [hidden] { display: none !important; }
-        .products-header { display: flex; align-items: center; gap: 8px; min-height: 40px; margin-bottom: 8px; }
+        .products-header { position: sticky; top: 0; z-index: 2; display: flex; align-items: center; gap: 8px; min-height: 48px; margin-bottom: 8px; background: var(--card-background-color, var(--primary-background-color)); }
+        .products-header .back { color: var(--primary-color); }
         .products-title { flex: 1; min-width: 0; font-size: 16px; font-weight: 500; color: var(--primary-text-color); overflow-wrap: anywhere; }
         .products-path { margin: 0 0 12px; font-size: 12px; color: var(--secondary-text-color); overflow-wrap: anywhere; }
         ha-alert { display: block; margin-bottom: 12px; }
@@ -1255,13 +1262,14 @@ class ShoppingListCatalogProducts extends HTMLElement {
       <ha-alert role="status" aria-live="polite" hidden></ha-alert>
       <div class="products-body"></div>
       <div class="footer" hidden>
+        <button type="button" class="link done" hidden><ha-icon icon="mdi:arrow-left"></ha-icon>Back to products</button>
         <span class="footer-message" role="status" aria-live="polite"></span>
         <button type="button" class="discard">Discard changes</button>
         <button type="button" class="save">Save products</button>
       </div>
     `;
     const header = this.shadowRoot.querySelector('.products-header');
-    const back = button(this._view ? 'Products' : 'Card settings', 'mdi:arrow-left', 'back', true);
+    const back = button(this._view ? 'All products' : 'Card settings', 'mdi:arrow-left', 'back', true);
     back.addEventListener('click', () => (this._view ? this._showList() : this._close()));
     const title = document.createElement('span');
     title.className = 'products-title';
@@ -1274,6 +1282,9 @@ class ShoppingListCatalogProducts extends HTMLElement {
     }
     this.shadowRoot.querySelector('.discard').addEventListener('click', () => this._discard());
     this.shadowRoot.querySelector('.save').addEventListener('click', () => this._save());
+    const done = this.shadowRoot.querySelector('.done');
+    done.hidden = !this._view;
+    done.addEventListener('click', () => this._showList());
     if (this._loaded) {
       if (this._view) this._renderProduct();
       else this._renderList();
@@ -1618,6 +1629,10 @@ class ShoppingListCatalogEditor extends HTMLElement {
               <legend>Categories</legend>
               <div class="catalog-category-choices"></div>
             </fieldset>
+            <ha-select id="product_order" label="Product order" naturalMenuWidth fixedMenuPosition>
+              <mwc-list-item value="catalog">As in the catalog</mwc-list-item>
+              <mwc-list-item value="name">By name</mwc-list-item>
+            </ha-select>
             <label class="catalog-toggle"><ha-switch id="show_category_tabs"></ha-switch><span>Category tabs</span></label>
             <label class="catalog-toggle"><ha-switch id="show_search"></ha-switch><span>Search</span></label>
             <label class="catalog-toggle"><ha-switch id="show_title"></ha-switch><span>Title</span></label>
@@ -1652,6 +1667,7 @@ class ShoppingListCatalogEditor extends HTMLElement {
     }
     const layout = this.shadowRoot.getElementById('layout');
     layout.options = [{ value: 'vertical', label: 'Vertical' }, { value: 'horizontal', label: 'Horizontal' }];
+    this.shadowRoot.getElementById('product_order').options = [{ value: 'catalog', label: 'As in the catalog' }, { value: 'name', label: 'By name' }];
     this.shadowRoot.querySelector('.catalog-starter').addEventListener('click', () => this._downloadStarter());
     this.shadowRoot.querySelector('.catalog-edit-products').addEventListener('click', () => this._openProducts());
     this.shadowRoot.querySelector('.catalog-use-source').addEventListener('click', () => {
@@ -1668,11 +1684,14 @@ class ShoppingListCatalogEditor extends HTMLElement {
         if (control.id === 'layout' && value == null && typeof event.detail?.index === 'number') {
           value = ['vertical', 'horizontal'][event.detail.index];
         }
+        if (control.id === 'product_order' && value == null && typeof event.detail?.index === 'number') {
+          value = ['catalog', 'name'][event.detail.index];
+        }
         if (control.localName === 'ha-switch') value = control.checked;
         this._change(control.id, value ?? control.value);
       };
       for (const event of ['input', 'change', 'value-changed']) control.addEventListener(event, changed);
-      if (control.id === 'layout') control.addEventListener('selected', changed);
+      if (control.id === 'layout' || control.id === 'product_order') control.addEventListener('selected', changed);
     }
     this.shadowRoot.querySelector('.catalog-all-categories').addEventListener('change', event => {
       if (!this._config) return;
@@ -1693,6 +1712,7 @@ class ShoppingListCatalogEditor extends HTMLElement {
     const values = {
       catalog_entity: config.catalog_entity || '', catalog_attribute: config.catalog_attribute || '',
       todo_list: config.todo_list || '', title: config.title || '', columns: config.columns ?? 4,
+      product_order: config.product_order === 'name' ? 'name' : 'catalog',
       layout: options.layout || 'vertical', image_base: options.image_base || '', list_prefix: options.list_prefix || '',
       quantity_step: options.quantity_step ?? 1, quantity_max: options.quantity_max ?? '',
     };
@@ -1790,8 +1810,9 @@ class ShoppingListCatalogEditor extends HTMLElement {
     else if (field === 'keep_at_zero') next = value ? false : undefined;
     else if (field === 'layout') {
       if (value !== 'vertical' && value !== 'horizontal') return;
-      next = value === 'vertical' ? undefined : value;
-    } else if (typeof value === 'string') next = value.trim() || undefined;
+      next = value === 'vertical' ? undefined : value;    } else if (field === 'product_order') {
+      if (value !== 'catalog' && value !== 'name') return;
+      next = value === 'name' ? value : undefined;    } else if (typeof value === 'string') next = value.trim() || undefined;
     if (next === undefined) delete target[key];
     else target[key] = next;
     if (field === 'catalog_entity') {
@@ -2724,6 +2745,9 @@ class ShoppingListCatalogCard extends HTMLElement {
     }
     const columns = config.columns ?? 4;
     if (!Number.isInteger(columns) || columns < 1 || columns > 6) throw new Error('Columns must be an integer from 1 to 6.');
+    if (config.product_order !== undefined && !['catalog', 'name'].includes(config.product_order)) {
+      throw new Error('product_order must be catalog or name.');
+    }
     if (this._config?.catalog_entity !== config.catalog_entity || this._config?.catalog_attribute !== config.catalog_attribute) this._category = null;
     if (this._config && this._config.todo_list !== config.todo_list) {
       this._toggleList(false);

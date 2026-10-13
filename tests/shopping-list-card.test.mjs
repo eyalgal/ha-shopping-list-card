@@ -1303,6 +1303,26 @@ function visibleProducts(catalog) {
   return [...catalog.shadowRoot.querySelectorAll('shopping-list-card')].filter(card => !card.hidden);
 }
 
+test('product_order sorts products by name within each category or keeps the catalog order', async context => {
+  const environment = createEnvironment(context);
+  const setup = createHass();
+  catalogSource(setup, {
+    Fruits: [{ title: 'pear' }, { title: 'Apple', subtitle: 'Pink Lady' }, { title: 'banana' }, { title: 'Apple' }],
+    Bakery: [{ title: 'Rolls' }, { title: 'Bagels' }],
+  });
+  const catalog = mountCatalog(environment, setup.hass, { product_order: 'name', show_category_tabs: false });
+  await settle();
+  const names = () => visibleProducts(catalog).map(card => card._config.title + (card._config.types ? ` [${card._config.types.map(type => type.name ?? type).join(', ')}]` : ''));
+  assert.deepEqual(names(), ['Apple [Pink Lady]', 'banana', 'pear', 'Bagels', 'Rolls']);
+
+  catalog.closest('shopping-list-card').setConfig({ type: 'custom:shopping-list-card', mode: 'catalog', catalog_entity: 'sensor.catalog', todo_list: 'todo.shopping', show_category_tabs: false });
+  await settle();
+  assert.deepEqual(names(), ['pear', 'Apple [Pink Lady]', 'banana', 'Rolls', 'Bagels']);
+  assert.throws(() => catalog.closest('shopping-list-card').setConfig({
+    type: 'custom:shopping-list-card', mode: 'catalog', catalog_entity: 'sensor.catalog', todo_list: 'todo.shopping', product_order: 'price',
+  }), /product_order must be catalog or name/);
+});
+
 test('catalog search matches category, subtitle, and variants without rebuilding product tiles', async context => {
   const environment = createEnvironment(context);
   const setup = createHass();

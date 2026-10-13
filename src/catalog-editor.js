@@ -73,6 +73,10 @@ class ShoppingListCatalogEditor extends HTMLElement {
               <legend>Categories</legend>
               <div class="catalog-category-choices"></div>
             </fieldset>
+            <ha-select id="product_order" label="Product order" naturalMenuWidth fixedMenuPosition>
+              <mwc-list-item value="catalog">As in the catalog</mwc-list-item>
+              <mwc-list-item value="name">By name</mwc-list-item>
+            </ha-select>
             <label class="catalog-toggle"><ha-switch id="show_category_tabs"></ha-switch><span>Category tabs</span></label>
             <label class="catalog-toggle"><ha-switch id="show_search"></ha-switch><span>Search</span></label>
             <label class="catalog-toggle"><ha-switch id="show_title"></ha-switch><span>Title</span></label>
@@ -107,6 +111,7 @@ class ShoppingListCatalogEditor extends HTMLElement {
     }
     const layout = this.shadowRoot.getElementById('layout');
     layout.options = [{ value: 'vertical', label: 'Vertical' }, { value: 'horizontal', label: 'Horizontal' }];
+    this.shadowRoot.getElementById('product_order').options = [{ value: 'catalog', label: 'As in the catalog' }, { value: 'name', label: 'By name' }];
     this.shadowRoot.querySelector('.catalog-starter').addEventListener('click', () => this._downloadStarter());
     this.shadowRoot.querySelector('.catalog-edit-products').addEventListener('click', () => this._openProducts());
     this.shadowRoot.querySelector('.catalog-use-source').addEventListener('click', () => {
@@ -123,11 +128,14 @@ class ShoppingListCatalogEditor extends HTMLElement {
         if (control.id === 'layout' && value == null && typeof event.detail?.index === 'number') {
           value = ['vertical', 'horizontal'][event.detail.index];
         }
+        if (control.id === 'product_order' && value == null && typeof event.detail?.index === 'number') {
+          value = ['catalog', 'name'][event.detail.index];
+        }
         if (control.localName === 'ha-switch') value = control.checked;
         this._change(control.id, value ?? control.value);
       };
       for (const event of ['input', 'change', 'value-changed']) control.addEventListener(event, changed);
-      if (control.id === 'layout') control.addEventListener('selected', changed);
+      if (control.id === 'layout' || control.id === 'product_order') control.addEventListener('selected', changed);
     }
     this.shadowRoot.querySelector('.catalog-all-categories').addEventListener('change', event => {
       if (!this._config) return;
@@ -148,6 +156,7 @@ class ShoppingListCatalogEditor extends HTMLElement {
     const values = {
       catalog_entity: config.catalog_entity || '', catalog_attribute: config.catalog_attribute || '',
       todo_list: config.todo_list || '', title: config.title || '', columns: config.columns ?? 4,
+      product_order: config.product_order === 'name' ? 'name' : 'catalog',
       layout: options.layout || 'vertical', image_base: options.image_base || '', list_prefix: options.list_prefix || '',
       quantity_step: options.quantity_step ?? 1, quantity_max: options.quantity_max ?? '',
     };
@@ -245,8 +254,9 @@ class ShoppingListCatalogEditor extends HTMLElement {
     else if (field === 'keep_at_zero') next = value ? false : undefined;
     else if (field === 'layout') {
       if (value !== 'vertical' && value !== 'horizontal') return;
-      next = value === 'vertical' ? undefined : value;
-    } else if (typeof value === 'string') next = value.trim() || undefined;
+      next = value === 'vertical' ? undefined : value;    } else if (field === 'product_order') {
+      if (value !== 'catalog' && value !== 'name') return;
+      next = value === 'name' ? value : undefined;    } else if (typeof value === 'string') next = value.trim() || undefined;
     if (next === undefined) delete target[key];
     else target[key] = next;
     if (field === 'catalog_entity') {

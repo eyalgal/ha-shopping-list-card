@@ -172,6 +172,9 @@ class ShoppingListCatalogCard extends HTMLElement {
     }
     const columns = config.columns ?? 4;
     if (!Number.isInteger(columns) || columns < 1 || columns > 6) throw new Error('Columns must be an integer from 1 to 6.');
+    if (config.product_order !== undefined && !['catalog', 'name'].includes(config.product_order)) {
+      throw new Error('product_order must be catalog or name.');
+    }
     if (this._config?.catalog_entity !== config.catalog_entity || this._config?.catalog_attribute !== config.catalog_attribute) this._category = null;
     if (this._config && this._config.todo_list !== config.todo_list) {
       this._toggleList(false);

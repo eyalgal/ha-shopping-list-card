@@ -68,6 +68,7 @@ Catalog mode reads products from a sensor and stores selections in the to-do int
 | `columns` | No | Grid columns, from 1 to 6. A responsive maximum unless `fixed_columns` is enabled. | `4` |
 | `fixed_columns` | No | Keep exactly `columns` tracks at every container width, including phones. | `false` |
 | `categories` | No | Exact category names to display. Omit for all; `[]` displays none. Missing names do not fall back to other categories. | All categories |
+| `product_order` | No | `catalog` keeps the order of the JSON source; `name` sorts products alphabetically within each category. Categories always keep their source order. | `catalog` |
 | `show_category_tabs` | No | Show the category selector. When hidden, all allowed categories appear together. | `true` |
 | `show_search` | No | Show search. Disabling it clears the active search. | `true` |
 | `show_title` | No | Show the main heading. | `true` |

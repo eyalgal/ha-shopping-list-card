@@ -116,7 +116,8 @@ class ShoppingListCatalogProducts extends HTMLElement {
         :host { display: block; min-width: 0; container-type: inline-size; }
         * { box-sizing: border-box; }
         [hidden] { display: none !important; }
-        .products-header { display: flex; align-items: center; gap: 8px; min-height: 40px; margin-bottom: 8px; }
+        .products-header { position: sticky; top: 0; z-index: 2; display: flex; align-items: center; gap: 8px; min-height: 48px; margin-bottom: 8px; background: var(--card-background-color, var(--primary-background-color)); }
+        .products-header .back { color: var(--primary-color); }
         .products-title { flex: 1; min-width: 0; font-size: 16px; font-weight: 500; color: var(--primary-text-color); overflow-wrap: anywhere; }
         .products-path { margin: 0 0 12px; font-size: 12px; color: var(--secondary-text-color); overflow-wrap: anywhere; }
         ha-alert { display: block; margin-bottom: 12px; }
@@ -157,13 +158,14 @@ class ShoppingListCatalogProducts extends HTMLElement {
       <ha-alert role="status" aria-live="polite" hidden></ha-alert>
       <div class="products-body"></div>
       <div class="footer" hidden>
+        <button type="button" class="link done" hidden><ha-icon icon="mdi:arrow-left"></ha-icon>Back to products</button>
         <span class="footer-message" role="status" aria-live="polite"></span>
         <button type="button" class="discard">Discard changes</button>
         <button type="button" class="save">Save products</button>
       </div>
     `;
     const header = this.shadowRoot.querySelector('.products-header');
-    const back = button(this._view ? 'Products' : 'Card settings', 'mdi:arrow-left', 'back', true);
+    const back = button(this._view ? 'All products' : 'Card settings', 'mdi:arrow-left', 'back', true);
     back.addEventListener('click', () => (this._view ? this._showList() : this._close()));
     const title = document.createElement('span');
     title.className = 'products-title';
@@ -176,6 +178,9 @@ class ShoppingListCatalogProducts extends HTMLElement {
     }
     this.shadowRoot.querySelector('.discard').addEventListener('click', () => this._discard());
     this.shadowRoot.querySelector('.save').addEventListener('click', () => this._save());
+    const done = this.shadowRoot.querySelector('.done');
+    done.hidden = !this._view;
+    done.addEventListener('click', () => this._showList());
     if (this._loaded) {
       if (this._view) this._renderProduct();
       else this._renderList();
