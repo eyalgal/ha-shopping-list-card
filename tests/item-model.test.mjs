@@ -31,6 +31,26 @@ test('quantity actions use the uid, configured step, and maximum', () => {
   assert.equal(decrement.data.rename, 'Milk');
 });
 
+test('quantities with a unit from other apps are recognized and keep their unit', () => {
+  const milk = matchItem([item('Milk (4 bottles)')], 'Milk', config);
+  assert.deepEqual([milk.present, milk.isOn, milk.qty, milk.unit], [true, true, 4, 'bottles']);
+  assert.equal(matchItem([item('Toilet paper (9 rolls)')], 'Toilet paper', config).qty, 9);
+  assert.equal(matchItem([item('Flour (2 kg)')], 'Flour', config).unit, 'kg');
+  assert.equal(matchItem([item('Milk (4)')], 'Milk', config).unit, null);
+  for (const summary of ['Milk (bottles)', 'Milk (4 )', 'Milk (4 (x))', 'Milk 4 bottles']) {
+    assert.equal(matchItem([item(summary)], 'Milk', config).present, false, summary);
+  }
+
+  assert.equal(planItemAction(config, [item('Milk (4 bottles)')], null, 'increment').data.rename, 'Milk (5 bottles)');
+  assert.equal(planItemAction(config, [item('Milk (2 bottles)')], null, 'decrement').data.rename, 'Milk (1 bottles)');
+  assert.equal(planItemAction(config, [item('Milk (4 bottles)')], null), null);
+  assert.equal(planItemAction(config, [item('Milk (1 bottles)')], null).service, 'remove_item');
+  const keptZero = planItemAction({ ...config, remove_zero: false }, [item('Milk (1 bottles)')], null);
+  assert.equal(keptZero.data.rename, 'Milk (0 bottles)');
+  assert.equal(matchItem([item('Milk (0 bottles)')], 'Milk', { ...config, remove_zero: false }).isOn, false);
+  assert.equal(planListAddition([item('Milk (3 bottles)')], 'milk'), null);
+});
+
 test('toggle adds missing items and preserves multi-quantity tap behavior', () => {
   const add = planItemAction(config, [], null);
   assert.equal(add.service, 'add_item');

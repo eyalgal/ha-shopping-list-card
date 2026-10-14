@@ -64,6 +64,8 @@ With `enable_quantity: true`:
 
 Catalog mode enables quantities by default. Single mode does not. Quantities are stored in the to-do summary, such as `Milk (2)`, rather than only in the browser.
 
+Entries that include a unit after the number, such as `Milk (4 bottles)` added by another app or typed by hand, count as the same item with quantity 4. Changing the amount keeps the unit, so `+` turns it into `Milk (5 bottles)`.
+
 ## Hold Actions
 
 The default hold removes an item entirely, regardless of quantity. On a variant header it removes the main item and every configured variant; on a variant row it removes that row only. Explicit hold removal also deletes kept-zero entries.

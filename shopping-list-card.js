@@ -7,14 +7,16 @@ function keepZero(config) {
   return !!config.enable_quantity && config.remove_zero === false;
 }
 
-function itemSummary(config, fullName, quantity) {
+function itemSummary(config, fullName, quantity, unit = null) {
   if (!config.enable_quantity) return fullName;
+  if (unit) return `${fullName} (${quantity} ${unit})`;
   return keepZero(config) || quantity > 1 ? `${fullName} (${quantity})` : fullName;
 }
 
 function matchItem(items, fullName, config) {
   const escaped = fullName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-  const pattern = new RegExp(`^${escaped}(?: \\((\\d+)\\))?$`, 'i');
+  // Other apps may add a unit after the number, e.g. "Milk (4 bottles)".
+  const pattern = new RegExp(`^${escaped}(?: \\((\\d+)(?: ([^()]*[^()\\s]))?\\))?$`, 'i');
   for (const item of items || []) {
     if (typeof item.summary !== 'string') continue;
     const match = item.summary.match(pattern);
@@ -22,10 +24,10 @@ function matchItem(items, fullName, config) {
     const quantity = match[1] != null ? Number(match[1]) : 1;
     return {
       isOn: keepZero(config) ? quantity > 0 : true,
-      present: true, qty: quantity, matched: item.summary, matchedUid: item.uid,
+      present: true, qty: quantity, unit: match[2] || null, matched: item.summary, matchedUid: item.uid,
     };
   }
-  return { isOn: false, present: false, qty: 0, matched: null, matchedUid: null };
+  return { isOn: false, present: false, qty: 0, unit: null, matched: null, matchedUid: null };
 }
 
 function planItemAction(config, items, subtitle, action = 'toggle') {
@@ -58,7 +60,7 @@ function planItemAction(config, items, subtitle, action = 'toggle') {
     quantity = 1;
   }
 
-  const summary = itemSummary(config, fullName, quantity);
+  const summary = itemSummary(config, fullName, quantity, state.unit);
   if (!state.present) {
     return {
       key, service: 'add_item', data: { item: summary },
