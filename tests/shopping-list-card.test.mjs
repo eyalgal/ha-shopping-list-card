@@ -1405,8 +1405,8 @@ test('Suggested shows products due from purchase history and explains why', asyn
   const environment = createEnvironment(context);
   const setup = createHass([item('Apple')]);
   setup.hass.states['sensor.catalog'] = { state: '1', attributes: {
-    catalog: { Products: [{ title: 'Apple' }, { title: 'Milk', types: ['Oat'] }, { title: 'Cheese', list_prefix: 'Dairy' }, { title: 'Pear' }] },
-    suggestions: { Apple: { every: 7, since: 8, quantity: 1 }, 'Milk - Oat': { every: 4, since: 5, quantity: 2 }, 'dairy - cheese': { every: 1, since: 1, quantity: 1 } },
+    catalog: { Products: [{ title: 'Apple' }, { title: 'Milk', types: ['Oat'] }, { title: 'Cheese', list_prefix: 'Dairy' }, { title: 'Pear' }, { title: 'Grapes', subtitle: 'Green' }, { title: 'Grapes', subtitle: 'Red' }] },
+    suggestions: { Apple: { every: 7, since: 8, quantity: 1 }, 'Milk - Oat': { every: 4, since: 5, quantity: 2 }, 'dairy - cheese': { every: 1, since: 1, quantity: 1 }, Grapes: { every: 5, since: 9 } },
   } };
   const catalog = mountCatalog(environment, setup.hass, { catalog_attribute: 'catalog' });
   await settle();
@@ -1425,7 +1425,7 @@ test('Suggested shows products due from purchase history and explains why', asyn
   suggested.checked = true;
   suggested.dispatchEvent(new environment.window.Event('change'));
   assert.equal(onList.checked, false);
-  assert.deepEqual(visibleProducts(catalog).map(card => card._config.title), ['Apple', 'Milk', 'Cheese']);
+  assert.deepEqual(visibleProducts(catalog).map(card => card._config.title), ['Apple', 'Milk', 'Cheese', 'Grapes']);
   onList.checked = true;
   onList.dispatchEvent(new environment.window.Event('change'));
   assert.equal(suggested.checked, false);

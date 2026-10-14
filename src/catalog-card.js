@@ -1,6 +1,6 @@
 import { getTodoStore } from './todo-store.js';
 import { findCatalogSource, productOnList, readCatalog, searchText } from './catalog-model.js';
-import { planListAddition } from './item-model.js';
+import { buildName, planListAddition } from './item-model.js';
 import './catalog-editor.js';
 import './undo-control.js';
 
@@ -554,7 +554,9 @@ class ShoppingListCatalogCard extends HTMLElement {
       let count = 0;
       for (const product of group.products) {
         const record = this._products.get(product.key);
-        const suggestion = suggestions && product.names.map(name => suggestions.get(name.toLowerCase())).find(Boolean);
+        // Also match the bare title, so purchases from before a product had variants still count.
+        const suggestion = suggestions && [...product.names, buildName(product.config, '')]
+          .map(name => suggestions.get(name.toLowerCase())).find(Boolean);
         const matches = (this._category === null || this._category === group.name)
           && terms.every(term => product.search.includes(term))
           && (!this._onList || productOnList(product, items)
