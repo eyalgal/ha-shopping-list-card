@@ -1,7 +1,7 @@
 {
   "name": "ha-shopping-list-card",
   "description": "A Home Assistant Lovelace card to manage items on a to-do list",
-  "version": "3.1.0",
+  "version": "3.2.0",
   "main": "shopping-list-card.js",
   "scripts": {
     "build": "rollup -c",

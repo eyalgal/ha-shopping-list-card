@@ -2,7 +2,7 @@
 
 Use **Catalog** mode in Shopping List Card to browse products from one shared JSON-backed sensor. Categories, search, variants, quantities, the full shopping list, and quick-add are built in. No generated tile template, `auto-entities`, or `layout-card` is needed.
 
-Catalog mode requires Shopping List Card **3.0.0** or later; editing products from the card requires **3.1.0** and the Shopping List Catalog integration. Install or update the card through HACS.
+Catalog mode requires Shopping List Card **3.0.0** or later; editing products from the card requires **3.1.0** and the Shopping List Catalog integration, and the **Suggested** filter requires **3.2.0** with Shopping List Catalog 0.2.0. Install or update the card through HACS.
 
 This folder keeps its original URL, but the instructions and dashboard example now use Catalog mode. The existing JSON format is still supported; you do not need to convert your catalog.
 

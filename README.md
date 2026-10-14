@@ -12,7 +12,7 @@ Catalog mode with demo products, category tabs, quantities, and expanded variant
 - **Single or Catalog:** a few favorite products, or a shared catalog with categories, search, and an On list filter.
 - **Variants and quantities:** group related products on one expandable tile, like Gala and Granny Smith apples, each with its own quantity.
 - **Full list, quick-add, and Undo:** manage the complete list, add a one-off item, or restore an accidental removal.
-- **Edit products in Home Assistant:** with the companion [Shopping List Catalog](https://github.com/eyalgal/ha-shopping-list-catalog) integration, keep one catalog per store and edit it from the card editor.
+- **Edit products in Home Assistant:** with the companion [Shopping List Catalog](https://github.com/eyalgal/ha-shopping-list-catalog) integration, keep one catalog per store and edit it from the card editor. It also learns from what you check off, and the **Suggested** filter shows what you usually buy around now.
 - **Shared across dashboards:** selections stay in your existing to-do integration, with live updates through Home Assistant.
 
 ## Get Started
