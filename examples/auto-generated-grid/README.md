@@ -2,7 +2,7 @@
 
 Use **Catalog** mode in Shopping List Card to browse products from one shared JSON-backed sensor. Categories, search, variants, quantities, the full shopping list, and quick-add are built in. No generated tile template, `auto-entities`, or `layout-card` is needed.
 
-Catalog mode requires Shopping List Card **3.0.0** or later. Install or update it through HACS.
+Catalog mode requires Shopping List Card **3.0.0** or later; editing products from the card requires **3.1.0** and the Shopping List Catalog integration. Install or update the card through HACS.
 
 This folder keeps its original URL, but the instructions and dashboard example now use Catalog mode. The existing JSON format is still supported; you do not need to convert your catalog.
 
@@ -10,12 +10,22 @@ This folder keeps its original URL, but the instructions and dashboard example n
 
 | Data | Where it lives | How to change it |
 |---|---|---|
-| Available products, categories, and variants | Your JSON file, exposed through a sensor | Edit the JSON and refresh the sensor |
+| Available products, categories, and variants | Your JSON file, exposed through a sensor | **Edit products** with Shopping List Catalog, or edit the JSON and refresh the sensor |
 | Items to buy and their quantities | Your existing `todo` entity | Tap products, use quick-add, or open the full list |
 | Category restrictions, visibility, and product defaults | This dashboard card's configuration | Use the visual card editor |
 | Search, active category, On list filter, expanded variants | The current card view | Use the catalog controls; these reset on reload |
 
-The JSON contains the available products, not the current shopping list. Catalog mode reads that data; it cannot write products back to the file.
+The JSON contains the available products, not the current shopping list.
+
+## Recommended: Shopping List Catalog
+
+The companion [Shopping List Catalog](https://github.com/eyalgal/ha-shopping-list-catalog) integration replaces the `command_line` sensor below. Each catalog is a JSON file with its own sensor, such as one per store, every category is exposed automatically, and administrators can edit products from the card editor with **Edit products**.
+
+1. Install **Shopping List Catalog** through HACS and restart Home Assistant.
+2. Add it under **Settings > Devices & Services > Add Integration**. Start from starter products, an empty catalog, a copy of another catalog, or your existing `shopping_items.json`, which is edited in place.
+3. Point the card at the new sensor, such as `sensor.shopping_catalog_supermarket`, with `catalog_attribute: catalog`. The visual editor fills in the attribute when you select the sensor.
+
+If you move from the `command_line` sensor, remove it from `configuration.yaml` once your cards use the new sensor. The rest of this guide covers the manual sensor setup and the JSON format, which both options share.
 
 ## Already Have the JSON Sensor?
 

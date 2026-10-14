@@ -96,13 +96,25 @@ The list icon opens Home Assistant's native to-do list, including items outside 
 
 The plus button adds a one-off item directly to the to-do list. It does not create a catalog product or apply a category prefix. Existing active items are not duplicated; an existing zero item is reactivated when updates are supported. The input clears only after confirmation. Failed saves retain the text, and offline writes are not queued.
 
-For permanent catalog products, edit the shared JSON and refresh its sensor. The card reads the source; it cannot write products back to it.
+For permanent catalog products, edit the shared JSON and refresh its sensor, or use [Edit products](#editing-catalog-products) with Shopping List Catalog.
 
 ### Sharing and Persistence
 
 Use the same `catalog_entity` and `todo_list` on each dashboard to share products and selections. No catalog copy is stored in the browser. Shopping selections persist in the to-do integration; catalog edits appear after the source sensor refreshes.
 
-Search, category selection, On list, and expanded variants are local view state and reset on reload. They do not change another dashboard's view. New JSON categories must also be exposed by the sensor; the example Command Line sensor uses explicit `json_attributes` and a five-minute scan interval.
+Search, category selection, On list, and expanded variants are local view state and reset on reload. They do not change another dashboard's view. New JSON categories must also be exposed by the sensor; the example Command Line sensor uses explicit `json_attributes` and a five-minute scan interval. Shopping List Catalog sensors expose every category automatically and pick up file edits within 30 seconds.
+
+Products appear in their JSON order. Set **Display > Product order** to **By name** (`product_order: name`) to sort them alphabetically within each category without changing the source.
+
+## Editing Catalog Products
+
+The companion [Shopping List Catalog](https://github.com/eyalgal/ha-shopping-list-catalog) integration stores each catalog as a JSON file with its own sensor, such as `sensor.shopping_catalog_costco`. When a Catalog card uses one of these sensors, administrators see **Edit products** in the editor's **Catalog** section.
+
+- Rename, reorder, add, and delete categories. Add, reorder, and delete products, or move a product to another category.
+- Select a product to edit it with the same form as a Single card, including variants with their own images or icons. Settings that match the card's product defaults are not stored, and fields the editor does not know are kept.
+- **Save products** writes the catalog file and keeps the previous version as `<file>.bak`. If the catalog changed somewhere else after you opened it, the save is refused; reload to get the latest version.
+
+Product edits and card settings are saved separately: **Save products** writes the catalog, and the dialog's **Save** stores the card configuration.
 
 ## Images
 

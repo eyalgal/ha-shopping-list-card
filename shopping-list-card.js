@@ -3179,14 +3179,14 @@ if (!customElements.get('shopping-list-catalog')) {
  *
  * Author: eyalgal
  * License: MIT
- * Version: 3.0.0
+ * Version: 3.1.0
  *
  * Note: This card requires a to-do entity to function properly.
  * For more information, visit: https://github.com/eyalgal/ha-shopping-list-card
  */
 
 
-const CARD_VERSION = '3.0.0';
+const CARD_VERSION = '3.1.0';
 
 function escapeHtml(str) {
   if (str == null) return '';

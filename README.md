@@ -12,6 +12,7 @@ Catalog mode with demo products, category tabs, quantities, and expanded variant
 - **Single or Catalog:** a few favorite products, or a shared catalog with categories, search, and an On list filter.
 - **Variants and quantities:** group related products on one expandable tile, like Gala and Granny Smith apples, each with its own quantity.
 - **Full list, quick-add, and Undo:** manage the complete list, add a one-off item, or restore an accidental removal.
+- **Edit products in Home Assistant:** with the companion [Shopping List Catalog](https://github.com/eyalgal/ha-shopping-list-catalog) integration, keep one catalog per store and edit it from the card editor.
 - **Shared across dashboards:** selections stay in your existing to-do integration, with live updates through Home Assistant.
 
 ## Get Started
@@ -51,6 +52,8 @@ Browse products from a shared JSON-backed sensor. Choose categories, search, ope
 
 The editor validates the source and offers **Starter JSON** for a new catalog. Follow the [JSON catalog setup guide](https://github.com/eyalgal/ha-shopping-list-card/tree/main/examples/auto-generated-grid/) to connect the sensor. No `auto-entities`, `layout-card`, or generated grid is required.
 
+To edit products without touching JSON, install the companion [Shopping List Catalog](https://github.com/eyalgal/ha-shopping-list-catalog) integration. It provides one sensor per catalog, such as one per store, and administrators get **Edit products** in this card's editor.
+
 <details>
 <summary>Minimal Catalog configuration</summary>
 
@@ -66,7 +69,7 @@ Replace the sensor and list IDs with your own. Products live in the sensor's sou
 </details>
 
 <details>
-<summary>More screenshots: product cards and a mobile catalog</summary>
+<summary>More screenshots: product cards, a mobile catalog, and the products editor</summary>
 
 ### Product Cards
 
@@ -80,13 +83,19 @@ Horizontal variant groups and vertical tiles can share the same shopping list.
 
 Compact tiles keep the main item and its variants accessible. Screenshots use demo data and sample photos; product-photo files are not bundled with the card.
 
+### Editing Products
+
+<img src="https://raw.githubusercontent.com/eyalgal/ha-shopping-list-card/main/docs/images/products-editor.png" alt="Products editor inside the card editor, listing categories with their products, variant counts, and reorder and delete buttons above a Save products bar" width="560"/>
+
+With Shopping List Catalog, **Edit products** opens the catalog's categories and products inside the card editor.
+
 </details>
 
 <a id="undo-removal"></a>
 
 ## Good to Know
 
-- **Catalogs are read-only sources.** Quick-add changes the shopping list, not the JSON catalog. Edit the source to add permanent products.
+- **Quick-add does not change the catalog.** It adds a one-off item to the shopping list. Add permanent products in the JSON source, or with **Edit products** when using Shopping List Catalog.
 - **Undo is temporary.** A 10-second Undo button on the removed tile covers this card's last removal batch in the current browser, not edits through other apps or the native list. Turn it off with `show_undo: false`. [Undo details](https://github.com/eyalgal/ha-shopping-list-card/blob/main/docs/usage.md#undo-removal).
 - **Quantities affect removal.** Above one, use the minus button or default hold action; a normal tap does not remove the item. Kept-zero mode behaves differently. [Quantity behavior](https://github.com/eyalgal/ha-shopping-list-card/blob/main/docs/usage.md#quantities).
 - **No offline write queue.** The card waits for Home Assistant confirmation and does not automatically repeat failed changes.
