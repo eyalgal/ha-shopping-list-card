@@ -69,7 +69,7 @@ Replace the sensor and list IDs with your own. Products live in the sensor's sou
 </details>
 
 <details>
-<summary>More screenshots: product cards, a mobile catalog, and the products editor</summary>
+<summary>More screenshots: product cards, a mobile catalog, suggestions, and the products editor</summary>
 
 ### Product Cards
 
@@ -82,6 +82,12 @@ Horizontal variant groups and vertical tiles can share the same shopping list.
 <img src="https://raw.githubusercontent.com/eyalgal/ha-shopping-list-card/main/docs/images/catalog-mobile-undo.png" alt="Two-column catalog at phone width, showing the Undo button on the Eggs tile after removing it, and separate Milk and Lactose-free quantities" width="390"/>
 
 Compact tiles keep the main item and its variants accessible. Screenshots use demo data and sample photos; product-photo files are not bundled with the card.
+
+### Suggested Products
+
+<img src="https://raw.githubusercontent.com/eyalgal/ha-shopping-list-card/main/docs/images/catalog-suggested.png" alt="Catalog with the Suggested filter on, showing nine usually bought products across Fruits, Vegetables, and Dairy and Eggs, with Apple and Milk already on the list" width="812"/>
+
+With Shopping List Catalog, **Suggested** shows what you usually buy around now, learned from the items you check off.
 
 ### Editing Products
 

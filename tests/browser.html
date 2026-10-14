@@ -263,6 +263,8 @@
       return card;
     } });
     let catalogData;
+    let suggestions = null;
+    const catalogAttributes = () => (companionMode ? { catalog: catalogData, ...(suggestions ? { suggestions } : {}) } : catalogData);
     if (catalogMode || editorMode) {
       const response = await fetch('../examples/auto-generated-grid/shopping_items.json');
       catalogData = await response.json();
@@ -277,7 +279,7 @@
           if (product.title === 'Milk') product.image = image;
         }
       }
-      hass.states['sensor.catalog'] = { state: '1', attributes: companionMode ? { catalog: catalogData } : catalogData };
+      hass.states['sensor.catalog'] = { state: '1', attributes: catalogAttributes() };
     }
     const configurations = [
       { id: 'milk', title: 'Milk', enable_quantity: true, image },
@@ -352,13 +354,18 @@
       pushUnrelated() { push(); },
       updateCatalog(data) {
         catalogData = structuredClone(data);
-        hass.states['sensor.catalog'] = { state: String(Date.now()), attributes: companionMode ? { catalog: catalogData } : catalogData };
+        hass.states['sensor.catalog'] = { state: String(Date.now()), attributes: catalogAttributes() };
         for (const card of document.querySelectorAll('shopping-list-card[data-fixture-card]')) card.hass = { ...hass };
         const editor = document.querySelector('shopping-list-card-editor');
         if (editor) editor.hass = { ...hass };
       },
       setCatalogAvailable(available) {
         hass.states['sensor.catalog'] = { state: available ? '1' : 'unavailable', attributes: catalogData };
+        for (const card of document.querySelectorAll('shopping-list-card[data-fixture-card]')) card.hass = { ...hass };
+      },
+      setSuggestions(value) {
+        suggestions = value;
+        hass.states['sensor.catalog'] = { state: String(Date.now()), attributes: catalogAttributes() };
         for (const card of document.querySelectorAll('shopping-list-card[data-fixture-card]')) card.hass = { ...hass };
       },
       setConnected(connected) {
