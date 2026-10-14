@@ -64,7 +64,7 @@ With `enable_quantity: true`:
 
 Catalog mode enables quantities by default. Single mode does not. Quantities are stored in the to-do summary, such as `Milk (2)`, rather than only in the browser.
 
-Entries that include a unit after the number, such as `Milk (4 bottles)` added by another app or typed by hand, count as the same item with quantity 4. Changing the amount keeps the unit, so `+` turns it into `Milk (5 bottles)`.
+Entries that include a common unit after the number, such as `Milk (4 bottles)` or `Flour (2 kg)` added by another app or typed by hand, count as the same item with that quantity. Changing the amount keeps the unit, so `+` turns it into `Milk (5 bottles)`; at one, the entry becomes plain `Milk`. Other words, as in `Milk (2 percent)`, keep the entry separate.
 
 ## Hold Actions
 

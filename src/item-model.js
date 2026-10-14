@@ -7,16 +7,22 @@ export function keepZero(config) {
   return !!config.enable_quantity && config.remove_zero === false;
 }
 
+// Units other apps may add after the number, e.g. "Milk (4 bottles)".
+const UNITS = [
+  'pcs?', 'pieces?', 'packs?', 'packets?', 'rolls?', 'bottles?', 'cans?', 'jars?', 'boxe?s?', 'bags?', 'cartons?',
+  'tubs?', 'tubes?', 'loaf', 'loaves', 'bunch(?:es)?', 'heads?', 'dozens?', 'units?', 'servings?', 'slices?',
+  'kg', 'kgs', 'g', 'gr', 'grams?', 'lbs?', 'pounds?', 'oz', 'ounces?', 'l', 'liters?', 'litres?', 'ml', 'cl',
+].join('|');
+
 export function itemSummary(config, fullName, quantity, unit = null) {
   if (!config.enable_quantity) return fullName;
-  if (unit) return `${fullName} (${quantity} ${unit})`;
+  if (unit && quantity !== 1) return `${fullName} (${quantity} ${unit})`;
   return keepZero(config) || quantity > 1 ? `${fullName} (${quantity})` : fullName;
 }
 
 export function matchItem(items, fullName, config) {
   const escaped = fullName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-  // Other apps may add a unit after the number, e.g. "Milk (4 bottles)".
-  const pattern = new RegExp(`^${escaped}(?: \\((\\d+)(?: ([^()]*[^()\\s]))?\\))?$`, 'i');
+  const pattern = new RegExp(`^${escaped}(?: \\((\\d+)(?: (${UNITS}))?\\))?$`, 'i');
   for (const item of items || []) {
     if (typeof item.summary !== 'string') continue;
     const match = item.summary.match(pattern);
