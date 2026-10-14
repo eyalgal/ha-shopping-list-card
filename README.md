@@ -85,7 +85,7 @@ Compact tiles keep the main item and its variants accessible. Screenshots use de
 
 ### Suggested Products
 
-<img src="https://raw.githubusercontent.com/eyalgal/ha-shopping-list-card/main/docs/images/catalog-suggested.png" alt="Catalog with the Suggested filter on, showing nine usually bought products across Fruits, Vegetables, and Dairy and Eggs, with Apple and Milk already on the list" width="812"/>
+<img src="https://raw.githubusercontent.com/eyalgal/ha-shopping-list-card/main/docs/images/catalog-suggested.png" alt="Catalog with the Suggested filter on, showing nine usually bought products across Fruits, Vegetables, and Dairy and Eggs, with Apple and Milk already on the list and a tooltip on Banana explaining it is usually bought weekly and was last bought 9 days ago" width="812"/>
 
 With Shopping List Catalog, **Suggested** shows what you usually buy around now, learned from the items you check off.
 
