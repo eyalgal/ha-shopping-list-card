@@ -4,6 +4,13 @@ import { planListAddition } from './item-model.js';
 import './catalog-editor.js';
 import './undo-control.js';
 
+function suggestionText(info) {
+  const every = Number(info.every) || 0;
+  const since = Number(info.since) || 0;
+  const usual = every === 7 ? 'weekly' : every === 1 ? 'daily' : `every ${every} days`;
+  return `Suggested: you usually buy this ${usual}, last bought ${since} ${since === 1 ? 'day' : 'days'} ago`;
+}
+
 class ShoppingListCatalogCard extends HTMLElement {
   constructor() {
     super();
@@ -14,6 +21,7 @@ class ShoppingListCatalogCard extends HTMLElement {
     this._category = null;
     this._query = '';
     this._onList = false;
+    this._suggestedOnly = false;
     this._store = null;
     this._unsubscribe = null;
     this._snapshot = null;
@@ -81,7 +89,8 @@ class ShoppingListCatalogCard extends HTMLElement {
       </div>
       <div class="catalog-toolbar">
         <label class="catalog-search"><ha-icon icon="mdi:magnify"></ha-icon><input type="search" aria-label="Search catalog" placeholder="Search products" autocomplete="off"><button class="catalog-icon-button catalog-clear-search" type="button" aria-label="Clear search" title="Clear search" hidden><ha-icon icon="mdi:close"></ha-icon></button></label>
-        <label class="catalog-on-list"><input type="checkbox">On list</label>
+        <label class="catalog-on-list catalog-only-on-list"><input type="checkbox">On list</label>
+        <label class="catalog-on-list catalog-only-suggested" hidden title="Products you usually buy around now"><input type="checkbox">Suggested</label>
       </div>
       <form class="catalog-add-form" id="catalog-add-form" aria-label="Add item to shopping list" hidden>
         <input class="catalog-add-input" type="text" aria-label="Item to add" placeholder="Add to shopping list" required autocomplete="off">
@@ -115,8 +124,17 @@ class ShoppingListCatalogCard extends HTMLElement {
       this._applyFilters();
       this._search.focus();
     });
-    this.shadowRoot.querySelector('.catalog-on-list input').addEventListener('change', event => {
+    this.shadowRoot.querySelector('.catalog-only-on-list input').addEventListener('change', event => {
       this._onList = event.target.checked;
+      if (this._onList) this._setSuggestedOnly(false);
+      this._applyFilters();
+    });
+    this.shadowRoot.querySelector('.catalog-only-suggested input').addEventListener('change', event => {
+      this._setSuggestedOnly(event.target.checked);
+      if (this._suggestedOnly) {
+        this._onList = false;
+        this.shadowRoot.querySelector('.catalog-only-on-list input').checked = false;
+      }
       this._applyFilters();
     });
     this.shadowRoot.querySelector('.catalog-open-list').addEventListener('click', () => {
@@ -165,7 +183,7 @@ class ShoppingListCatalogCard extends HTMLElement {
       || config.categories.some(category => typeof category !== 'string' || !category.trim()))) {
       throw new Error('Categories must be a list of category names.');
     }
-    for (const option of ['fixed_columns', 'show_category_tabs', 'show_search', 'show_title', 'show_item_count', 'show_list_button', 'show_add_button', 'show_undo']) {
+    for (const option of ['fixed_columns', 'show_category_tabs', 'show_search', 'show_title', 'show_item_count', 'show_list_button', 'show_add_button', 'show_undo', 'show_suggested']) {
       if (config[option] !== undefined && typeof config[option] !== 'boolean') {
         throw new Error(`${option} must be true or false.`);
       }
@@ -510,9 +528,25 @@ class ShoppingListCatalogCard extends HTMLElement {
     });
   }
 
+  _setSuggestedOnly(value) {
+    this._suggestedOnly = value;
+    this.shadowRoot.querySelector('.catalog-only-suggested input').checked = value;
+  }
+
+  // Suggestions come from the Shopping List Catalog integration's purchase history.
+  _suggestions() {
+    if (this._config?.show_suggested === false) return null;
+    const raw = this._hass?.states?.[this._config?.catalog_entity]?.attributes?.suggestions;
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null;
+    return new Map(Object.entries(raw).map(([name, info]) => [name.toLowerCase(), info]));
+  }
+
   _applyFilters() {
     const terms = searchText(this._query).trim().split(/\s+/).filter(Boolean);
     const items = this._snapshot?.items;
+    const suggestions = this._suggestions();
+    this.shadowRoot.querySelector('.catalog-only-suggested').hidden = !suggestions;
+    if (!suggestions && this._suggestedOnly) this._setSuggestedOnly(false);
     // Keep a just-removed product visible under On list so its Undo button stays reachable.
     const undoKeys = new Set(this._snapshot?.undo?.keys || []);
     let visible = 0;
@@ -520,10 +554,14 @@ class ShoppingListCatalogCard extends HTMLElement {
       let count = 0;
       for (const product of group.products) {
         const record = this._products.get(product.key);
+        const suggestion = suggestions && product.names.map(name => suggestions.get(name.toLowerCase())).find(Boolean);
         const matches = (this._category === null || this._category === group.name)
           && terms.every(term => product.search.includes(term))
           && (!this._onList || productOnList(product, items)
-            || product.names.some(name => undoKeys.has(name.toLowerCase())));
+            || product.names.some(name => undoKeys.has(name.toLowerCase())))
+          && (!this._suggestedOnly || !!suggestion);
+        if (suggestion) record.card.title = suggestionText(suggestion);
+        else record.card.removeAttribute('title');
         if (!matches && !record.card.hidden) record.card._clearHolds?.();
         record.card.hidden = !matches;
         record.card.inert = !matches;
@@ -546,6 +584,7 @@ class ShoppingListCatalogCard extends HTMLElement {
     empty.hidden = visible > 0 || !!this._sourceError || !this._hass
       || (this._onList && items === null);
     empty.textContent = !this._products.size ? this._config?.categories ? 'No products in the selected categories.' : 'The product catalog is empty.'
+      : this._suggestedOnly ? 'No suggestions right now. They appear as you check off purchases.'
       : this._onList ? 'No catalog products match the selected list filters.' : 'No products match your search.';
   }
 

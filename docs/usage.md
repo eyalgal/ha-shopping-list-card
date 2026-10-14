@@ -90,6 +90,8 @@ Undo is on by default. Turn it off with `show_undo: false`, or with **Undo butto
 
 Category tabs, search, and **On list** filter the product tiles. Search ignores case and accents and includes category, title, subtitle, and variant names. **On list** includes a product when its header item or any variant is active; kept-zero entries are inactive. The top count measures visible products, not total quantities.
 
+**Suggested** appears when the catalog sensor comes from [Shopping List Catalog](https://github.com/eyalgal/ha-shopping-list-catalog) with purchase history turned on. It shows products you usually buy around now, based on when you checked them off before, including ones already on the list. Hover a suggested tile to see why it was picked. Suggested and On list are alternatives, so turning one on turns the other off. Hide it with `show_suggested: false`.
+
 The visual editor's **Display** section selects category subsets and independently shows or hides controls. Fixed columns, header visibility, and shared product defaults are covered in the [configuration reference](configuration.md#catalog-options).
 
 ### Full List and Quick Add

@@ -1401,6 +1401,76 @@ test('On list includes selected variants and respects kept-zero quantities and p
   assert.equal(setup.services.length, 0);
 });
 
+test('Suggested shows products due from purchase history and explains why', async context => {
+  const environment = createEnvironment(context);
+  const setup = createHass([item('Apple')]);
+  setup.hass.states['sensor.catalog'] = { state: '1', attributes: {
+    catalog: { Products: [{ title: 'Apple' }, { title: 'Milk', types: ['Oat'] }, { title: 'Cheese', list_prefix: 'Dairy' }, { title: 'Pear' }] },
+    suggestions: { Apple: { every: 7, since: 8, quantity: 1 }, 'Milk - Oat': { every: 4, since: 5, quantity: 2 }, 'dairy - cheese': { every: 1, since: 1, quantity: 1 } },
+  } };
+  const catalog = mountCatalog(environment, setup.hass, { catalog_attribute: 'catalog' });
+  await settle();
+  const label = catalog.shadowRoot.querySelector('.catalog-only-suggested');
+  const onList = catalog.shadowRoot.querySelector('.catalog-only-on-list input');
+  assert.equal(label.hidden, false);
+  const [apple, milk, cheese, pear] = catalog.shadowRoot.querySelectorAll('shopping-list-card');
+  assert.equal(apple.title, 'Suggested: you usually buy this weekly, last bought 8 days ago');
+  assert.equal(milk.title, 'Suggested: you usually buy this every 4 days, last bought 5 days ago');
+  assert.equal(cheese.title, 'Suggested: you usually buy this daily, last bought 1 day ago');
+  assert.equal(pear.hasAttribute('title'), false);
+
+  onList.checked = true;
+  onList.dispatchEvent(new environment.window.Event('change'));
+  const suggested = label.querySelector('input');
+  suggested.checked = true;
+  suggested.dispatchEvent(new environment.window.Event('change'));
+  assert.equal(onList.checked, false);
+  assert.deepEqual(visibleProducts(catalog).map(card => card._config.title), ['Apple', 'Milk', 'Cheese']);
+  onList.checked = true;
+  onList.dispatchEvent(new environment.window.Event('change'));
+  assert.equal(suggested.checked, false);
+  assert.deepEqual(visibleProducts(catalog).map(card => card._config.title), ['Apple']);
+
+  onList.checked = false;
+  onList.dispatchEvent(new environment.window.Event('change'));
+  suggested.checked = true;
+  suggested.dispatchEvent(new environment.window.Event('change'));
+  setup.hass.states['sensor.catalog'] = { ...setup.hass.states['sensor.catalog'], attributes: { ...setup.hass.states['sensor.catalog'].attributes, suggestions: {} } };
+  catalog.hass = { ...setup.hass, states: { ...setup.hass.states } };
+  assert.equal(visibleProducts(catalog).length, 0);
+  assert.match(catalog.shadowRoot.querySelector('.catalog-empty').textContent, /No suggestions right now/);
+  assert.equal(setup.services.length, 0);
+});
+
+test('Suggested stays hidden without suggestions or when show_suggested is false', async context => {
+  const environment = createEnvironment(context);
+  const setup = createHass();
+  setup.hass.states['sensor.catalog'] = { state: '1', attributes: { catalog: { Products: [{ title: 'Apple' }] }, suggestions: { Apple: { every: 7, since: 8 } } } };
+  const plain = createHass();
+  catalogSource(plain, { Products: [{ title: 'Apple' }] });
+  const off = mountCatalog(environment, setup.hass, { catalog_attribute: 'catalog', show_suggested: false });
+  const none = mountCatalog(environment, plain.hass);
+  await settle();
+  assert.equal(off.shadowRoot.querySelector('.catalog-only-suggested').hidden, true);
+  assert.equal(off.shadowRoot.querySelector('shopping-list-card').hasAttribute('title'), false);
+  assert.equal(none.shadowRoot.querySelector('.catalog-only-suggested').hidden, true);
+  assert.throws(() => off.setConfig({ ...off._config, show_suggested: 'no' }), /show_suggested/);
+
+  const editor = environment.window.customElements.get('shopping-list-catalog').getConfigElement();
+  const changes = [];
+  editor.addEventListener('config-changed', event => changes.push(event.detail.config));
+  editor.setConfig({ catalog_entity: 'sensor.catalog', todo_list: 'todo.shopping', catalog_attribute: 'catalog' });
+  editor.hass = setup.hass;
+  const toggle = editor.shadowRoot.getElementById('show_suggested');
+  assert.equal(toggle.checked, true);
+  toggle.checked = false;
+  toggle.dispatchEvent(new environment.window.Event('change'));
+  assert.equal(changes.at(-1).show_suggested, false);
+  toggle.checked = true;
+  toggle.dispatchEvent(new environment.window.Event('change'));
+  assert.equal('show_suggested' in changes.at(-1), false);
+});
+
 test('catalog refresh adds and removes products while preserving unchanged cards and the source', async context => {
   const environment = createEnvironment(context);
   const setup = createHass();
