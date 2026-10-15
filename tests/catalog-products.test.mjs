@@ -17,7 +17,7 @@ function createEnvironment(context, { confirm = true } = {}) {
   return { window, document: window.document };
 }
 
-function createHass(catalog, { admin = true, companion = true, save } = {}) {
+function createHass(catalog, { admin = true, companion = true, save, candidates, dismiss } = {}) {
   const calls = [];
   let revision = 'r1';
   const hass = {
@@ -38,6 +38,14 @@ function createHass(catalog, { admin = true, companion = true, save } = {}) {
         catalog = message.catalog;
         revision = `r${calls.length}`;
         return { revision };
+      }
+      if (message.type === 'shopping_list_catalog/candidates') {
+        if (!candidates) throw { code: 'unknown_command', message: 'Unknown command.' };
+        return { candidates };
+      }
+      if (message.type === 'shopping_list_catalog/dismiss') {
+        if (dismiss) return dismiss(message);
+        return null;
       }
       return { items: [] };
     },
@@ -254,4 +262,102 @@ test('a broken catalog file is reported instead of editable', async context => {
   assert.match(root.querySelector('ha-alert').textContent, /not valid JSON/);
   assert.equal(root.querySelector('.footer').hidden, true);
   assert.equal(root.querySelector('input.category-name'), null);
+});
+
+const CANDIDATE_CATALOG = {
+  Fruits: [
+    { title: 'Apple', types: ['Gala'] },
+    { title: 'Grapes', subtitle: 'Green' },
+    { title: 'Grapes', subtitle: 'Purple' },
+    { title: 'Banana' },
+  ],
+  Snacks: [{ title: 'Chips' }],
+};
+
+const CANDIDATES = [
+  { key: 'bamba', name: 'Bamba', times: 3, last: '2026-09-28', quantity: 1, variant_of: null },
+  { key: 'apple | honeycrisp', name: 'Apple - Honeycrisp', times: 2, last: '2026-10-12', quantity: 2, variant_of: { category: 'Fruits', title: 'Apple', variant: 'Honeycrisp' } },
+  { key: 'grape | red', name: 'Grapes - Red', times: 2, last: '2026-10-10', quantity: 1, variant_of: { category: 'Fruits', title: 'Grapes', variant: 'Red' } },
+  { key: 'mini pear', name: 'Mini pears', times: 2, last: '2026-10-09', quantity: 1, variant_of: { category: 'Fruits', title: 'Pear', variant: 'Mini' } },
+];
+
+const candidateRow = (root, key) => root.querySelector(`[data-candidate="${key}"]`);
+
+test('products bought but missing from the catalog can be added as products or variants', async context => {
+  const environment = createEnvironment(context);
+  const { hass, calls } = createHass(structuredClone(CANDIDATE_CATALOG), { candidates: structuredClone(CANDIDATES) });
+  const { root } = await openProducts(environment, hass);
+
+  assert.equal(root.querySelector('.candidates h3').textContent, 'Bought but not in the catalog');
+  assert.deepEqual([...root.querySelectorAll('.candidate .product-name')].map(name => name.textContent),
+    ['Bamba', 'Apple - Honeycrisp', 'Grapes - Red', 'Mini pears']);
+  assert.match(candidateRow(root, 'bamba').querySelector('.product-meta').textContent, /^Bought 3 times, last on /);
+  assert.equal(candidateRow(root, 'bamba').querySelector('.add-variant'), null);
+  // Pear isn't in the catalog, so only a new product is offered.
+  assert.equal(candidateRow(root, 'mini pear').querySelector('.add-variant'), null);
+  assert.equal(candidateRow(root, 'apple | honeycrisp').querySelector('.add-variant').textContent, 'Add to Apple as Honeycrisp');
+
+  const bamba = candidateRow(root, 'bamba');
+  assert.equal(bamba.querySelector('.add-candidate').disabled, true);
+  const select = bamba.querySelector('.candidate-category');
+  select.value = [...select.options].find(option => option.textContent === 'Snacks').value;
+  select.dispatchEvent(new environment.window.Event('change'));
+  click(bamba.querySelector('.add-candidate'));
+  assert.equal(root.querySelector('.category-select').selectedOptions[0].textContent, 'Snacks');
+  assert.equal(root.querySelector('shopping-list-card-editor').shadowRoot.querySelector('#title').value, 'Bamba');
+  click(root.querySelector('.back'));
+  assert.equal(candidateRow(root, 'bamba'), null);
+
+  click(candidateRow(root, 'apple | honeycrisp').querySelector('.add-variant'));
+  assert.equal(root.querySelector('shopping-list-card-editor').shadowRoot.querySelector('#title').value, 'Apple');
+  click(root.querySelector('.back'));
+  click(candidateRow(root, 'grape | red').querySelector('.add-variant'));
+  click(root.querySelector('.back'));
+  assert.equal(root.querySelector('.candidates').textContent.includes('Grapes - Red'), false);
+
+  click(root.querySelector('.save'));
+  await settle();
+  const saved = calls.find(call => call.type === 'shopping_list_catalog/save').catalog;
+  assert.deepEqual(saved.Fruits, [
+    { title: 'Apple', types: ['Gala', 'Honeycrisp'] },
+    { title: 'Grapes', subtitle: 'Green' },
+    { title: 'Grapes', subtitle: 'Purple' },
+    { title: 'Grapes', subtitle: 'Red' },
+    { title: 'Banana' },
+  ]);
+  assert.deepEqual(saved.Snacks, [{ title: 'Chips' }, { title: 'Bamba' }]);
+  assert.equal(calls.some(call => call.type === 'shopping_list_catalog/dismiss'), false);
+});
+
+test('dismissing a missing product is saved right away and reported if it fails', async context => {
+  const environment = createEnvironment(context);
+  let fail = true;
+  const { hass, calls } = createHass(structuredClone(CANDIDATE_CATALOG), {
+    candidates: structuredClone(CANDIDATES),
+    dismiss: () => { if (fail) throw { message: 'Not allowed.' }; return null; },
+  });
+  const { root } = await openProducts(environment, hass);
+
+  click(candidateRow(root, 'bamba').querySelector('.dismiss-candidate'));
+  await settle();
+  assert.match(root.querySelector('ha-alert').textContent, /Not allowed/);
+  assert.ok(candidateRow(root, 'bamba'));
+
+  fail = false;
+  click(candidateRow(root, 'bamba').querySelector('.dismiss-candidate'));
+  await settle();
+  assert.equal(candidateRow(root, 'bamba'), null);
+  assert.equal(root.querySelector('ha-alert').hidden, true);
+  assert.deepEqual(calls.filter(call => call.type === 'shopping_list_catalog/dismiss').at(-1),
+    { type: 'shopping_list_catalog/dismiss', entity_id: ENTITY, key: 'bamba' });
+  assert.equal(root.querySelector('.save').disabled, true);
+});
+
+test('older integrations without candidates show the products as before', async context => {
+  const environment = createEnvironment(context);
+  const { hass } = createHass(structuredClone(CANDIDATE_CATALOG));
+  const { root } = await openProducts(environment, hass);
+  assert.equal(root.querySelector('.candidates'), null);
+  assert.equal(root.querySelectorAll('section.category').length, 2);
+  assert.equal(root.querySelector('ha-alert').hidden, true);
 });

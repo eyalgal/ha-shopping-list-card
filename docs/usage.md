@@ -119,6 +119,7 @@ The companion [Shopping List Catalog](https://github.com/eyalgal/ha-shopping-lis
 - Rename, reorder, add, and delete categories. Add, reorder, and delete products, or move a product to another category.
 - Select a product to edit it with the same form as a Single card, including variants with their own images or icons. Settings that match the card's product defaults are not stored, and fields the editor does not know are kept.
 - **Save products** writes the catalog file and keeps the previous version as `<file>.bak`. If the catalog changed somewhere else after you opened it, the save is refused; reload to get the latest version.
+- **Bought but not in the catalog** (Shopping List Catalog 0.3.0 or later, with purchase history on) lists items you checked off on at least two different days that aren't products yet. Add one as a new product in the category you choose, or, when it looks like a variant of an existing product such as `Mini cucumbers` for Cucumber, add it to that product. Added items are saved with **Save products**; **Dismiss** stops offering an item right away.
 
 Product edits and card settings are saved separately: **Save products** writes the catalog, and the dialog's **Save** stores the card configuration.
 

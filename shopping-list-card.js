@@ -1138,8 +1138,18 @@ function button(label, iconName, className = '', text = false) {
 }
 
 function variantCount(types) {
+  return variantList(types).length;
+}
+
+function variantList(types) {
   const entries = typeof types === 'string' ? types.split(/[,\n]/) : Array.isArray(types) ? types : [];
-  return entries.filter(entry => String(typeof entry === 'string' ? entry : entry?.name ?? '').trim()).length;
+  return entries.filter(entry => String(typeof entry === 'string' ? entry : entry?.name ?? '').trim());
+}
+
+function shortDate(value) {
+  const [year, month, day] = String(value).split('-').map(Number);
+  const date = new Date(year, month - 1, day);
+  return Number.isNaN(date.getTime()) ? String(value) : date.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
 }
 
 class ShoppingListCatalogProducts extends HTMLElement {
@@ -1148,6 +1158,7 @@ class ShoppingListCatalogProducts extends HTMLElement {
     this.attachShadow({ mode: 'open' });
     this._nextId = 1;
     this._categories = [];
+    this._candidates = [];
     this._view = null;
     // Product forms emit config-changed; it must not reach the card editor.
     for (const type of ['config-changed', 'value-changed']) this.addEventListener(type, event => event.stopPropagation());
@@ -1188,12 +1199,23 @@ class ShoppingListCatalogProducts extends HTMLElement {
         this._loaded = true;
         this._savedSignature = this._signature();
         this._status = null;
+        await this._loadCandidates();
       }
     } catch (error) {
       this._status = { level: 'error', message: error?.message || 'The catalog could not be loaded.' };
     }
     this._view = null;
     this._render();
+  }
+
+  async _loadCandidates() {
+    try {
+      const result = await this._hass.callWS({ type: `${COMPANION_DOMAIN}/candidates`, entity_id: this._entityId });
+      this._candidates = Array.isArray(result?.candidates) ? result.candidates : [];
+    } catch {
+      // Shopping List Catalog before 0.3.0 has no candidates command.
+      this._candidates = [];
+    }
   }
 
   _category(name, products = []) {
@@ -1256,6 +1278,15 @@ class ShoppingListCatalogProducts extends HTMLElement {
         .link { color: var(--primary-color); padding: 0 8px; }
         .danger { color: var(--error-color, #db4437); }
         .product-category { display: grid; gap: 4px; margin-bottom: 12px; font-size: 13px; color: var(--secondary-text-color); }
+        .candidates { border: 1px dashed var(--primary-color); border-radius: 8px; padding: 8px 8px 4px 12px; margin-bottom: 12px; }
+        .candidates h3 { margin: 4px 0 2px; font-size: 14px; font-weight: 500; color: var(--primary-text-color); }
+        .candidates-hint { margin: 0 0 4px; font-size: 12px; color: var(--secondary-text-color); }
+        .candidate { padding: 6px 0; border-top: 1px solid var(--divider-color); }
+        .candidate-head { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 8px; }
+        .candidate-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; margin-top: 4px; }
+        .candidate-actions .link { height: 32px; }
+        .candidate-create { display: flex; flex: 1 1 260px; align-items: center; gap: 4px; min-width: 0; }
+        .candidate-create select { flex: 1; height: 36px; }
         .footer { position: sticky; bottom: 0; display: flex; justify-content: flex-end; align-items: center; gap: 8px; padding: 12px 0 4px; margin-top: 8px; background: var(--card-background-color, var(--primary-background-color)); border-top: 1px solid var(--divider-color); }
         .footer-message { flex: 1; min-width: 0; font-size: 13px; color: var(--secondary-text-color); }
         .save { padding: 0 16px; background: var(--primary-color); color: var(--text-primary-color, #fff); font-weight: 500; }
@@ -1304,6 +1335,7 @@ class ShoppingListCatalogProducts extends HTMLElement {
   _renderList() {
     const body = this.shadowRoot.querySelector('.products-body');
     const problems = this._problems();
+    if (this._candidates.length) body.append(this._renderCandidates());
     this._categories.forEach((category, index) => {
       const section = document.createElement('section');
       section.className = 'category';
@@ -1361,6 +1393,118 @@ class ShoppingListCatalogProducts extends HTMLElement {
     });
     body.append(addCategory);
     this._updateProblems(problems);
+  }
+
+  _renderCandidates() {
+    const section = document.createElement('section');
+    section.className = 'candidates';
+    section.setAttribute('aria-labelledby', 'candidates-title');
+    const heading = document.createElement('h3');
+    heading.id = 'candidates-title';
+    heading.textContent = 'Bought but not in the catalog';
+    const hint = document.createElement('p');
+    hint.className = 'candidates-hint';
+    hint.textContent = 'Items checked off on different days that aren\'t products yet.';
+    section.append(heading, hint);
+    for (const candidate of this._candidates) section.append(this._candidateRow(candidate));
+    return section;
+  }
+
+  _candidateRow(candidate) {
+    const row = document.createElement('div');
+    row.className = 'candidate';
+    row.dataset.candidate = candidate.key;
+    const text = document.createElement('span');
+    text.className = 'product-text';
+    const name = document.createElement('span');
+    name.className = 'product-name';
+    name.textContent = candidate.name;
+    const meta = document.createElement('span');
+    meta.className = 'product-meta';
+    meta.textContent = `Bought ${candidate.times} times, last on ${shortDate(candidate.last)}`;
+    text.append(name, meta);
+    const dismiss = button(`Dismiss ${candidate.name}`, 'mdi:close', 'dismiss-candidate');
+    dismiss.addEventListener('click', () => this._dismissCandidate(candidate));
+    const head = document.createElement('div');
+    head.className = 'candidate-head';
+    head.append(text, dismiss);
+    const actions = document.createElement('div');
+    actions.className = 'candidate-actions';
+    const target = candidate.variant_of && this._variantTarget(candidate.variant_of);
+    if (target) {
+      const variant = button(`Add to ${target.title} as ${candidate.variant_of.variant}`, 'mdi:plus', 'link add-variant', true);
+      variant.addEventListener('click', () => this._addVariant(candidate, target));
+      actions.append(variant);
+    }
+    const select = document.createElement('select');
+    select.className = 'candidate-category';
+    select.setAttribute('aria-label', `Category for ${candidate.name}`);
+    const placeholder = document.createElement('option');
+    placeholder.value = '';
+    placeholder.textContent = 'Choose a category';
+    select.append(placeholder);
+    for (const category of this._categories) {
+      const option = document.createElement('option');
+      option.value = String(category.id);
+      option.textContent = category.name.trim() || 'Unnamed category';
+      select.append(option);
+    }
+    const add = button('Add as new product', 'mdi:plus', 'link add-candidate', true);
+    add.disabled = true;
+    select.addEventListener('change', () => { add.disabled = !select.value; });
+    add.addEventListener('click', () => {
+      const category = this._categories.find(entry => String(entry.id) === select.value);
+      if (!category) return;
+      const product = { id: this._nextId++, data: { title: candidate.name } };
+      category.products.push(product);
+      this._resolveCandidate(candidate);
+      this._showProduct(product.id);
+    });
+    const create = document.createElement('div');
+    create.className = 'candidate-create';
+    create.append(select, add);
+    actions.append(create);
+    row.append(head, actions);
+    return row;
+  }
+
+  // The product a variant would join: one with variants, or same-titled rows split by subtitle.
+  _variantTarget({ category: categoryName, title }) {
+    const category = this._categories.find(entry => entry.name.trim() === categoryName);
+    const matches = category?.products.filter(product => String(product.data.title ?? '').trim().toLowerCase() === title.toLowerCase()) || [];
+    if (!matches.length) return null;
+    const bySubtitle = matches.every(product => product.data.subtitle && !variantCount(product.data.types));
+    return { category, products: matches, bySubtitle, title: String(matches[0].data.title).trim() };
+  }
+
+  _addVariant(candidate, target) {
+    const name = candidate.variant_of.variant;
+    let product;
+    if (target.bySubtitle) {
+      product = { id: this._nextId++, data: { title: target.title, subtitle: name } };
+      const last = target.products[target.products.length - 1];
+      target.category.products.splice(target.category.products.indexOf(last) + 1, 0, product);
+    } else {
+      product = target.products.find(entry => !entry.data.subtitle) || target.products[0];
+      product.data = { ...product.data, types: [...variantList(product.data.types), name] };
+    }
+    this._resolveCandidate(candidate);
+    this._showProduct(product.id);
+  }
+
+  _resolveCandidate(candidate) {
+    this._candidates = this._candidates.filter(entry => entry !== candidate);
+  }
+
+  async _dismissCandidate(candidate) {
+    try {
+      await this._hass.callWS({ type: `${COMPANION_DOMAIN}/dismiss`, entity_id: this._entityId, key: candidate.key });
+      this._resolveCandidate(candidate);
+      this._status = null;
+    } catch (error) {
+      this._status = { level: 'error', message: error?.message || `${candidate.name} could not be dismissed.` };
+    }
+    this._rerender();
   }
 
   _productRow(category, product, index) {
@@ -3229,14 +3373,14 @@ if (!customElements.get('shopping-list-catalog')) {
  *
  * Author: eyalgal
  * License: MIT
- * Version: 3.2.0
+ * Version: 3.3.0
  *
  * Note: This card requires a to-do entity to function properly.
  * For more information, visit: https://github.com/eyalgal/ha-shopping-list-card
  */
 
 
-const CARD_VERSION = '3.2.0';
+const CARD_VERSION = '3.3.0';
 
 function escapeHtml(str) {
   if (str == null) return '';

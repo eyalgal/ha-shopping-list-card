@@ -6,7 +6,7 @@
  *
  * Author: eyalgal
  * License: MIT
- * Version: 3.2.0
+ * Version: 3.3.0
  *
  * Note: This card requires a to-do entity to function properly.
  * For more information, visit: https://github.com/eyalgal/ha-shopping-list-card
@@ -21,7 +21,7 @@ import './editor.js';
 import './catalog-card.js';
 import './undo-control.js';
 
-const CARD_VERSION = '3.2.0';
+const CARD_VERSION = '3.3.0';
 
 function escapeHtml(str) {
   if (str == null) return '';
