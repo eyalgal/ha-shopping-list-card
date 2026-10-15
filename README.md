@@ -5,14 +5,24 @@
 
 A Home Assistant card that turns your existing to-do list into product tiles or a browsable shopping catalog. Tap a product to add it to your list instead of typing it in every time, then pick variants and adjust quantities.
 
-<img src="https://raw.githubusercontent.com/eyalgal/ha-shopping-list-card/main/docs/images/catalog-hero.png" alt="Shopping catalog with Fruit, Dairy, and Pantry categories, selected products, and expanded Milk variants with independent quantities" width="960"/>
+<img src="https://raw.githubusercontent.com/eyalgal/ha-shopping-list-card/main/docs/images/catalog-hero.png" alt="Shopping catalog with the Suggested filter on, showing the Fruit, Dairy, and Pantry products usually bought around now with a tooltip explaining one suggestion, and a Not in the catalog yet section offering Hummus, Oat milk, and Sourdough to add to the list or the catalog" width="960"/>
 
-Catalog mode with demo products, category tabs, quantities, and expanded variants.
+The catalog learns what you buy: **Suggested** shows what you usually need around now, and **Not in the catalog yet** catches what you keep buying that isn't a product yet.
 
-- **Single or Catalog:** a few favorite products, or a shared catalog with categories, search, and an On list filter.
+### Learns What You Buy
+
+With the companion [Shopping List Catalog](https://github.com/eyalgal/ha-shopping-list-catalog) integration, every item you check off is remembered, whichever app you use.
+
+- **Suggested:** one tap shows the products you're probably out of, based on how often you buy them and when you last did. Hover a tile to see why it's there.
+- **Not in the catalog yet:** things you keep adding by hand show up at the bottom of the catalog. Add one to your list, add it to the catalog in the category you choose (or as a variant, like Oat for Milk), or tell it not to suggest that item again.
+- **Automations too:** a suggestions sensor per catalog lists what's due, ready for a reminder or a notification.
+
+### Features
+
+- **Single or Catalog:** a few favorite products, or a shared catalog with categories, search, and **On list** and **Suggested** filters.
 - **Variants and quantities:** group related products on one expandable tile, like Gala and Granny Smith apples, each with its own quantity.
 - **Full list, quick-add, and Undo:** manage the complete list, add a one-off item, or restore an accidental removal.
-- **Edit products in Home Assistant:** with the companion [Shopping List Catalog](https://github.com/eyalgal/ha-shopping-list-catalog) integration, keep one catalog per store and edit it from the card editor. It also learns from what you check off, and the **Suggested** filter shows what you usually buy around now.
+- **Edit products in Home Assistant:** with Shopping List Catalog, keep one catalog per store and edit it from the card editor.
 - **Shared across dashboards:** selections stay in your existing to-do integration, with live updates through Home Assistant.
 
 ## Get Started
@@ -69,7 +79,13 @@ Replace the sensor and list IDs with your own. Products live in the sensor's sou
 </details>
 
 <details>
-<summary>More screenshots: product cards, a mobile catalog, suggestions, and the products editor</summary>
+<summary>More screenshots: the whole catalog, product cards, a mobile catalog, suggestions on a real dashboard, and the products editor</summary>
+
+### Browsing the Catalog
+
+<img src="https://raw.githubusercontent.com/eyalgal/ha-shopping-list-card/main/docs/images/catalog-overview.png" alt="Shopping catalog with Fruit, Dairy, and Pantry categories, selected products, and expanded Milk variants with independent quantities" width="960"/>
+
+Category tabs, search, quantities, and expanded variants.
 
 ### Product Cards
 
@@ -83,7 +99,7 @@ Horizontal variant groups and vertical tiles can share the same shopping list.
 
 Compact tiles keep the main item and its variants accessible. Screenshots use demo data and sample photos; product-photo files are not bundled with the card.
 
-### Suggested Products
+### Suggestions on a Real Dashboard
 
 <img src="https://raw.githubusercontent.com/eyalgal/ha-shopping-list-card/main/docs/images/catalog-suggested.png" alt="Catalog with the Suggested filter on, showing nine usually bought products across Fruits, Vegetables, and Condiments, with Snap Peas already on the list and a tooltip on Pear: usually bought every 10 days, last bought 9 days ago" width="812"/>
 

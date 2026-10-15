@@ -105,8 +105,8 @@ class ShoppingListCatalogCard extends HTMLElement {
         .catalog-missing-toggle ha-icon { --mdc-icon-size: 18px; }
         .catalog-missing { margin: 18px 0 0; }
         .catalog-missing-hint { margin: -4px 0 8px; color: var(--secondary-text-color); font-size: 12px; }
-        .catalog-missing-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 8px; }
-        .catalog-missing-item { display: grid; gap: 6px; padding: 10px 12px; border: 1px dashed var(--divider-color, #aaa); border-radius: var(--ha-card-border-radius, 12px); background: var(--card-background-color); }
+        .catalog-missing-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 8px; align-items: start; }
+        .catalog-missing-item { display: grid; align-content: start; gap: 6px; padding: 10px 12px; border: 1px dashed var(--divider-color, #aaa); border-radius: var(--ha-card-border-radius, 12px); background: var(--card-background-color); }
         .catalog-missing-head { display: flex; align-items: flex-start; gap: 8px; }
         .catalog-missing-text { flex: 1; min-width: 0; display: grid; }
         .catalog-missing-name { font-weight: 500; overflow-wrap: anywhere; }

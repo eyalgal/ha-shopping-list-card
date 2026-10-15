@@ -264,7 +264,10 @@
     } });
     let catalogData;
     let suggestions = null;
-    const catalogAttributes = () => (companionMode ? { catalog: catalogData, ...(suggestions ? { suggestions } : {}) } : catalogData);
+    let missing = null;
+    const catalogAttributes = () => (companionMode
+      ? { catalog: catalogData, ...(suggestions ? { suggestions } : {}), ...(missing ? { missing_products: missing } : {}) }
+      : catalogData);
     if (catalogMode || editorMode) {
       const response = await fetch('../examples/auto-generated-grid/shopping_items.json');
       catalogData = await response.json();
@@ -363,8 +366,9 @@
         hass.states['sensor.catalog'] = { state: available ? '1' : 'unavailable', attributes: catalogData };
         for (const card of document.querySelectorAll('shopping-list-card[data-fixture-card]')) card.hass = { ...hass };
       },
-      setSuggestions(value) {
+      setSuggestions(value, missingProducts = missing) {
         suggestions = value;
+        missing = missingProducts;
         hass.states['sensor.catalog'] = { state: String(Date.now()), attributes: catalogAttributes() };
         for (const card of document.querySelectorAll('shopping-list-card[data-fixture-card]')) card.hass = { ...hass };
       },
