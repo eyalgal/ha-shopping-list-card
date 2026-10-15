@@ -2478,7 +2478,13 @@ test('administrators add missing products to a category or as a variant, or dism
   assert.deepEqual([...form.querySelectorAll('option')].map(option => option.textContent), ['Choose a category', 'Fruits', 'Snacks']);
   const add = form.querySelector('.catalog-missing-add-catalog');
   assert.equal(add.disabled, true);
-  const select = form.querySelector('select');
+  const select = form.querySelector('.catalog-select select');
+  assert.equal(select.value, '');
+  assert.equal(form.querySelector('.catalog-select ha-icon').getAttribute('icon'), 'mdi:chevron-down');
+  pressButton(form.querySelector('.catalog-missing-cancel'));
+  assert.equal(form.hidden, true);
+  assert.equal(setup.fetches.some(message => message.type?.startsWith('shopping_list_catalog/')), false);
+  pressButton(open);
   select.value = 'Snacks';
   select.dispatchEvent(new environment.window.Event('change'));
   assert.equal(add.disabled, false);
@@ -2504,7 +2510,16 @@ test('administrators add missing products to a category or as a variant, or dism
   await settle();
   assert.deepEqual(JSON.parse(JSON.stringify(setup.fetches.at(-1))), { type: 'shopping_list_catalog/add_candidate', entity_id: 'sensor.catalog', key: 'apple | fuji' });
 
-  pressButton(fuji.querySelector('.catalog-missing-dismiss'));
+  const dismiss = fuji.querySelector('.catalog-missing-dismiss');
+  assert.equal(dismiss.textContent, 'Don\'t suggest');
+  const prompts = [];
+  environment.window.confirm = text => { prompts.push(text); return false; };
+  pressButton(dismiss);
+  await settle();
+  assert.match(prompts[0], /^Stop suggesting Apple - Fuji\?/);
+  assert.equal(setup.fetches.at(-1).type, 'shopping_list_catalog/add_candidate');
+  environment.window.confirm = () => true;
+  pressButton(dismiss);
   await settle();
   assert.deepEqual(JSON.parse(JSON.stringify(setup.fetches.at(-1))), { type: 'shopping_list_catalog/dismiss', entity_id: 'sensor.catalog', key: 'apple | fuji' });
 
@@ -2560,4 +2575,23 @@ test('missing products can show with Suggested, behind a toolbar button, or not 
   assert.equal(changes.at(-1).missing_products, 'button');
   select.dispatchEvent(new environment.window.CustomEvent('selected', { detail: { value: 'bottom' } }));
   assert.equal('missing_products' in changes.at(-1), false);
+});
+
+test('without visible categories, missing products offer only what can be done', async context => {
+  const environment = createEnvironment(context);
+  const setup = missingSetup();
+  const catalog = mountCatalog(environment, setup.hass, { catalog_attribute: 'catalog', categories: ['Nope'] });
+  await settle();
+  const bamba = missingRow(catalog, 'bamba');
+  assert.equal(bamba.querySelector('.catalog-missing-catalog'), null);
+  assert.equal(bamba.querySelector('.catalog-missing-form'), null);
+  assert.ok(bamba.querySelector('.catalog-missing-add-list'));
+  assert.ok(bamba.querySelector('.catalog-missing-dismiss'));
+
+  const fruitsOnly = mountCatalog(environment, setup.hass, { catalog_attribute: 'catalog', categories: ['Fruits'] });
+  await settle();
+  const fuji = missingRow(fruitsOnly, 'apple | fuji');
+  pressButton(fuji.querySelector('.catalog-missing-catalog'));
+  assert.ok(fuji.querySelector('.catalog-missing-variant'));
+  assert.deepEqual([...fuji.querySelectorAll('option')].map(option => option.textContent), ['Choose a category', 'Fruits']);
 });

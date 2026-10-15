@@ -2861,12 +2861,28 @@ class ShoppingListCatalogCard extends HTMLElement {
         .catalog-missing-message:empty { display: none; }
         .catalog-missing-message[data-error="true"] { color: var(--error-color, #db4437); }
         .catalog-missing-actions, .catalog-missing-form { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
-        .catalog-missing-form { padding-top: 6px; border-top: 1px solid var(--divider-color); }
-        .catalog-missing-form select { flex: 1 1 120px; min-width: 0; height: 36px; padding: 0 8px; border: 1px solid var(--divider-color, #aaa); border-radius: 6px; background: var(--card-background-color); color: var(--primary-text-color); font: inherit; font-size: 14px; }
+        .catalog-missing-form { padding-top: 8px; border-top: 1px solid var(--divider-color); }
+        .catalog-select { position: relative; display: inline-flex; flex: 1 1 150px; min-width: 0; }
+        .catalog-select select { width: 100%; min-width: 0; height: 36px; padding: 0 36px 0 14px; border: 1px solid var(--divider-color, #aaa); border-radius: 18px; background: var(--card-background-color); color: var(--primary-text-color); font: inherit; font-size: 14px; appearance: none; -webkit-appearance: none; cursor: pointer; }
+        .catalog-select select:invalid { color: var(--secondary-text-color); }
+        .catalog-select select:focus-visible { outline: 2px solid var(--primary-color); outline-offset: 1px; }
+        .catalog-select ha-icon { position: absolute; inset-inline-end: 10px; top: 50%; transform: translateY(-50%); pointer-events: none; color: var(--secondary-text-color); --mdc-icon-size: 20px; }
+        @supports (appearance: base-select) {
+          .catalog-select select, .catalog-select select::picker(select) { appearance: base-select; }
+          .catalog-select select { display: flex; align-items: center; }
+          .catalog-select select::picker-icon { display: none; }
+          .catalog-select select::picker(select) { margin-block: 4px; padding: 6px; border: 1px solid var(--divider-color, #ccc); border-radius: 12px; background: var(--card-background-color, #fff); color: var(--primary-text-color); box-shadow: 0 8px 24px rgba(0, 0, 0, .18); }
+          .catalog-select option { padding: 10px 12px; border-radius: 8px; font-size: 14px; }
+          .catalog-select option::checkmark { display: none; }
+          .catalog-select option:hover, .catalog-select option:focus-visible { background: var(--secondary-background-color, rgba(127,127,127,.12)); outline: none; }
+          .catalog-select option:checked { color: var(--primary-color); font-weight: 500; }
+        }
         .catalog-text-button { display: inline-flex; align-items: center; gap: 6px; min-height: 36px; padding: 0 10px; border: 0; border-radius: 18px; background: var(--secondary-background-color, rgba(127,127,127,.12)); font-size: 14px; }
         .catalog-text-button ha-icon { --mdc-icon-size: 18px; }
         .catalog-text-button:disabled { opacity: .55; cursor: default; }
         .catalog-text-button.primary { background: var(--primary-color); color: var(--text-primary-color, #fff); }
+        .catalog-text-button.quiet { background: transparent; color: var(--secondary-text-color); }
+        .catalog-text-button.quiet:hover:not(:disabled) { background: var(--secondary-background-color, rgba(127,127,127,.12)); }
         @container (max-width: 900px) { .catalog-grid { grid-template-columns: repeat(var(--catalog-medium-columns, 3), minmax(0, 1fr)); } }
         @container (max-width: 560px) { .catalog-grid { grid-template-columns: repeat(var(--catalog-mobile-columns, 2), minmax(0, 1fr)); } }
         @container (max-width: 300px) { .catalog-grid { grid-template-columns: repeat(var(--catalog-narrow-columns, 1), minmax(0, 1fr)); } .catalog-counter { display: none; } }
@@ -3444,12 +3460,15 @@ class ShoppingListCatalogCard extends HTMLElement {
       if (form) {
         form.hidden = !state.formOpen;
         row.querySelector('.catalog-missing-catalog').setAttribute('aria-expanded', String(!!state.formOpen));
-        const select = form.querySelector('select');
-        for (const control of row.querySelectorAll('.catalog-missing-catalog, .catalog-missing-variant, .catalog-missing-dismiss, select')) {
+        for (const control of row.querySelectorAll('.catalog-missing-catalog, .catalog-missing-variant, .catalog-missing-cancel, select')) {
           control.disabled = !!state.busy;
         }
-        form.querySelector('.catalog-missing-add-catalog').disabled = !!state.busy || !select.value;
+        const select = form.querySelector('select');
+        const add = form.querySelector('.catalog-missing-add-catalog');
+        if (add) add.disabled = !!state.busy || !select.value;
       }
+      const dismiss = row.querySelector('.catalog-missing-dismiss');
+      if (dismiss) dismiss.disabled = !!state.busy;
       const message = row.querySelector('.catalog-missing-message');
       message.textContent = state.message || '';
       message.dataset.error = String(!!state.error);
@@ -3494,54 +3513,75 @@ class ShoppingListCatalogCard extends HTMLElement {
       row.append(head, actions, message);
       return row;
     }
-    const dismiss = document.createElement('button');
-    dismiss.type = 'button';
-    dismiss.className = 'catalog-icon-button catalog-missing-dismiss';
-    dismiss.title = `Don't suggest ${item.name} again`;
-    dismiss.setAttribute('aria-label', dismiss.title);
-    dismiss.innerHTML = '<ha-icon icon="mdi:close"></ha-icon>';
-    dismiss.addEventListener('click', () => { void this._missingRequest(item, state(), { type: 'dismiss' }, ''); });
-    head.append(dismiss);
-    const toCatalog = textButton('Add to catalog', 'mdi:playlist-plus', 'catalog-missing-catalog');
-    toCatalog.addEventListener('click', () => {
-      state().formOpen = !state().formOpen;
-      this._renderMissing();
+    const place = item.variant_of && categories.includes(item.variant_of.category) ? item.variant_of : null;
+    if (place || categories.length) {
+      const toCatalog = textButton('Add to catalog', 'mdi:playlist-plus', 'catalog-missing-catalog');
+      toCatalog.addEventListener('click', () => {
+        state().formOpen = !state().formOpen;
+        this._renderMissing();
+      });
+      actions.append(toCatalog);
+    }
+    const dismiss = textButton('Don\'t suggest', 'mdi:eye-off-outline', 'quiet catalog-missing-dismiss');
+    dismiss.title = `Stop suggesting ${item.name}`;
+    dismiss.addEventListener('click', () => {
+      if (!window.confirm(`Stop suggesting ${item.name}? It won't appear here again.`)) return;
+      void this._missingRequest(item, state(), { type: 'dismiss' }, '');
     });
-    actions.append(toCatalog);
+    actions.append(dismiss);
+    if (!place && !categories.length) {
+      row.append(head, actions, message);
+      return row;
+    }
     const form = document.createElement('div');
     form.className = 'catalog-missing-form';
     form.hidden = true;
-    const place = item.variant_of;
-    if (place && categories.includes(place.category)) {
+    if (place) {
       const variant = textButton(`Add to ${place.title} as ${place.variant}`, 'mdi:plus', 'catalog-missing-variant');
       variant.addEventListener('click', () => {
         void this._missingRequest(item, state(), { type: 'add_candidate' }, `Added to ${place.title}.`);
       });
       form.append(variant);
     }
-    const select = document.createElement('select');
-    select.setAttribute('aria-label', `Category for ${item.name}`);
-    const placeholder = document.createElement('option');
-    placeholder.value = '';
-    placeholder.textContent = 'Choose a category';
-    select.append(placeholder);
-    for (const category of categories) {
-      const option = document.createElement('option');
-      option.value = category;
-      option.textContent = category;
-      select.append(option);
+    if (categories.length) {
+      const picker = document.createElement('span');
+      picker.className = 'catalog-select';
+      const select = document.createElement('select');
+      select.required = true;
+      select.setAttribute('aria-label', `Category for ${item.name}`);
+      const placeholder = document.createElement('option');
+      placeholder.value = '';
+      placeholder.textContent = 'Choose a category';
+      placeholder.disabled = true;
+      placeholder.hidden = true;
+      select.append(placeholder);
+      for (const category of categories) {
+        const option = document.createElement('option');
+        option.value = category;
+        option.textContent = category;
+        select.append(option);
+      }
+      select.value = this._missingState.get(item.key)?.category || '';
+      select.addEventListener('change', () => {
+        state().category = select.value;
+        this._renderMissing();
+      });
+      const chevron = document.createElement('ha-icon');
+      chevron.setAttribute('icon', 'mdi:chevron-down');
+      picker.append(select, chevron);
+      const add = textButton('Add', 'mdi:check', 'primary catalog-missing-add-catalog');
+      add.addEventListener('click', () => {
+        if (!select.value) return;
+        void this._missingRequest(item, state(), { type: 'add_candidate', category: select.value }, `Added to ${select.value}.`);
+      });
+      form.append(picker, add);
     }
-    select.value = this._missingState.get(item.key)?.category || '';
-    select.addEventListener('change', () => {
-      state().category = select.value;
+    const cancel = textButton('Cancel', 'mdi:close', 'quiet catalog-missing-cancel');
+    cancel.addEventListener('click', () => {
+      state().formOpen = false;
       this._renderMissing();
     });
-    const add = textButton('Add', 'mdi:check', 'primary catalog-missing-add-catalog');
-    add.addEventListener('click', () => {
-      if (!select.value) return;
-      void this._missingRequest(item, state(), { type: 'add_candidate', category: select.value }, `Added to ${select.value}.`);
-    });
-    form.append(select, add);
+    form.append(cancel);
     row.append(head, actions, form, message);
     return row;
   }
