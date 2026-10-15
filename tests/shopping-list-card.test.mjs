@@ -2388,3 +2388,176 @@ test('late quick-add results cannot clear a draft entered for another list', asy
   assert.equal(setup.services[0].data.entity_id, 'todo.shopping');
   assert.equal(setup.services.length, 1);
 });
+const MISSING = [
+  { key: 'bamba', name: 'Bamba', times: 3, last: '2026-09-28', quantity: 1, variant_of: null },
+  { key: 'apple | fuji', name: 'Apple - Fuji', times: 2, last: '2026-10-12', quantity: 1, variant_of: { category: 'Fruits', title: 'Apple', variant: 'Fuji' } },
+];
+
+function missingSetup(options = {}, admin = true) {
+  const setup = createHass([], options);
+  setup.hass.user = { is_admin: admin };
+  setup.hass.states['sensor.catalog'] = { state: '1', attributes: {
+    catalog: { Fruits: [{ title: 'Apple', types: ['Gala'] }], Snacks: [{ title: 'Chips' }] },
+    suggestions: { Chips: { every: 7, since: 9 } },
+    missing_products: structuredClone(MISSING),
+  } };
+  return setup;
+}
+
+const missingRows = catalog => [...catalog.shadowRoot.querySelectorAll('.catalog-missing-item')].filter(row => !row.hidden);
+const missingRow = (catalog, key) => catalog.shadowRoot.querySelector(`[data-missing="${key}"]`);
+const pressButton = element => element.dispatchEvent(new element.ownerDocument.defaultView.MouseEvent('click', { bubbles: true }));
+
+test('missing products show at the bottom of All and can be added to the list', async context => {
+  const environment = createEnvironment(context);
+  const setup = missingSetup({ service(domain, service, data) {
+    assert.equal(`${domain}.${service}`, 'todo.add_item');
+    setup.push([item(data.item)]);
+  } }, false);
+  const catalog = mountCatalog(environment, setup.hass, { catalog_attribute: 'catalog' });
+  await settle();
+  const section = catalog.shadowRoot.querySelector('.catalog-missing');
+  assert.equal(section.hidden, false);
+  assert.equal(catalog.shadowRoot.querySelector('.catalog-content').nextElementSibling.nextElementSibling, section);
+  assert.equal(section.querySelector('.catalog-missing-title').textContent, 'Not in the catalog yet');
+  assert.deepEqual(missingRows(catalog).map(row => row.querySelector('.catalog-missing-name').textContent), ['Bamba', 'Apple - Fuji']);
+  assert.match(missingRow(catalog, 'bamba').querySelector('.catalog-missing-meta').textContent, /^Bought 3 times, last on /);
+  // Only administrators can change the catalog.
+  assert.equal(missingRow(catalog, 'bamba').querySelector('.catalog-missing-catalog'), null);
+  assert.equal(missingRow(catalog, 'bamba').querySelector('.catalog-missing-dismiss'), null);
+  assert.equal(catalog.shadowRoot.querySelector('.catalog-missing-toggle').hidden, true);
+
+  const search = catalog.shadowRoot.querySelector('input[type="search"]');
+  search.value = 'fuj';
+  search.dispatchEvent(new environment.window.Event('input'));
+  assert.deepEqual(missingRows(catalog).map(row => row.dataset.missing), ['apple | fuji']);
+  search.value = 'zzz';
+  search.dispatchEvent(new environment.window.Event('input'));
+  assert.equal(section.hidden, true);
+  search.value = '';
+  search.dispatchEvent(new environment.window.Event('input'));
+
+  catalog.shadowRoot.querySelectorAll('.catalog-tab')[1].click();
+  assert.equal(section.hidden, true);
+  catalog.shadowRoot.querySelectorAll('.catalog-tab')[0].click();
+  assert.equal(section.hidden, false);
+  const onList = catalog.shadowRoot.querySelector('.catalog-only-on-list input');
+  onList.checked = true;
+  onList.dispatchEvent(new environment.window.Event('change'));
+  assert.equal(section.hidden, true);
+  onList.checked = false;
+  onList.dispatchEvent(new environment.window.Event('change'));
+
+  const add = missingRow(catalog, 'bamba').querySelector('.catalog-missing-add-list');
+  assert.equal(add.textContent, 'Add to list');
+  pressButton(add);
+  await settle();
+  assert.deepEqual(JSON.parse(JSON.stringify(setup.services[0].data)), { entity_id: 'todo.shopping', item: 'Bamba' });
+  assert.equal(add.textContent, 'On list');
+  assert.equal(add.disabled, true);
+  assert.equal(setup.fetches.some(message => message.type?.startsWith('shopping_list_catalog/')), false);
+});
+
+test('administrators add missing products to a category or as a variant, or dismiss them', async context => {
+  const environment = createEnvironment(context);
+  let fail = false;
+  const setup = missingSetup({ fetch(message) {
+    if (fail) throw { message: 'The catalog changed since it was loaded.' };
+    return message.type === 'shopping_list_catalog/add_candidate' ? { revision: 'r2' } : null;
+  } });
+  const catalog = mountCatalog(environment, setup.hass, { catalog_attribute: 'catalog' });
+  await settle();
+  const bamba = missingRow(catalog, 'bamba');
+  const open = bamba.querySelector('.catalog-missing-catalog');
+  const form = bamba.querySelector('.catalog-missing-form');
+  assert.equal(form.hidden, true);
+  pressButton(open);
+  assert.equal(form.hidden, false);
+  assert.equal(open.getAttribute('aria-expanded'), 'true');
+  assert.equal(form.querySelector('.catalog-missing-variant'), null);
+  assert.deepEqual([...form.querySelectorAll('option')].map(option => option.textContent), ['Choose a category', 'Fruits', 'Snacks']);
+  const add = form.querySelector('.catalog-missing-add-catalog');
+  assert.equal(add.disabled, true);
+  const select = form.querySelector('select');
+  select.value = 'Snacks';
+  select.dispatchEvent(new environment.window.Event('change'));
+  assert.equal(add.disabled, false);
+
+  fail = true;
+  pressButton(add);
+  await settle();
+  assert.match(bamba.querySelector('.catalog-missing-message').textContent, /changed since it was loaded/);
+  assert.equal(bamba.querySelector('.catalog-missing-message').dataset.error, 'true');
+  assert.equal(form.hidden, false);
+
+  fail = false;
+  pressButton(add);
+  await settle();
+  assert.deepEqual(JSON.parse(JSON.stringify(setup.fetches.at(-1))), { type: 'shopping_list_catalog/add_candidate', category: 'Snacks', entity_id: 'sensor.catalog', key: 'bamba' });
+  assert.equal(bamba.querySelector('.catalog-missing-message').textContent, 'Added to Snacks.');
+
+  const fuji = missingRow(catalog, 'apple | fuji');
+  pressButton(fuji.querySelector('.catalog-missing-catalog'));
+  const variant = fuji.querySelector('.catalog-missing-variant');
+  assert.equal(variant.textContent, 'Add to Apple as Fuji');
+  pressButton(variant);
+  await settle();
+  assert.deepEqual(JSON.parse(JSON.stringify(setup.fetches.at(-1))), { type: 'shopping_list_catalog/add_candidate', entity_id: 'sensor.catalog', key: 'apple | fuji' });
+
+  pressButton(fuji.querySelector('.catalog-missing-dismiss'));
+  await settle();
+  assert.deepEqual(JSON.parse(JSON.stringify(setup.fetches.at(-1))), { type: 'shopping_list_catalog/dismiss', entity_id: 'sensor.catalog', key: 'apple | fuji' });
+
+  // The integration removes added and dismissed products from the sensor.
+  setup.hass.states['sensor.catalog'] = { ...setup.hass.states['sensor.catalog'], attributes: { ...setup.hass.states['sensor.catalog'].attributes, missing_products: [] } };
+  catalog.hass = { ...setup.hass, states: { ...setup.hass.states } };
+  assert.equal(catalog.shadowRoot.querySelector('.catalog-missing').hidden, true);
+  assert.equal(catalog.shadowRoot.querySelectorAll('.catalog-missing-item').length, 0);
+});
+
+test('missing products can show with Suggested, behind a toolbar button, or not at all', async context => {
+  const environment = createEnvironment(context);
+  const setup = missingSetup();
+  const withSuggested = mountCatalog(environment, setup.hass, { catalog_attribute: 'catalog', missing_products: 'suggested' });
+  const behindButton = mountCatalog(environment, setup.hass, { catalog_attribute: 'catalog', missing_products: 'button' });
+  const hidden = mountCatalog(environment, setup.hass, { catalog_attribute: 'catalog', missing_products: 'hidden' });
+  await settle();
+
+  const suggestedSection = withSuggested.shadowRoot.querySelector('.catalog-missing');
+  assert.equal(suggestedSection.hidden, true);
+  const suggested = withSuggested.shadowRoot.querySelector('.catalog-only-suggested input');
+  suggested.checked = true;
+  suggested.dispatchEvent(new environment.window.Event('change'));
+  assert.equal(suggestedSection.hidden, false);
+  assert.equal(missingRows(withSuggested).length, 2);
+
+  const toggle = behindButton.shadowRoot.querySelector('.catalog-missing-toggle');
+  const panel = behindButton.shadowRoot.querySelector('.catalog-missing');
+  assert.equal(toggle.hidden, false);
+  assert.equal(toggle.textContent, '2 new');
+  assert.equal(toggle.getAttribute('aria-label'), '2 products not in the catalog');
+  assert.equal(behindButton.shadowRoot.querySelector('.catalog-toolbar').nextElementSibling, panel);
+  assert.equal(panel.hidden, true);
+  pressButton(toggle);
+  assert.equal(panel.hidden, false);
+  assert.equal(toggle.getAttribute('aria-expanded'), 'true');
+  pressButton(toggle);
+  assert.equal(panel.hidden, true);
+
+  assert.equal(hidden.shadowRoot.querySelector('.catalog-missing').hidden, true);
+  assert.equal(hidden.shadowRoot.querySelector('.catalog-missing-toggle').hidden, true);
+  assert.equal(hidden.shadowRoot.querySelectorAll('.catalog-missing-item').length, 0);
+  assert.throws(() => hidden.setConfig({ ...hidden._config, missing_products: 'top' }), /missing_products must be bottom, suggested, button, hidden/);
+
+  const editor = environment.window.customElements.get('shopping-list-catalog').getConfigElement();
+  const changes = [];
+  editor.addEventListener('config-changed', event => changes.push(event.detail.config));
+  editor.setConfig({ catalog_entity: 'sensor.catalog', todo_list: 'todo.shopping', catalog_attribute: 'catalog' });
+  editor.hass = setup.hass;
+  const select = editor.shadowRoot.getElementById('missing_products');
+  assert.equal(select.value, 'bottom');
+  select.dispatchEvent(new environment.window.CustomEvent('selected', { detail: { value: 'button' } }));
+  assert.equal(changes.at(-1).missing_products, 'button');
+  select.dispatchEvent(new environment.window.CustomEvent('selected', { detail: { value: 'bottom' } }));
+  assert.equal('missing_products' in changes.at(-1), false);
+});

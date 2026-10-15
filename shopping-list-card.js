@@ -1146,7 +1146,7 @@ function variantList(types) {
   return entries.filter(entry => String(typeof entry === 'string' ? entry : entry?.name ?? '').trim());
 }
 
-function shortDate(value) {
+function shortDate$1(value) {
   const [year, month, day] = String(value).split('-').map(Number);
   const date = new Date(year, month - 1, day);
   return Number.isNaN(date.getTime()) ? String(value) : date.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
@@ -1421,7 +1421,7 @@ class ShoppingListCatalogProducts extends HTMLElement {
     name.textContent = candidate.name;
     const meta = document.createElement('span');
     meta.className = 'product-meta';
-    meta.textContent = `Bought ${candidate.times} times, last on ${shortDate(candidate.last)}`;
+    meta.textContent = `Bought ${candidate.times} times, last on ${shortDate$1(candidate.last)}`;
     text.append(name, meta);
     const dismiss = button(`Dismiss ${candidate.name}`, 'mdi:close', 'dismiss-candidate');
     dismiss.addEventListener('click', () => this._dismissCandidate(candidate));
@@ -1709,6 +1709,13 @@ if (!customElements.get('shopping-list-catalog-products')) {
   customElements.define('shopping-list-catalog-products', ShoppingListCatalogProducts);
 }
 
+const MISSING_OPTIONS = [
+  { value: 'bottom', label: 'At the bottom of All' },
+  { value: 'suggested', label: 'With the Suggested filter' },
+  { value: 'button', label: 'Toolbar button' },
+  { value: 'hidden', label: 'Hidden' },
+];
+
 class ShoppingListCatalogEditor extends HTMLElement {
   constructor() {
     super();
@@ -1793,6 +1800,12 @@ class ShoppingListCatalogEditor extends HTMLElement {
             <label class="catalog-toggle"><ha-switch id="show_add_button"></ha-switch><span>Add item button</span></label>
             <label class="catalog-toggle"><ha-switch id="show_undo"></ha-switch><span>Undo button</span></label>
             <label class="catalog-toggle"><ha-switch id="show_suggested"></ha-switch><span>Suggested filter</span></label>
+            <ha-select id="missing_products" label="Products not in the catalog" naturalMenuWidth fixedMenuPosition>
+              <mwc-list-item value="bottom">At the bottom of All</mwc-list-item>
+              <mwc-list-item value="suggested">With the Suggested filter</mwc-list-item>
+              <mwc-list-item value="button">Toolbar button</mwc-list-item>
+              <mwc-list-item value="hidden">Hidden</mwc-list-item>
+            </ha-select>
           </div>
         </ha-expansion-panel>
         <ha-expansion-panel header="Product defaults" outlined>
@@ -1821,6 +1834,7 @@ class ShoppingListCatalogEditor extends HTMLElement {
     const layout = this.shadowRoot.getElementById('layout');
     layout.options = [{ value: 'vertical', label: 'Vertical' }, { value: 'horizontal', label: 'Horizontal' }];
     this.shadowRoot.getElementById('product_order').options = [{ value: 'catalog', label: 'As in the catalog' }, { value: 'name', label: 'By name' }];
+    this.shadowRoot.getElementById('missing_products').options = MISSING_OPTIONS;
     this.shadowRoot.querySelector('.catalog-starter').addEventListener('click', () => this._downloadStarter());
     this.shadowRoot.querySelector('.catalog-edit-products').addEventListener('click', () => this._openProducts());
     this.shadowRoot.querySelector('.catalog-use-source').addEventListener('click', () => {
@@ -1840,11 +1854,14 @@ class ShoppingListCatalogEditor extends HTMLElement {
         if (control.id === 'product_order' && value == null && typeof event.detail?.index === 'number') {
           value = ['catalog', 'name'][event.detail.index];
         }
+        if (control.id === 'missing_products' && value == null && typeof event.detail?.index === 'number') {
+          value = MISSING_OPTIONS[event.detail.index]?.value;
+        }
         if (control.localName === 'ha-switch') value = control.checked;
         this._change(control.id, value ?? control.value);
       };
       for (const event of ['input', 'change', 'value-changed']) control.addEventListener(event, changed);
-      if (control.id === 'layout' || control.id === 'product_order') control.addEventListener('selected', changed);
+      if (control.id === 'layout' || control.id === 'product_order' || control.id === 'missing_products') control.addEventListener('selected', changed);
     }
     this.shadowRoot.querySelector('.catalog-all-categories').addEventListener('change', event => {
       if (!this._config) return;
@@ -1866,6 +1883,7 @@ class ShoppingListCatalogEditor extends HTMLElement {
       catalog_entity: config.catalog_entity || '', catalog_attribute: config.catalog_attribute || '',
       todo_list: config.todo_list || '', title: config.title || '', columns: config.columns ?? 4,
       product_order: config.product_order === 'name' ? 'name' : 'catalog',
+      missing_products: config.missing_products || 'bottom',
       layout: options.layout || 'vertical', image_base: options.image_base || '', list_prefix: options.list_prefix || '',
       quantity_step: options.quantity_step ?? 1, quantity_max: options.quantity_max ?? '',
     };
@@ -1965,7 +1983,10 @@ class ShoppingListCatalogEditor extends HTMLElement {
       if (value !== 'vertical' && value !== 'horizontal') return;
       next = value === 'vertical' ? undefined : value;    } else if (field === 'product_order') {
       if (value !== 'catalog' && value !== 'name') return;
-      next = value === 'name' ? value : undefined;    } else if (typeof value === 'string') next = value.trim() || undefined;
+      next = value === 'name' ? value : undefined;    } else if (field === 'missing_products') {
+      if (!MISSING_OPTIONS.some(option => option.value === value)) return;
+      next = value === 'bottom' ? undefined : value;
+    } else if (typeof value === 'string') next = value.trim() || undefined;
     if (next === undefined) delete target[key];
     else target[key] = next;
     if (field === 'catalog_entity') {
@@ -2730,6 +2751,26 @@ if (!customElements.get('shopping-list-undo')) {
   customElements.define('shopping-list-undo', ShoppingListUndo);
 }
 
+const MISSING_MODES = ['bottom', 'suggested', 'button', 'hidden'];
+
+function shortDate(value) {
+  const [year, month, day] = String(value).split('-').map(Number);
+  const date = new Date(year, month - 1, day);
+  return Number.isNaN(date.getTime()) ? String(value) : date.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+}
+
+function textButton(label, iconName, className) {
+  const button = document.createElement('button');
+  button.type = 'button';
+  button.className = `catalog-text-button ${className}`;
+  const icon = document.createElement('ha-icon');
+  icon.setAttribute('icon', iconName);
+  const text = document.createElement('span');
+  text.textContent = label;
+  button.append(icon, text);
+  return button;
+}
+
 function suggestionText(info) {
   const every = Number(info.every) || 0;
   const since = Number(info.since) || 0;
@@ -2748,6 +2789,9 @@ class ShoppingListCatalogCard extends HTMLElement {
     this._query = '';
     this._onList = false;
     this._suggestedOnly = false;
+    this._missingOpen = false;
+    this._missingState = new Map();
+    this._missingSignature = null;
     this._store = null;
     this._unsubscribe = null;
     this._snapshot = null;
@@ -2795,14 +2839,34 @@ class ShoppingListCatalogCard extends HTMLElement {
         .catalog-tab-count { font-size: 12px; opacity: .8; }
         .catalog-section { margin: 18px 0 0; }
         .catalog-category-heading { display: flex; align-items: baseline; gap: 8px; margin-bottom: 8px; }
-        .catalog-category-title { margin: 0; min-width: 0; font-size: 16px; font-weight: 500; line-height: 1.4; overflow-wrap: anywhere; }
-        .catalog-category-count { color: var(--secondary-text-color); font-size: 12px; }
+        .catalog-category-title, .catalog-missing-title { margin: 0; min-width: 0; font-size: 16px; font-weight: 500; line-height: 1.4; overflow-wrap: anywhere; }
+        .catalog-category-count, .catalog-missing-count { color: var(--secondary-text-color); font-size: 12px; }
         .catalog-grid { display: grid; grid-template-columns: repeat(var(--catalog-columns, 4), minmax(0, 1fr)); gap: 8px; align-items: start; }
         .catalog-grid > shopping-list-card { display: block; min-width: 0; }
         .catalog-grid > shopping-list-card[hidden] { display: none !important; }
         :host([data-sync-state]:not([data-sync-state="ready"])) shopping-list-card .list-status { display: none; }
         .catalog-status:not(:empty) { margin-top: 12px; overflow-wrap: anywhere; }
         .catalog-empty { padding: 24px 0; margin: 0; color: var(--secondary-text-color); font-size: 14px; }
+        .catalog-missing-toggle { display: inline-flex; align-items: center; gap: 6px; min-height: 36px; padding: 0 12px; border: 1px solid var(--divider-color, #aaa); border-radius: 18px; background: transparent; font-size: 14px; white-space: nowrap; }
+        .catalog-missing-toggle[aria-expanded="true"] { border-color: var(--primary-color); color: var(--primary-color); }
+        .catalog-missing-toggle ha-icon { --mdc-icon-size: 18px; }
+        .catalog-missing { margin: 18px 0 0; }
+        .catalog-missing-hint { margin: -4px 0 8px; color: var(--secondary-text-color); font-size: 12px; }
+        .catalog-missing-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 8px; }
+        .catalog-missing-item { display: grid; gap: 6px; padding: 10px 12px; border: 1px dashed var(--divider-color, #aaa); border-radius: var(--ha-card-border-radius, 12px); background: var(--card-background-color); }
+        .catalog-missing-head { display: flex; align-items: flex-start; gap: 8px; }
+        .catalog-missing-text { flex: 1; min-width: 0; display: grid; }
+        .catalog-missing-name { font-weight: 500; overflow-wrap: anywhere; }
+        .catalog-missing-meta, .catalog-missing-message { color: var(--secondary-text-color); font-size: 12px; }
+        .catalog-missing-message:empty { display: none; }
+        .catalog-missing-message[data-error="true"] { color: var(--error-color, #db4437); }
+        .catalog-missing-actions, .catalog-missing-form { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+        .catalog-missing-form { padding-top: 6px; border-top: 1px solid var(--divider-color); }
+        .catalog-missing-form select { flex: 1 1 120px; min-width: 0; height: 36px; padding: 0 8px; border: 1px solid var(--divider-color, #aaa); border-radius: 6px; background: var(--card-background-color); color: var(--primary-text-color); font: inherit; font-size: 14px; }
+        .catalog-text-button { display: inline-flex; align-items: center; gap: 6px; min-height: 36px; padding: 0 10px; border: 0; border-radius: 18px; background: var(--secondary-background-color, rgba(127,127,127,.12)); font-size: 14px; }
+        .catalog-text-button ha-icon { --mdc-icon-size: 18px; }
+        .catalog-text-button:disabled { opacity: .55; cursor: default; }
+        .catalog-text-button.primary { background: var(--primary-color); color: var(--text-primary-color, #fff); }
         @container (max-width: 900px) { .catalog-grid { grid-template-columns: repeat(var(--catalog-medium-columns, 3), minmax(0, 1fr)); } }
         @container (max-width: 560px) { .catalog-grid { grid-template-columns: repeat(var(--catalog-mobile-columns, 2), minmax(0, 1fr)); } }
         @container (max-width: 300px) { .catalog-grid { grid-template-columns: repeat(var(--catalog-narrow-columns, 1), minmax(0, 1fr)); } .catalog-counter { display: none; } }
@@ -2817,6 +2881,7 @@ class ShoppingListCatalogCard extends HTMLElement {
         <label class="catalog-search"><ha-icon icon="mdi:magnify"></ha-icon><input type="search" aria-label="Search catalog" placeholder="Search products" autocomplete="off"><button class="catalog-icon-button catalog-clear-search" type="button" aria-label="Clear search" title="Clear search" hidden><ha-icon icon="mdi:close"></ha-icon></button></label>
         <label class="catalog-on-list catalog-only-on-list"><input type="checkbox">On list</label>
         <label class="catalog-on-list catalog-only-suggested" hidden title="Products you usually buy around now"><input type="checkbox">Suggested</label>
+        <button class="catalog-missing-toggle" type="button" aria-expanded="false" aria-controls="catalog-missing" hidden><ha-icon icon="mdi:cart-plus"></ha-icon><span class="catalog-missing-toggle-text"></span></button>
       </div>
       <form class="catalog-add-form" id="catalog-add-form" aria-label="Add item to shopping list" hidden>
         <input class="catalog-add-input" type="text" aria-label="Item to add" placeholder="Add to shopping list" required autocomplete="off">
@@ -2835,6 +2900,11 @@ class ShoppingListCatalogCard extends HTMLElement {
       <div class="catalog-status" role="status" aria-live="polite"></div>
       <div class="catalog-content" id="catalog-content" role="tabpanel"></div>
       <p class="catalog-empty" role="status" hidden></p>
+      <section class="catalog-missing" id="catalog-missing" aria-labelledby="catalog-missing-title" hidden>
+        <div class="catalog-category-heading"><h3 class="catalog-missing-title" id="catalog-missing-title">Not in the catalog yet</h3><span class="catalog-missing-count"></span></div>
+        <p class="catalog-missing-hint">You checked these off on different days, but they aren't products yet.</p>
+        <div class="catalog-missing-list"></div>
+      </section>
     `;
     this._content = this.shadowRoot.querySelector('.catalog-content');
     this._tabs = this.shadowRoot.querySelector('.catalog-tabs');
@@ -2866,6 +2936,11 @@ class ShoppingListCatalogCard extends HTMLElement {
     this.shadowRoot.querySelector('.catalog-open-list').addEventListener('click', () => {
       if (!this._config) return;
       this._toggleList(this.shadowRoot.querySelector('.catalog-list-panel').hidden);
+    });
+    this._missing = this.shadowRoot.querySelector('.catalog-missing');
+    this.shadowRoot.querySelector('.catalog-missing-toggle').addEventListener('click', () => {
+      this._missingOpen = !this._missingOpen;
+      this._renderMissing();
     });
     this.shadowRoot.querySelector('.catalog-close-list').addEventListener('click', () => {
       this._toggleList(false);
@@ -2919,6 +2994,9 @@ class ShoppingListCatalogCard extends HTMLElement {
     if (config.product_order !== undefined && !['catalog', 'name'].includes(config.product_order)) {
       throw new Error('product_order must be catalog or name.');
     }
+    if (config.missing_products !== undefined && !MISSING_MODES.includes(config.missing_products)) {
+      throw new Error(`missing_products must be ${MISSING_MODES.join(', ')}.`);
+    }
     if (this._config?.catalog_entity !== config.catalog_entity || this._config?.catalog_attribute !== config.catalog_attribute) this._category = null;
     if (this._config && this._config.todo_list !== config.todo_list) {
       this._toggleList(false);
@@ -2951,6 +3029,9 @@ class ShoppingListCatalogCard extends HTMLElement {
     this.shadowRoot.querySelector('.catalog-add-toggle').hidden = config.show_add_button === false;
     if (config.show_list_button === false) this._toggleList(false);
     if (config.show_add_button === false) this._toggleAddForm(false);
+    // As a toolbar panel the section opens under the toolbar; otherwise it follows the products.
+    if (config.missing_products === 'button') this.shadowRoot.querySelector('.catalog-toolbar').after(this._missing);
+    else this.shadowRoot.querySelector('.catalog-empty').after(this._missing);
     this._update();
   }
 
@@ -3314,6 +3395,197 @@ class ShoppingListCatalogCard extends HTMLElement {
     empty.textContent = !this._products.size ? this._config?.categories ? 'No products in the selected categories.' : 'The product catalog is empty.'
       : this._suggestedOnly ? 'No suggestions right now. They appear as you check off purchases.'
       : this._onList ? 'No catalog products match the selected list filters.' : 'No products match your search.';
+    this._renderMissing();
+  }
+
+  // Products bought repeatedly that the Shopping List Catalog integration doesn't have in the catalog yet.
+  _missingItems() {
+    const raw = this._hass?.states?.[this._config?.catalog_entity]?.attributes?.missing_products;
+    return Array.isArray(raw)
+      ? raw.filter(item => item && typeof item.key === 'string' && typeof item.name === 'string' && item.name.trim())
+      : [];
+  }
+
+  _renderMissing() {
+    if (!this._config || !this._missing) return;
+    const mode = this._config.missing_products || 'bottom';
+    const all = mode === 'hidden' ? [] : this._missingItems();
+    const admin = !!this._hass?.user?.is_admin;
+    const categories = this._groups.map(group => group.name);
+    const list = this._missing.querySelector('.catalog-missing-list');
+    const signature = JSON.stringify([all, admin, categories]);
+    if (signature !== this._missingSignature) {
+      this._missingSignature = signature;
+      list.replaceChildren(...all.map(item => this._missingRow(item, admin, categories)));
+      const keys = new Set(all.map(item => item.key));
+      for (const key of this._missingState.keys()) if (!keys.has(key)) this._missingState.delete(key);
+    }
+    if (!all.length) this._missingOpen = false;
+    const toggle = this.shadowRoot.querySelector('.catalog-missing-toggle');
+    toggle.hidden = mode !== 'button' || !all.length;
+    toggle.querySelector('.catalog-missing-toggle-text').textContent = `${all.length} new`;
+    toggle.setAttribute('aria-label', `${all.length} ${all.length === 1 ? 'product' : 'products'} not in the catalog`);
+    toggle.title = toggle.getAttribute('aria-label');
+    toggle.setAttribute('aria-expanded', String(this._missingOpen));
+    const terms = searchText(this._query).trim().split(/\s+/).filter(Boolean);
+    const items = this._snapshot?.items;
+    let shown = 0;
+    for (const row of list.children) {
+      const item = row._item;
+      const state = this._missingState.get(item.key) || {};
+      row.hidden = mode !== 'button' && !terms.every(term => searchText(item.name).includes(term));
+      if (!row.hidden) shown++;
+      const onList = !!items && matchItem(items, item.name, {}).present;
+      const addList = row.querySelector('.catalog-missing-add-list');
+      addList.querySelector('ha-icon').setAttribute('icon', onList ? 'mdi:check' : 'mdi:plus');
+      addList.querySelector('span').textContent = onList ? 'On list' : 'Add to list';
+      addList.disabled = onList || !!state.busy || !this._store?.ready || !this._canAddItems();
+      const form = row.querySelector('.catalog-missing-form');
+      if (form) {
+        form.hidden = !state.formOpen;
+        row.querySelector('.catalog-missing-catalog').setAttribute('aria-expanded', String(!!state.formOpen));
+        const select = form.querySelector('select');
+        for (const control of row.querySelectorAll('.catalog-missing-catalog, .catalog-missing-variant, .catalog-missing-dismiss, select')) {
+          control.disabled = !!state.busy;
+        }
+        form.querySelector('.catalog-missing-add-catalog').disabled = !!state.busy || !select.value;
+      }
+      const message = row.querySelector('.catalog-missing-message');
+      message.textContent = state.message || '';
+      message.dataset.error = String(!!state.error);
+    }
+    const placed = mode === 'bottom' ? this._category === null && !this._onList
+      : mode === 'suggested' ? this._suggestedOnly
+        : mode === 'button' && this._missingOpen;
+    this._missing.hidden = !placed || !shown;
+    this._missing.querySelector('.catalog-missing-count').textContent = String(shown);
+  }
+
+  _missingRow(item, admin, categories) {
+    const state = () => {
+      if (!this._missingState.has(item.key)) this._missingState.set(item.key, {});
+      return this._missingState.get(item.key);
+    };
+    const row = document.createElement('div');
+    row.className = 'catalog-missing-item';
+    row.dataset.missing = item.key;
+    row._item = item;
+    const head = document.createElement('div');
+    head.className = 'catalog-missing-head';
+    const text = document.createElement('div');
+    text.className = 'catalog-missing-text';
+    const name = document.createElement('span');
+    name.className = 'catalog-missing-name';
+    name.textContent = item.name;
+    const meta = document.createElement('span');
+    meta.className = 'catalog-missing-meta';
+    meta.textContent = `Bought ${item.times} ${item.times === 1 ? 'time' : 'times'}, last on ${shortDate(item.last)}`;
+    text.append(name, meta);
+    head.append(text);
+    const actions = document.createElement('div');
+    actions.className = 'catalog-missing-actions';
+    const addList = textButton('Add to list', 'mdi:plus', 'catalog-missing-add-list');
+    addList.addEventListener('click', () => { void this._addMissingToList(item, state()); });
+    actions.append(addList);
+    const message = document.createElement('div');
+    message.className = 'catalog-missing-message';
+    message.setAttribute('role', 'status');
+    if (!admin) {
+      row.append(head, actions, message);
+      return row;
+    }
+    const dismiss = document.createElement('button');
+    dismiss.type = 'button';
+    dismiss.className = 'catalog-icon-button catalog-missing-dismiss';
+    dismiss.title = `Don't suggest ${item.name} again`;
+    dismiss.setAttribute('aria-label', dismiss.title);
+    dismiss.innerHTML = '<ha-icon icon="mdi:close"></ha-icon>';
+    dismiss.addEventListener('click', () => { void this._missingRequest(item, state(), { type: 'dismiss' }, ''); });
+    head.append(dismiss);
+    const toCatalog = textButton('Add to catalog', 'mdi:playlist-plus', 'catalog-missing-catalog');
+    toCatalog.addEventListener('click', () => {
+      state().formOpen = !state().formOpen;
+      this._renderMissing();
+    });
+    actions.append(toCatalog);
+    const form = document.createElement('div');
+    form.className = 'catalog-missing-form';
+    form.hidden = true;
+    const place = item.variant_of;
+    if (place && categories.includes(place.category)) {
+      const variant = textButton(`Add to ${place.title} as ${place.variant}`, 'mdi:plus', 'catalog-missing-variant');
+      variant.addEventListener('click', () => {
+        void this._missingRequest(item, state(), { type: 'add_candidate' }, `Added to ${place.title}.`);
+      });
+      form.append(variant);
+    }
+    const select = document.createElement('select');
+    select.setAttribute('aria-label', `Category for ${item.name}`);
+    const placeholder = document.createElement('option');
+    placeholder.value = '';
+    placeholder.textContent = 'Choose a category';
+    select.append(placeholder);
+    for (const category of categories) {
+      const option = document.createElement('option');
+      option.value = category;
+      option.textContent = category;
+      select.append(option);
+    }
+    select.value = this._missingState.get(item.key)?.category || '';
+    select.addEventListener('change', () => {
+      state().category = select.value;
+      this._renderMissing();
+    });
+    const add = textButton('Add', 'mdi:check', 'primary catalog-missing-add-catalog');
+    add.addEventListener('click', () => {
+      if (!select.value) return;
+      void this._missingRequest(item, state(), { type: 'add_candidate', category: select.value }, `Added to ${select.value}.`);
+    });
+    form.append(select, add);
+    row.append(head, actions, form, message);
+    return row;
+  }
+
+  async _missingRequest(item, state, message, done) {
+    if (state.busy || !this._hass) return;
+    Object.assign(state, { busy: true, error: false, message: message.type === 'dismiss' ? '' : 'Adding to the catalog...' });
+    this._renderMissing();
+    try {
+      await this._hass.callWS({ ...message, type: `shopping_list_catalog/${message.type}`, entity_id: this._config.catalog_entity, key: item.key });
+      Object.assign(state, { message: done, formOpen: false });
+    } catch (error) {
+      Object.assign(state, { error: true, message: error?.message || 'Something went wrong. Try again.' });
+    } finally {
+      state.busy = false;
+      this._renderMissing();
+    }
+  }
+
+  async _addMissingToList(item, state) {
+    const store = this._store;
+    if (state.busy) return;
+    if (!store?.ready || !this._canAddItems()) {
+      Object.assign(state, { error: true, message: !this._canAddItems() ? 'This list does not support adding items.' : 'Wait for the shopping list to reconnect.' });
+      this._renderMissing();
+      return;
+    }
+    Object.assign(state, { busy: true, error: false, message: '' });
+    this._renderMissing();
+    try {
+      await store.execute([item.name.toLowerCase()], items => {
+        const action = planListAddition(items, item.name);
+        const features = this._hass.states[this._config.todo_list]?.attributes?.supported_features;
+        if (action?.service === 'update_item' && features !== undefined && !(features & 4)) {
+          throw new Error('This list does not support updating an existing item.');
+        }
+        return action ? [action] : [];
+      });
+    } catch (error) {
+      Object.assign(state, { error: true, message: error?.message || 'Could not add the item.' });
+    } finally {
+      state.busy = false;
+      this._renderMissing();
+    }
   }
 
   _renderStatus() {

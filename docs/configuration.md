@@ -77,6 +77,7 @@ Catalog mode reads products from a sensor and stores selections in the to-do int
 | `show_add_button` | No | Show quick-add for a missing shopping-list item. | `true` |
 | `show_undo` | No | Show the Undo button on a product tile after a removal. Products and `item_options` can also set it. | `true` |
 | `show_suggested` | No | Show the **Suggested** filter when the catalog sensor provides purchase-based suggestions (Shopping List Catalog 0.2.0 or later). | `true` |
+| `missing_products` | No | Where to show products you buy that aren't in the catalog (Shopping List Catalog 0.3.0 or later): `bottom` of the All tab, `suggested` with the Suggested filter, `button` behind a toolbar button with a count, or `hidden`. | `bottom` |
 | `item_options` | No | Shared Single-mode defaults, such as layout, images, quantities, colors, and hold behavior. Product settings override these, but cannot change `todo_list`. | Vertical tiles with quantities enabled |
 
 The visual editor detects valid direct or wrapped catalog data when you select a sensor. Its status shows category/product counts or a source error. It does not silently repair an existing saved configuration; use the offered source suggestion to apply a detected attribute.

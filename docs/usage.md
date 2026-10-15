@@ -92,6 +92,8 @@ Category tabs, search, and **On list** filter the product tiles. Search ignores 
 
 **Suggested** appears when the catalog sensor comes from [Shopping List Catalog](https://github.com/eyalgal/ha-shopping-list-catalog) with purchase history turned on. It shows products you usually buy around now, based on when you checked them off before, including ones already on the list. Hover a suggested tile to see why it was picked. Suggested and On list are alternatives, so turning one on turns the other off. Hide it with `show_suggested: false`.
 
+**Not in the catalog yet** lists items you checked off on at least two different days that aren't catalog products, also from Shopping List Catalog (0.3.0 or later). Anyone can add one to the shopping list. Administrators can also add it to the catalog in a category they choose, or as a variant when it looks like one of an existing product (such as `Mini cucumbers` for Cucumber), and dismiss items they don't want suggested again. Choose where the section appears with `missing_products` or **Display > Products not in the catalog**: at the bottom of the All tab (default), together with the Suggested filter, behind a toolbar button showing how many there are, or hidden.
+
 <img src="images/catalog-suggested.png" alt="Catalog with the Suggested filter on, showing nine usually bought products across Fruits, Vegetables, and Condiments, with Snap Peas already on the list and a tooltip on Pear: usually bought every 10 days, last bought 9 days ago" width="812"/>
 
 The visual editor's **Display** section selects category subsets and independently shows or hides controls. Fixed columns, header visibility, and shared product defaults are covered in the [configuration reference](configuration.md#catalog-options).
